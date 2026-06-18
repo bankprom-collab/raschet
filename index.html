@@ -947,7 +947,7 @@
         </table>
         <div class="add-form" style="grid-template-columns:1fr 130px 55px 55px 55px 50px">
           <select id="in-client" onchange="onClientSelect(this)"></select>
-          <input type="text" id="in-amount" placeholder="5000+3000" inputmode="decimal" oninput="updateInPreview()">
+          <input type="text" id="in-amount" placeholder="5000+3000" inputmode="tel" oninput="updateInPreview()">
           <input type="text" id="in-pct" placeholder="%1" inputmode="decimal" oninput="numericInputFilter(event); updateInPreview()">
           <input type="text" id="in-pct2" placeholder="%2" inputmode="decimal" oninput="numericInputFilter(event); updateInPreview()">
           <input type="text" id="in-pctcur" placeholder="%кур" inputmode="decimal" oninput="numericInputFilter(event); updateInPreview()" title="Процент куратору">
