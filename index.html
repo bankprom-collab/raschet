@@ -5141,6 +5141,7 @@ const GDRIVE_CLIENT_ID_KEY = 'gdrive_client_id_v1';
 const GDRIVE_FILE_ID_KEY = 'gdrive_file_id_v1';
 const GDRIVE_AUTOSYNC_KEY = 'gdrive_autosync_v1';
 const GDRIVE_LAST_SYNC_KEY = 'gdrive_last_sync_v1';
+const GDRIVE_TOKEN_KEY = 'gdrive_token_v1';
 const GDRIVE_FOLDER_NAME = 'Расчётная_программа';
 const GDRIVE_FILE_NAME = 'data.json';
 const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.file';
@@ -5153,6 +5154,19 @@ let autoSyncTimer = null;
 
 function getClientId() {
   return localStorage.getItem(GDRIVE_CLIENT_ID_KEY) || '';
+}
+
+// Восстановить сохранённый токен при старте, если он ещё не истёк.
+// Это избавляет от повторной авторизации при перезагрузке страницы.
+function restoreSavedToken() {
+  try {
+    const s = JSON.parse(localStorage.getItem(GDRIVE_TOKEN_KEY) || 'null');
+    if (s && s.t && s.exp && s.exp > Date.now()) {
+      accessToken = s.t;
+    } else if (s) {
+      localStorage.removeItem(GDRIVE_TOKEN_KEY);
+    }
+  } catch (e) {}
 }
 
 function openSyncModal() {
@@ -5191,6 +5205,7 @@ function resetSyncConfig() {
   localStorage.removeItem(GDRIVE_AUTOSYNC_KEY);
   localStorage.removeItem(GDRIVE_LAST_SYNC_KEY);
   accessToken = null;
+  try { localStorage.removeItem(GDRIVE_TOKEN_KEY); } catch (e) {}
   stopAutoSync();
   document.getElementById('sync-setup').style.display = 'block';
   document.getElementById('sync-main').style.display = 'none';
@@ -5256,6 +5271,10 @@ function initGoogleApis() {
             return;
           }
           accessToken = resp.access_token;
+          try {
+            const ttl = (resp.expires_in ? resp.expires_in : 3600) * 1000;
+            localStorage.setItem(GDRIVE_TOKEN_KEY, JSON.stringify({ t: accessToken, exp: Date.now() + ttl - 120000 }));
+          } catch (e) {}
           refreshSyncUI();
           showToast('Подключено к Google Drive');
         }
@@ -5275,7 +5294,7 @@ function connectGDrive() {
     return;
   }
   // prompt='' — если уже логинен, не показывать окно
-  tokenClient.requestAccessToken({ prompt: 'consent' });
+  tokenClient.requestAccessToken({ prompt: '' });
 }
 
 function disconnectGDrive() {
@@ -5283,6 +5302,7 @@ function disconnectGDrive() {
     google.accounts.oauth2.revoke(accessToken, () => {});
   }
   accessToken = null;
+  try { localStorage.removeItem(GDRIVE_TOKEN_KEY); } catch (e) {}
   stopAutoSync();
   refreshSyncUI();
   showToast('Отключено от Google Drive');
@@ -5555,8 +5575,11 @@ function bootstrapAutoSync() {
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────
+restoreSavedToken();
 initLoginScreen();
 bootstrapAutoSync();
+// Если есть действующий токен — заранее поднимем Google API для тихой синхронизации
+if (accessToken && getClientId()) { initGoogleApis(); }
 
 // При возвращении вкладки в фокус — проверяем, нет ли свежих данных
 let lastVisibilitySync = 0;
