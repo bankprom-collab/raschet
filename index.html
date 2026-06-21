@@ -947,7 +947,7 @@
         </table>
         <div class="add-form" style="grid-template-columns:1fr 130px 55px 55px 55px 50px">
           <select id="in-client" onchange="onClientSelect(this)"></select>
-          <input type="text" id="in-amount" placeholder="5000+3000" inputmode="tel" oninput="updateInPreview()">
+          <input type="text" id="in-amount" placeholder="5000+3000" inputmode="decimal" oninput="updateInPreview()">
           <input type="text" id="in-pct" placeholder="%1" inputmode="decimal" oninput="numericInputFilter(event); updateInPreview()">
           <input type="text" id="in-pct2" placeholder="%2" inputmode="decimal" oninput="numericInputFilter(event); updateInPreview()">
           <input type="text" id="in-pctcur" placeholder="%кур" inputmode="decimal" oninput="numericInputFilter(event); updateInPreview()" title="Процент куратору">
@@ -5398,6 +5398,39 @@ async function loadFromGDrive() {
 // Сравнивает метку времени локальных данных (state._modifiedAt) с меткой
 // данных в облаке. Берёт более свежие.
 // Используется и при автоматической синхронизации, и при ручной "🔄 Синхронизировать".
+// ── СЛИЯНИЕ ДАННЫХ ПРИ СИНХРОНИЗАЦИИ ───────────────────────────────────────
+// Объединяет локальные и облачные данные так, чтобы НИКОГДА не терять дни.
+// Правило: берётся объединение всех дней. День, который есть только в одной
+// копии (например, поздние числа 16,17,18,19...), сохраняется всегда. Если
+// один и тот же день есть в обеих копиях — берётся версия из более свежей
+// копии (по _modifiedAt). Самое позднее введённое всегда остаётся.
+function mergeLedgerStates(localS, cloudS) {
+  localS = localS || {}; cloudS = cloudS || {};
+  const localNewer = (localS._modifiedAt || 0) >= (cloudS._modifiedAt || 0);
+  const newer = localNewer ? localS : cloudS;
+  const older = localNewer ? cloudS : localS;
+  const merged = JSON.parse(JSON.stringify(newer));
+  if (!merged.days || typeof merged.days !== 'object') merged.days = {};
+  const olderDays = (older.days && typeof older.days === 'object') ? older.days : {};
+  for (const d in olderDays) {
+    if (!Object.prototype.hasOwnProperty.call(merged.days, d)) {
+      merged.days[d] = JSON.parse(JSON.stringify(olderDays[d]));
+    }
+  }
+  const mergedClients = Array.isArray(merged.clients) ? merged.clients.slice() : [];
+  const olderClients = Array.isArray(older.clients) ? older.clients : [];
+  for (const c of olderClients) if (!mergedClients.includes(c)) mergedClients.push(c);
+  merged.clients = mergedClients;
+  for (const key of ['tagWeekCorrections', 'weekDebtOverrides']) {
+    const a = (merged[key] && typeof merged[key] === 'object') ? merged[key] : {};
+    const b = (older[key] && typeof older[key] === 'object') ? older[key] : {};
+    for (const k in b) if (!Object.prototype.hasOwnProperty.call(a, k)) a[k] = b[k];
+    merged[key] = a;
+  }
+  merged._modifiedAt = Math.max(localS._modifiedAt || 0, cloudS._modifiedAt || 0) || Date.now();
+  return merged;
+}
+
 async function smartSync(opts) {
   opts = opts || {};
   const silent = !!opts.silent; // не показывать toast'ы если silent
@@ -5435,58 +5468,55 @@ async function smartSync(opts) {
     // 3. Если равны → ничего не делать
     // Чтобы избежать ложных срабатываний, добавляем буфер в 2 секунды
 
-    const BUFFER_MS = 2000;
-    const localIsNewer = localModifiedAt > cloudModifiedAt + BUFFER_MS;
-    const cloudIsNewer = cloudModifiedAt > localModifiedAt + BUFFER_MS;
+    // ── СЛИЯНИЕ ВМЕСТО ЗАМЕНЫ ──────────────────────────────────────────────
+    // Скачиваем облачные данные и объединяем их с локальными так, чтобы ни
+    // один день не пропал (см. mergeLedgerStates). Затем, если результат
+    // отличается, сохраняем локально и/или заливаем объединённое на Диск.
+    const res = await gapi.client.drive.files.get({ fileId, alt: 'media' });
+    const cloudData = typeof res.body === 'string' ? JSON.parse(res.body) : res.result;
+    if (!cloudData || !cloudData.clients || !cloudData.days) {
+      if (!silent) showToast('Файл на Диске повреждён', true);
+      return { status: 'corrupt' };
+    }
 
-    if (cloudIsNewer) {
-      // Облако новее. Если есть локальные изменения после последнего sync —
-      // это конфликт. Спросим пользователя.
-      const hasLocalChangesAfterSync = localModifiedAt > lastSyncAt + BUFFER_MS;
-      if (hasLocalChangesAfterSync && !opts.force) {
-        // КОНФЛИКТ
-        const choice = confirm(
-          '⚠️ Конфликт данных!\n\n' +
-          'На Google Drive есть более новые данные, но в этом браузере тоже есть изменения.\n\n' +
-          'Локально изменено: ' + new Date(localModifiedAt).toLocaleString('ru-RU') + '\n' +
-          'На Диске изменено: ' + new Date(cloudModifiedAt).toLocaleString('ru-RU') + '\n\n' +
-          'OK — взять данные с Диска (локальные изменения потеряются)\n' +
-          'Отмена — оставить локальные (потом можно нажать "Сохранить" чтобы записать на Диск)'
-        );
-        if (!choice) {
-          if (!silent) showToast('Синхронизация отменена');
-          return { status: 'conflict-kept-local' };
-        }
-      }
-      // Скачиваем с диска
-      const res = await gapi.client.drive.files.get({ fileId, alt: 'media' });
-      const data = typeof res.body === 'string' ? JSON.parse(res.body) : res.result;
-      if (data.clients && data.days) {
-        state = migrateState(data);
-        // ВАЖНО: сохраняем без обновления _modifiedAt — иначе метка собьётся
-        const modAt = state._modifiedAt;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        state._modifiedAt = modAt;
-        localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
-        refreshSyncUI();
-        render();
-        if (!silent) showToast('⬇ Загружено с Drive (свежее)');
-        return { status: 'downloaded' };
-      } else {
-        if (!silent) showToast('Файл на Диске повреждён', true);
-        return { status: 'corrupt' };
-      }
-    } else if (localIsNewer) {
-      // Локальное новее — заливаем на Диск
-      await saveToGDrive();
-      return { status: 'uploaded' };
-    } else {
-      // Одинаковы — ничего не делаем
+    // Подпись содержимого для сравнения (без учёта метки времени)
+    const sig = (s) => JSON.stringify({
+      days: s.days || {}, clients: s.clients || [],
+      tagWeekCorrections: s.tagWeekCorrections || {},
+      weekDebtOverrides: s.weekDebtOverrides || {},
+      lastPctCur: (s.lastPctCur === undefined ? null : s.lastPctCur)
+    });
+
+    const localSig = sig(state);
+    const cloudSig = sig(cloudData);
+
+    if (localSig === cloudSig) {
+      // Содержимое идентично — синхронизировать нечего
       localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
       refreshSyncUI();
       if (!silent) showToast('✓ Уже синхронизировано');
       return { status: 'in-sync' };
     }
+
+    // Объединяем локальное и облачное (ни один день не теряется)
+    const merged = migrateState(mergeLedgerStates(state, cloudData));
+    const mergedSig = sig(merged);
+
+    // Применяем объединённый результат локально
+    state = merged;
+    saveState();   // сохранит в браузер и обновит _modifiedAt
+    render();
+
+    // Если объединённое отличается от облака — заливаем его на Диск
+    if (mergedSig !== cloudSig) {
+      await saveToGDrive();
+    } else {
+      localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
+      refreshSyncUI();
+    }
+
+    if (!silent) showToast('🔄 Синхронизировано (данные объединены)');
+    return { status: 'merged' };
   } catch (e) {
     console.error('Smart sync error:', e);
     if (!silent) showToast('Ошибка синхронизации: ' + (e.message || 'см. консоль'), true);
