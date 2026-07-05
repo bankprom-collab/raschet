@@ -813,9 +813,9 @@
         <div class="ic">☁️</div><div class="t">Синхронизация</div>
         <div class="s">Google Drive между устройствами.</div>
       </div>
-      <div class="board-tile" style="--tile-c:#8590b3" onclick="exportData()">
+      <div class="board-tile" style="--tile-c:#8590b3" onclick="exportData()" oncontextmenu="changeItogoFolder(event)">
         <div class="ic">⬇️</div><div class="t">Экспорт</div>
-        <div class="s">Сохранить данные в файл.</div>
+        <div class="s">Сохранить данные в файл. ПКМ — выбрать папку ИТОГ.</div>
       </div>
       <div class="board-tile" style="--tile-c:#8590b3" onclick="importData()">
         <div class="ic">⬆️</div><div class="t">Импорт</div>
@@ -847,26 +847,15 @@
     <div id="calPopup" class="cal-popup"></div>
   </div>
   <div class="header-btns">
-    <button class="btn btn-ghost" onclick="showBoard()" title="На доску — домашний экран с разделами" style="border-color:#00e5b0;color:#00e5b0">🏠 Доска</button>
+    <button class="btn btn-ghost" onclick="showBoard()" title="На доску — домашний экран со всеми разделами (Аналитика, Статистика, Аудит, Экспорт, Импорт, Markdown и др.)" style="border-color:#00e5b0;color:#00e5b0">🏠 Доска</button>
     <button class="btn btn-primary" onclick="applyAndSave()" id="applySaveBtn"
             style="background:#ffd54f;border-color:#ffd54f;color:#000;font-weight:700"
             title="Пересчитать всю программу, сохранить в браузере и отправить на Google Drive">💾 Сохранить</button>
     <button class="btn btn-ghost" onclick="toggleManualMode()" id="manualModeBtn" style="border-color:#ff8a4a;color:#ff8a4a" title="Поставить автопересчёт на паузу и править данные вручную">✋ Ручной режим</button>
     <span class="tb-sep"></span>
     <button class="btn btn-ghost" onclick="openClientsModal()" title="Управление парами">👥 Пары</button>
-    <button class="btn btn-ghost" onclick="openClientPickModal()" title="Движение денег по каждой паре: приходы, выдачи и остаток по дням — с печатью">👤 Выборка</button>
-    <button class="btn btn-ghost" onclick="openAnalyticsModal()" title="Полная аналитика приходов и получено на руки по дням">📈 Аналитика</button>
-    <button class="btn btn-ghost" onclick="openAnalyticsBaseModal()" title="Аналитика база — только зелёные суммы, с разбором и печатью">🟢 База</button>
-    <button class="btn btn-ghost" onclick="openStatsModal()" title="Статистика куратора по периодам">📊 Статистика</button>
-    <button class="btn btn-ghost" onclick="openAuditModal()" title="Аудит данных — найти все расхождения в цепочке остатков">🩺 Аудит</button>
-    <span class="tb-sep"></span>
-    <button class="btn btn-ghost" onclick="exportData()" oncontextmenu="changeItogoFolder(event)"
-            id="exportBtn"
-            title="ЛКМ — сохранить. ПКМ — выбрать папку ИТОГ">⬇ Экспорт</button>
-    <button class="btn btn-ghost" onclick="openMarkdownModal()" title="Экспорт в Markdown для Obsidian">📋 Markdown</button>
-    <button class="btn btn-ghost" onclick="importData()" title="Импорт данных">⬆ Импорт</button>
-    <span class="tb-sep"></span>
     <button class="btn btn-primary" onclick="openSyncModal()">☁ Синхр.</button>
+    <span class="tb-sep"></span>
     <button class="btn btn-ghost" onclick="changePassword()" title="Сменить пароль">🔒</button>
     <button class="btn btn-ghost" onclick="lockApp()" title="Заблокировать">🚪</button>
   </div>
@@ -1741,10 +1730,21 @@ function migrateState(s) {
   // База клиентов — ТОЛЬКО пары «клиент-получатель». Одиночные имена удаляем.
   // Пополняем парами, встречающимися в данных. Одиночные из данных НЕ добавляем.
   {
-    // 1. Удаляем из базы все одиночные имена (без дефиса/второй части)
-    s.clients = (Array.isArray(s.clients) ? s.clients : []).filter(c => isClientPair(c));
+    // 1. Сворачиваем «Пара-случайный хвост» (комментарий, случайно попавший в
+    //    имя пары, напр. «Пр.Мира-Ленин-это из прошлой недели») обратно к
+    //    канонической паре, убираем одиночные имена и дубли.
+    const canonPair = (name) => {
+      const t = (name || '').trim();
+      for (const p of DEFAULT_PAIRS) {
+        if (t === p) return p;
+        if (t.indexOf(p + '-') === 0) return p;   // «Пр.Мира-Ленин-…» → «Пр.Мира-Ленин»
+      }
+      return t;
+    };
     const have = {};
-    s.clients.forEach(c => { if (c) have[c] = true; });
+    s.clients = (Array.isArray(s.clients) ? s.clients : [])
+      .map(canonPair)
+      .filter(c => isClientPair(c) && !have[c] && (have[c] = true));
     // 2. Гарантируем наличие базовых пар (при обновлении версии или пустом списке).
     //    На обычных загрузках список пар пользователь контролирует сам.
     if (needForceRemap || s.clients.length === 0) {
@@ -2792,6 +2792,9 @@ function renderWeekDebtSummary() {
   let totalOwed = 0;
   const body = rows.map(r => {
     totalOwed += r.v1;
+    // Базовая сумма (до вычета %), от которой считаются проценты: v1 = base*(1-pct1/100)
+    const base = (r.pct1 != null && r.pct1 > 0 && r.pct1 < 100) ? r100(r.v1 / (1 - r.pct1 / 100)) : null;
+    const baseHtml = (base != null) ? ` <span style="color:var(--muted-bright);font-weight:600" title="Базовая сумма, от которой считаются проценты">${fmt(base)}</span>` : '';
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
     let sec = '';
     if (r.has2 && r.v2 !== null && r.v2 !== undefined) {
@@ -2803,8 +2806,11 @@ function renderWeekDebtSummary() {
     const editBtn = (state.manualMode === true)
       ? ` <span style="cursor:pointer" title="Изменить сумму пары вручную" onclick="editWeekDebtPair('${escapeHtml(r.name).replace(/'/g, "\\'")}')">✏️</span>`
       : '';
+    const _ne = escapeHtml(r.name).replace(/'/g, "\\'");
+    const renBtn = ` <span style="cursor:pointer;opacity:.55" title="Переименовать пару" onclick="renamePairInline('${_ne}')">✎</span>`;
+    const delBtn = ` <span style="cursor:pointer;opacity:.55" title="Удалить пару из всей истории" onclick="deletePairEverywhere('${_ne}')">🗑</span>`;
     return `<div class="wds-row">
-      <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}</span>
+      <span class="wds-pair">${escapeHtml(r.name)}${baseHtml}${tag}${man}${renBtn}${delBtn}${editBtn}</span>
       <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b>${sec}</span>
     </div>`;
   }).join('');
@@ -4883,11 +4889,87 @@ function renameClient(i) {
     day.out.forEach(r => { if (r.client === oldName) { r.client = trimmed; updated++; } });
     day.in.forEach(r => { if (r.client === oldName) { r.client = trimmed; updated++; } });
   }
+  // Переносим ручные недельные коррекции (✎) и переопределения суммы (✏️) на новое
+  // имя (ключи вида «неделя::пара»), иначе они «повиснут» под старым именем и пара
+  // потеряет свои ручные суммы.
+  ['tagWeekCorrections', 'weekDebtOverrides'].forEach(store => {
+    const obj = state[store];
+    if (!obj || typeof obj !== 'object') return;
+    for (const key of Object.keys(obj)) {
+      const sep = key.indexOf('::');
+      if (sep < 0 || key.slice(sep + 2) !== oldName) continue;
+      obj[key.slice(0, sep + 2) + trimmed] = obj[key];
+      delete obj[key];
+    }
+  });
   saveState();
   renderClientsList();
   renderClientSelects();
   render();
   showToast(updated > 0 ? `Имя обновлено (в ${updated} записях)` : 'Имя обновлено');
+}
+
+// Переименовать пару прямо из блока «Задолженность по парам».
+// Если пара есть в списке клиентов — идём общим путём renameClient (он переносит
+// записи и ручные коррекции). Иначе (пара только в записях) — переименуем по имени.
+function renamePairInline(name) {
+  const oldName = (name || '').trim();
+  if (!oldName) return;
+  const idx = state.clients.indexOf(oldName);
+  if (idx >= 0) { renameClient(idx); return; }
+  const nn = prompt('Новое имя пары «' + oldName + '» (Имя1-Имя2):', oldName);
+  if (nn === null) return;
+  const trimmed = nn.trim();
+  if (trimmed === oldName) return;
+  if (!isClientPair(trimmed)) { showToast('Нужна пара: Имя1-Имя2', true); return; }
+  for (const d in state.days) {
+    const day = state.days[d]; if (!day) continue;
+    (day.out || []).forEach(r => { if (r.client === oldName) r.client = trimmed; });
+    (day.in || []).forEach(r => { if (r.client === oldName) r.client = trimmed; });
+  }
+  ['tagWeekCorrections', 'weekDebtOverrides'].forEach(store => {
+    const obj = state[store]; if (!obj || typeof obj !== 'object') return;
+    for (const key of Object.keys(obj)) {
+      const sep = key.indexOf('::');
+      if (sep >= 0 && key.slice(sep + 2) === oldName) { obj[key.slice(0, sep + 2) + trimmed] = obj[key]; delete obj[key]; }
+    }
+  });
+  saveState(); renderClientSelects(); render();
+  showToast('Имя обновлено');
+}
+
+// Полностью удалить пару: из списка клиентов, из ВСЕХ записей приход/выдача и из
+// ручных коррекций. С подтверждением — действие необратимо, остатки пересчитываются.
+function deletePairEverywhere(name) {
+  const pair = (name || '').trim();
+  if (!pair) return;
+  let cnt = 0;
+  for (const d in state.days) {
+    const day = state.days[d]; if (!day) continue;
+    cnt += (day.out || []).filter(r => r.client === pair).length;
+    cnt += (day.in || []).filter(r => r.client === pair).length;
+  }
+  const msg = cnt > 0
+    ? 'Удалить пару «' + pair + '» и ВСЕ её записи (' + cnt + ') из всей истории?\n\nДействие необратимо. Переходящие остатки пересчитаются.'
+    : 'Удалить пару «' + pair + '» из списка?';
+  if (!confirm(msg)) return;
+  for (const d in state.days) {
+    const day = state.days[d]; if (!day) continue;
+    if (Array.isArray(day.out)) day.out = day.out.filter(r => r.client !== pair);
+    if (Array.isArray(day.in)) day.in = day.in.filter(r => r.client !== pair);
+  }
+  state.clients = (state.clients || []).filter(c => c !== pair);
+  ['tagWeekCorrections', 'weekDebtOverrides'].forEach(store => {
+    const obj = state[store]; if (!obj || typeof obj !== 'object') return;
+    for (const key of Object.keys(obj)) {
+      const sep = key.indexOf('::');
+      if (sep >= 0 && key.slice(sep + 2) === pair) delete obj[key];
+    }
+  });
+  const firstDay = Object.keys(state.days).sort()[0];
+  if (firstDay) recalcCarryoversAfter(firstDay);
+  saveState(); renderClientSelects(); render();
+  showToast('Пара «' + pair + '» удалена' + (cnt > 0 ? ' (записей: ' + cnt + ')' : ''));
 }
 
 // ── EXPORT ─────────────────────────────────────────────────────────────────
