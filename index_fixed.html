@@ -2728,35 +2728,13 @@ function renderWeekDebtSummary() {
     const a = accr[p];
     if (!a || a.v1 <= 0) return;
     if ((p || '').includes('Вейс(рук)')) return; // Вейс — отдельно, с переносом
-    // Суммы к отдаче этой недели по паре (каждая строка прихода после %)
-    const thisWeekVals = [];
-    for (const d of Object.keys(state.days).sort()) {
-      if (d > currentDate || weekMondayStr(d) !== thisWeek || !isWeekday(d)) continue;
-      const dd = state.days[d];
-      if (!dd || !Array.isArray(dd.in)) continue;
-      dd.in.forEach(r => {
-        if ((r.client || '').trim() === p) thisWeekVals.push(r100(calcInRowFinal(r)));
-      });
-    }
-    // Гашение: выдача на руки гасит начисленную сумму этой недели, ТОЛЬКО
-    // если совпадает с ней (или с накопленным итогом пары). Прочие выдачи —
-    // это гашение старых долгов, текущую неделю они НЕ трогают.
-    let rem = a.v1;
-    for (const d of Object.keys(state.days).sort()) {
-      if (d > currentDate || weekMondayStr(d) !== thisWeek) continue;
-      const dd = state.days[d];
-      if (!dd || !Array.isArray(dd.out)) continue;
-      dd.out.forEach(o => {
-        if ((o.client || '').trim() !== p) return;
-        const amt = r100(o.amount || 0);
-        if (amt <= 0) return;
-        if (amt === r100(rem)) { rem = 0; return; }            // выдан весь итог пары
-        const idx = thisWeekVals.indexOf(amt);
-        if (idx >= 0) { rem = r100(rem - amt); thisWeekVals.splice(idx, 1); } // выдана конкретная сумма
-      });
-    }
+    // Выдача на руки («Получено на руки») за эту неделю по паре ВЫЧИТАЕТСЯ из
+    // накопленной суммы пары — задолженность уменьшается на выданное.
+    // Полностью выданная (остаток ≤ 0) пара уходит из блока.
+    const received = pairWeekReceived(currentDate, p);
+    let rem = r100(a.v1 - received);
     rem = Math.max(0, rem);
-    if (rem <= 0) return; // выдано — пара уходит из блока
+    if (rem <= 0) return; // всё выдано — пара уходит из блока
     const frac = a.v1 > 0 ? rem / a.v1 : 0;
     const v2 = (a.has2 && a.v2 !== null && a.v2 !== undefined) ? r100(a.v2 * frac) : null;
     rows.push({ name: p, v1: rem, v2, has2: a.has2 && v2 !== null,
@@ -2839,7 +2817,7 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %). Выдача на руки гасит начисленную сумму пары, когда совпадает с ней (или с её недельным итогом) — выдано, пара уходит. Прочие выдачи относятся к старым долгам и текущую неделю не трогают. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %) за вычетом выданного на руки. Выдача на руки по паре уменьшает её сумму на выданное; полностью выданная пара уходит. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
 }
 
