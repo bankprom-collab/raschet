@@ -1990,7 +1990,7 @@ function pairWeekDebt(dayStr, pairName) {
   for (const wk of weeks) {
     let acc1 = 0, acc2 = 0, rec = 0;
     for (const d of allDays) {
-      if (weekMondayStr(d) !== wk) continue;
+      if (d > dayStr || weekMondayStr(d) !== wk) continue;
       const dd = state.days[d];
       if (!dd) continue;
       if (isWeekday(d) && Array.isArray(dd.in)) {
@@ -2635,7 +2635,7 @@ function pairWeekReceived(dayStr, pairName) {
   const thisWeek = weekMondayStr(dayStr);
   let rec = 0;
   for (const d of Object.keys(state.days)) {
-    if (weekMondayStr(d) !== thisWeek) continue;
+    if (d > dayStr || weekMondayStr(d) !== thisWeek) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.out)) continue;
     dd.out.forEach(o => {
@@ -2728,35 +2728,13 @@ function renderWeekDebtSummary() {
     const a = accr[p];
     if (!a || a.v1 <= 0) return;
     if ((p || '').includes('Вейс(рук)')) return; // Вейс — отдельно, с переносом
-    // Суммы к отдаче этой недели по паре (каждая строка прихода после %)
-    const thisWeekVals = [];
-    for (const d of Object.keys(state.days).sort()) {
-      if (d > currentDate || weekMondayStr(d) !== thisWeek || !isWeekday(d)) continue;
-      const dd = state.days[d];
-      if (!dd || !Array.isArray(dd.in)) continue;
-      dd.in.forEach(r => {
-        if ((r.client || '').trim() === p) thisWeekVals.push(r100(calcInRowFinal(r)));
-      });
-    }
-    // Гашение: выдача на руки гасит начисленную сумму этой недели, ТОЛЬКО
-    // если совпадает с ней (или с накопленным итогом пары). Прочие выдачи —
-    // это гашение старых долгов, текущую неделю они НЕ трогают.
-    let rem = a.v1;
-    for (const d of Object.keys(state.days).sort()) {
-      if (d > currentDate || weekMondayStr(d) !== thisWeek) continue;
-      const dd = state.days[d];
-      if (!dd || !Array.isArray(dd.out)) continue;
-      dd.out.forEach(o => {
-        if ((o.client || '').trim() !== p) return;
-        const amt = r100(o.amount || 0);
-        if (amt <= 0) return;
-        if (amt === r100(rem)) { rem = 0; return; }            // выдан весь итог пары
-        const idx = thisWeekVals.indexOf(amt);
-        if (idx >= 0) { rem = r100(rem - amt); thisWeekVals.splice(idx, 1); } // выдана конкретная сумма
-      });
-    }
+    // Выдача на руки («Получено на руки») за эту неделю по паре ВЫЧИТАЕТСЯ из
+    // накопленной суммы пары — задолженность уменьшается на выданное.
+    // Полностью выданная (остаток ≤ 0) пара уходит из блока.
+    const received = pairWeekReceived(currentDate, p);
+    let rem = r100(a.v1 - received);
     rem = Math.max(0, rem);
-    if (rem <= 0) return; // выдано — пара уходит из блока
+    if (rem <= 0) return; // всё выдано — пара уходит из блока
     const frac = a.v1 > 0 ? rem / a.v1 : 0;
     const v2 = (a.has2 && a.v2 !== null && a.v2 !== undefined) ? r100(a.v2 * frac) : null;
     rows.push({ name: p, v1: rem, v2, has2: a.has2 && v2 !== null,
@@ -2839,7 +2817,7 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %). Выдача на руки гасит начисленную сумму пары, когда совпадает с ней (или с её недельным итогом) — выдано, пара уходит. Прочие выдачи относятся к старым долгам и текущую неделю не трогают. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %) за вычетом выданного на руки. Выдача на руки по паре уменьшает её сумму на выданное; полностью выданная пара уходит. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
 }
 
@@ -4392,7 +4370,9 @@ function openMarkdownModal() {
     const day = state.days[d];
     return day && ((day.out && day.out.length) || (day.in && day.in.length) || day.note);
   });
-  document.getElementById('md-all-count').textContent = daysWithData.length + ' ' + (daysWithData.length === 1 ? 'день' : daysWithData.length >= 2 && daysWithData.length <= 4 ? 'дня' : 'дней');
+  const _dc = daysWithData.length, _m10 = _dc % 10, _m100 = _dc % 100;
+  const _dw = (_m100 >= 11 && _m100 <= 14) ? 'дней' : (_m10 === 1) ? 'день' : (_m10 >= 2 && _m10 <= 4) ? 'дня' : 'дней';
+  document.getElementById('md-all-count').textContent = _dc + ' ' + _dw;
 
   // Поля диапазона — по умолчанию текущая неделя
   const today = new Date(currentDate + 'T12:00:00');
@@ -4433,7 +4413,7 @@ function dayToMarkdown(dateStr) {
   if (!day) return null;
 
   const co = day.carryover || 0;
-  const outTotal = (day.out || []).reduce((s,r)=>s+r.amount, 0);
+  const outTotal = (day.out || []).reduce((s,r)=>s+(r.amount||0), 0);
   const inTotal = (day.in || []).reduce((s,r) => s + calcInRowFinal(r), 0);
   const balance = co - outTotal + inTotal;
   const curatorT = (day.in || []).reduce((s,r) => {
@@ -4457,8 +4437,8 @@ function dayToMarkdown(dateStr) {
 
   // Собираем уникальных клиентов дня для тегов
   const dayClients = new Set();
-  (day.out || []).forEach(r => dayClients.add(r.client));
-  (day.in || []).forEach(r => dayClients.add(r.client));
+  (day.out || []).forEach(r => { if (r.client) dayClients.add(r.client); });
+  (day.in || []).forEach(r => { if (r.client) dayClients.add(r.client); });
 
   let md = '';
   // ── Frontmatter (YAML)
@@ -4678,7 +4658,7 @@ async function doMarkdownExport() {
   }
 
   // Выгружаем согласно выбранному способу упаковки
-  if (pack === 'separate' || (pack === 'separate' && files.length === 1)) {
+  if (pack === 'separate' || files.length === 1) {
     if (files.length === 1) {
       // Один файл — просто скачиваем
       downloadFile(files[0].name, files[0].content);
@@ -5328,7 +5308,8 @@ async function ensureFolderAndFile() {
   let fileId = localStorage.getItem(GDRIVE_FILE_ID_KEY);
   if (fileId) {
     try {
-      await gapi.client.drive.files.get({ fileId, fields: 'id, trashed' });
+      const info = await gapi.client.drive.files.get({ fileId, fields: 'id, trashed' });
+      if (info.result && info.result.trashed) { fileId = null; localStorage.removeItem(GDRIVE_FILE_ID_KEY); }
     } catch (e) {
       fileId = null;
     }
@@ -5356,7 +5337,7 @@ async function saveToGDrive() {
     const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
     if (!fileId) metadata.parents = [folderId];
 
-    const boundary = '-------RasčëtBoundary' + Date.now();
+    const boundary = '-------RaschetBoundary' + Date.now();
     const delim = `\r\n--${boundary}\r\n`;
     const closeDelim = `\r\n--${boundary}--`;
     const multipart =
