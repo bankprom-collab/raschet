@@ -1566,29 +1566,6 @@ const MIGRATION_VERSION = 8;
 let state = loadState();
 let currentDate = todayStr();
 
-// Одноразово применяем отсечку 30.06.2026 к переходящему остатку: первый день
-// эпохи = 0, дальше цепочка пересчитывается от нуля. Старые (сохранённые от
-// прошлой цепочки) остатки июля обнуляются к новому старту. Ручные опоры
-// (carryoverManual) не трогаем. Флаг — чтобы выполнилось один раз.
-(function applyChainResetOnce() {
-  try {
-    if (state && state._chainResetV1 !== true && state.days && typeof state.days === 'object') {
-      // Пересчитываем НАЧИСТО стандартной авто-логикой: старт эпохи = 0, дальше
-      // каждый день наследует остаток предыдущего. Ручные опоры не учитываем —
-      // после отсечки всё считается по обычной логике (ручной пересчёт не в счёт).
-      const eraDays = Object.keys(state.days).sort().filter(x => x >= DEBT_CARRY_START);
-      for (let i = 0; i < eraDays.length; i++) {
-        const day = state.days[eraDays[i]];
-        if (!day) continue;
-        day.carryover = (i === 0) ? 0 : calcBalance(eraDays[i - 1]);
-        day.carryoverManual = false;
-      }
-      state._chainResetV1 = true;
-      saveState();
-    }
-  } catch (e) { /* не блокируем загрузку */ }
-})();
-
 function todayStr() {
   // ЛОКАЛЬНАЯ дата (не UTC): иначе ночью в поясах восточнее Гринвича (МСК = UTC+3)
   // «сегодня» съезжало бы на вчерашнее число и записи попадали не в тот день.
@@ -1873,14 +1850,14 @@ function saveState() {
 }
 function getDay(d) {
   if (!state.days[d]) state.days[d] = { carryover: null, out: [], in: [], note: '', carryoverManual: false, curatorPaid: 0 };
-  // Дни ДО отсечки (30.06.2026) — ПОЛНЫЙ НОЛЬ (29 июня и раньше = 0). Первый день
-  // эпохи — старт с нуля. Остальные наследуют остаток предыдущего дня с данными
-  // (мостим пропуски: выходные/незаполненные дни не обнуляют остаток).
+  // Дни ДО отсечки (30.06.2026) — ноль (29 июня и раньше = 0). С 30 июня — обычная
+  // логика: если остаток не задан, наследуем от предыдущего дня с данными (мостим
+  // пропуски); заданные данные НЕ трогаем.
   const prev = prevDayWithData(d);
-  if (d < DEBT_CARRY_START || prev === null) {
+  if (d < DEBT_CARRY_START) {
     state.days[d].carryover = 0;
   } else if (state.days[d].carryover === null) {
-    state.days[d].carryover = calcBalance(prev);
+    state.days[d].carryover = prev ? calcBalance(prev) : 0;
   }
   return state.days[d];
 }
@@ -1925,9 +1902,8 @@ function calcBalance(d) {
   if (!day) return 0;
   // Всё ДО отсечки (30.06.2026) — полный ноль (29 июня и раньше = 0).
   if (d < DEBT_CARRY_START) return 0;
-  // Первый день эпохи стартует с НУЛЯ — старый остаток не подтягивается.
-  const isEraStart = prevDayWithData(d) === null;
-  const co = isEraStart ? 0 : (day.carryover || 0);
+  // С 30 июня — обычная логика: берём переходящий остаток дня как есть.
+  const co = day.carryover || 0;
   const outTotal = day.out.reduce((s, r) => s + r.amount, 0);
   // Приход: для каждой строки берём её финальный округлённый итог
   const inTotal = day.in.reduce((s, r) => s + calcInRowFinal(r), 0);
