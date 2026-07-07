@@ -785,6 +785,10 @@
         <div class="ic">📝</div><div class="t">Ввод за день</div>
         <div class="s">Дневник: приходы, выдачи, переходящий остаток. Здесь вводишь данные.</div>
       </div>
+      <div class="board-tile feature" id="tileDebtOut" style="--tile-c:#ff8a4a" onclick="openDebtOutModal()">
+        <div class="ic">💸</div><div class="t">Долг к отдаче сегодня</div>
+        <div class="s" id="tileDebtOutBody">—</div>
+      </div>
       <div class="board-tile" style="--tile-c:#818cf8" onclick="openClientPickModal()">
         <div class="ic">👤</div><div class="t">Выборка по клиентам</div>
         <div class="s">Движение по парам: пришло, %, выдано, остаток. С печатью.</div>
@@ -985,6 +989,17 @@
 </main>
 
 <!-- ── CLIENTS MODAL ── -->
+<!-- ── ДОЛГ К ОТДАЧЕ НА СЕГОДНЯ ── -->
+<div class="modal-overlay" id="debt-out-modal">
+  <div class="modal" style="max-width:640px">
+    <h2 style="color:#ff8a4a">💸 Долг к отдаче на сегодня по парам</h2>
+    <div id="debt-out-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('debt-out-modal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="clients-modal">
   <div class="modal">
     <h2>👥 База пар клиент-получатель</h2>
@@ -1533,6 +1548,13 @@ const STORAGE_KEY = 'ledger_v1';
 // Базовый набор пар клиент-получатель (только пары, без одиночных имён).
 // Объявлен ДО loadState(), т.к. миграция к нему обращается на старте.
 const DEFAULT_PAIRS = ['Аркадий2-Самв','Карапуз-Рома','Пр.Мира-Ленин','Пр.Мира-ИсФин','Вейс(рук)-Рынок'];
+// Даты «обнуления» по парам: всё строго ДО этой даты по паре не учитывается в
+// расчётах (приход/выдача/перенос). Вейс(рук)-Рынок обнулён по 29 июня 2026
+// включительно; с 30 июня 2026 считается с нуля, как обычная пара.
+const PAIR_RESET_DATE = { 'Вейс(рук)-Рынок': '2026-06-30' };
+function pairResetDate(pair) { return PAIR_RESET_DATE[(pair || '').trim()] || null; }
+// true, если день d нужно учитывать для пары (т.е. d не раньше даты обнуления).
+function pairDayCounts(pair, d) { const r = pairResetDate(pair); return !r || d >= r; }
 // Текущая версия схемы данных. Объявлена ДО loadState(), т.к. миграция к ней
 // обращается на старте (иначе обращение в «мёртвой зоне» рушит загрузку и
 // данные молча сбрасываются в пустое состояние).
@@ -1541,7 +1563,13 @@ let state = loadState();
 let currentDate = todayStr();
 
 function todayStr() {
-  return new Date().toISOString().slice(0,10);
+  // ЛОКАЛЬНАЯ дата (не UTC): иначе ночью в поясах восточнее Гринвича (МСК = UTC+3)
+  // «сегодня» съезжало бы на вчерашнее число и записи попадали не в тот день.
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 function loadState() {
   try {
@@ -1818,15 +1846,11 @@ function saveState() {
 }
 function getDay(d) {
   if (!state.days[d]) state.days[d] = { carryover: null, out: [], in: [], note: '', carryoverManual: false, curatorPaid: 0 };
-  // Auto-inherit carryover from previous day if not set
+  // Auto-inherit carryover from the last day WITH DATA (мостим пропуски: выходные
+  // и незаполненные дни не обнуляют остаток).
   if (state.days[d].carryover === null) {
-    const prev = getPrevDayStr(d);
-    if (prev && state.days[prev]) {
-      const prevBalance = calcBalance(prev);
-      state.days[d].carryover = prevBalance;
-    } else {
-      state.days[d].carryover = 0;
-    }
+    const prev = prevDayWithData(d);
+    state.days[d].carryover = prev ? calcBalance(prev) : 0;
   }
   return state.days[d];
 }
@@ -1839,19 +1863,14 @@ function recalcCarryoversAfter(d) {
   // Ручной режим: автопересчёт на паузе — ничего не трогаем
   if (state.manualMode === true) return;
   const allDays = Object.keys(state.days).sort();
-  // Берём только дни строго ПОСЛЕ d
-  const afterDays = allDays.filter(x => x > d);
-  for (const day of afterDays) {
-    const prev = getPrevDayStr(day);
-    if (!state.days[prev]) continue;
-    // Если carryover установлен вручную — не трогаем и НЕ продолжаем дальше,
-    // потому что ручной carryover разрывает цепочку
-    if (state.days[day].carryoverManual === true) {
-      // продолжаем пересчёт после этого дня — он сам стартовая точка
-      continue;
-    }
-    const prevBalance = calcBalance(prev);
-    state.days[day].carryover = prevBalance;
+  for (let i = 0; i < allDays.length; i++) {
+    const day = allDays[i];
+    if (day <= d) continue;                 // только дни строго ПОСЛЕ d
+    if (i === 0) continue;                   // нет предыдущего дня с данными
+    // Ручной carryover — опорная точка, не трогаем (цепочка продолжается после него)
+    if (state.days[day].carryoverManual === true) continue;
+    // Предыдущий день С ДАННЫМИ = allDays[i-1] (мостим календарные пропуски)
+    state.days[day].carryover = calcBalance(allDays[i - 1]);
   }
 }
 function getPrevDayStr(d) {
@@ -1859,6 +1878,15 @@ function getPrevDayStr(d) {
   const dt = new Date(d + 'T12:00:00');
   dt.setDate(dt.getDate() - 1);
   return dt.toISOString().slice(0,10);
+}
+// Последний ДЕНЬ С ДАННЫМИ строго раньше d. Нужен, чтобы переходящий остаток
+// наследовался ЧЕРЕЗ пропуски (выходные, незаполненные дни) и не рвался в 0.
+function prevDayWithData(d) {
+  let best = null;
+  for (const k in state.days) {
+    if (k < d && (best === null || k > best)) best = k;
+  }
+  return best;
 }
 function calcBalance(d) {
   const day = state.days[d];
@@ -1880,8 +1908,9 @@ function calcInRowFinal(r) {
       && r.total !== null && r.total !== undefined) {
     return r100(r.total);
   }
-  // Без процентов — точная сумма
-  return r.total;
+  // Без процентов — точная сумма. Защита от битых записей: null/undefined → 0,
+  // иначе один такой приход заражает NaN весь баланс и цепочку остатков.
+  return (r.total === null || r.total === undefined || isNaN(r.total)) ? 0 : r.total;
 }
 
 // ── НАРАСТАЮЩИЙ ИТОГ ПО ТЕГАМ ────────────────────────────────────────────────
@@ -1936,14 +1965,14 @@ function computeTagRunningTotals(dayStr) {
     if (weekMondayStr(d) !== thisWeek) continue; // только дни текущей недели
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
-    const weekday = isWeekday(d);
     dd.in.forEach(r => {
       const pair = (r.client || '').trim();
       const f1 = calcInRowFinal(r);
       const has2 = hasSecondPct(r);
       const f2 = has2 ? r100(r.total2) : 0;
-      // Прибавляем к накопителям только по рабочим дням
-      if (pair && weekday) {
+      // Прибавляем к накопителям во ВСЕ дни, включая выходные (как в кассе);
+      // и не раньше даты обнуления пары (Вейс(рук)-Рынок — с 30.06.2026).
+      if (pair && pairDayCounts(pair, d)) {
         acc1[pair] = (acc1[pair] || 0) + f1;
         if (has2) acc2[pair] = (acc2[pair] || 0) + f2;
       }
@@ -1977,7 +2006,9 @@ function pairWeekDebt(dayStr, pairName) {
   const pair = (pairName || '').trim();
   if (!pair) return { accrued: 0, accrued2: 0, has2: false, received: 0, remaining: 0, remaining2: 0, pct1: null, pct2: null };
   const targetWeek = weekMondayStr(dayStr);
-  const allDays = Object.keys(state.days).sort();
+  // Учитываем только дни этой пары не раньше её даты обнуления (перенос до неё
+  // не тянется). Для Вейс(рук)-Рынок всё до 30 июня 2026 отбрасывается.
+  const allDays = Object.keys(state.days).sort().filter(d => pairDayCounts(pair, d));
   // Недели по возрастанию, не позже недели текущего дня
   const weeks = [...new Set(allDays.map(weekMondayStr))].filter(w => w <= targetWeek).sort();
   // Перенос: gross1/gross2 — валовое начисление к отдаче по основной и второй
@@ -1993,7 +2024,7 @@ function pairWeekDebt(dayStr, pairName) {
       if (d > dayStr || weekMondayStr(d) !== wk) continue;
       const dd = state.days[d];
       if (!dd) continue;
-      if (isWeekday(d) && Array.isArray(dd.in)) {
+      if (Array.isArray(dd.in)) {   // приход во все дни, включая выходные
         dd.in.forEach(r => {
           if ((r.client || '').trim() !== pair) return;
           acc1 += calcInRowFinal(r);
@@ -2147,7 +2178,7 @@ function curatorWeeklyAccrued(dayStr) {
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
-    if (!isWeekday(d)) continue;                 // сб/вс не учитываются
+    // приход учитываем во ВСЕ дни, включая выходные (как в кассе и статистике)
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach(r => {
@@ -2185,7 +2216,7 @@ function dealsWeeklyAccrued(dayStr) {
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
-    if (!isWeekday(d)) continue;                 // сб/вс не учитываются
+    // приход учитываем во ВСЕ дни, включая выходные (как в кассе и статистике)
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach(r => {
@@ -2430,11 +2461,11 @@ function render() {
       modeEl.style.color = 'var(--muted)';
     }
   }
-  // Проверка расхождения с итогом предыдущего дня
+  // Проверка расхождения с итогом предыдущего дня С ДАННЫМИ (через пропуски)
   const mismatchEl = document.getElementById('carryover-mismatch');
   if (mismatchEl) {
-    const prev = getPrevDayStr(currentDate);
-    if (prev && state.days[prev]) {
+    const prev = prevDayWithData(currentDate);
+    if (prev) {
       const prevBalance = calcBalance(prev);
       const diff = co - prevBalance;
       if (Math.abs(diff) > 0.5) {
@@ -2601,12 +2632,13 @@ function pairWeekAccruals(dayStr) {
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue;   // только дни текущей недели
-    if (!isWeekday(d)) continue;                    // приход копим по будням
+    // приход копим во ВСЕ дни, включая выходные (как в кассе и статистике)
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach(r => {
       const pair = (r.client || '').trim();
       if (!pair) return;
+      if (!pairDayCounts(pair, d)) return;   // дни до даты обнуления пары не считаем
       acc1[pair] = (acc1[pair] || 0) + calcInRowFinal(r);
       if (r.pct !== null && r.pct !== undefined && r.pct > 0) p1[pair] = r.pct;
       if (hasSecondPct(r)) {
@@ -2636,6 +2668,7 @@ function pairWeekReceived(dayStr, pairName) {
   let rec = 0;
   for (const d of Object.keys(state.days)) {
     if (d > dayStr || weekMondayStr(d) !== thisWeek) continue;
+    if (!pairDayCounts(pair, d)) continue;   // дни до даты обнуления пары не считаем
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.out)) continue;
     dd.out.forEach(o => {
@@ -2695,13 +2728,13 @@ function pairClosedDebt(dayStr, pairName) {
 }
 
 // Блок «Задолженность по парам за неделю».
-// ЛОГИКА (зафиксирована):
-//  • Текущая неделя — НАКОПИТЕЛЬНЫЙ итог по парам (пн–пт, после %): приходы
-//    от клиентов копятся внизу. Выдачи на руки текущую неделю НЕ ТРОГАЮТ.
-//  • Выдачи на руки гасят только суммы ПРОШЛЫХ (закрытых) недель.
-//  • Показывается: непогашенный остаток прошлых недель (метка ↪ перенос)
-//    + накопление текущей недели. Когда старое выдано полностью — остаётся
-//    только накопление текущей недели.
+// ЛОГИКА (зафиксирована): это ТОЛЬКО ТЕКУЩАЯ неделя, БЕЗ переноса прошлых.
+//  • Показывается накопительный итог по парам за текущую неделю (пн–пт, после %)
+//    ЗА ВЫЧЕТОМ выданного на руки на этой же неделе. Полностью выданная пара
+//    (остаток ≤ 0) из блока уходит.
+//  • Перенос непогашенного долга прошлых недель здесь НЕ считается — для этого
+//    есть отдельная плитка «Долг к отдаче сегодня» (computeDebtOut/pairWeekDebt).
+//  • Вейс(рук)-Рынок с 30.06.2026 — обычная пара в этом же потоке (без ↪ переноса).
 function renderWeekDebtSummary() {
   const box = document.getElementById('week-debt-summary');
   if (!box) return;
@@ -2727,7 +2760,8 @@ function renderWeekDebtSummary() {
   pairsSet.forEach(p => {
     const a = accr[p];
     if (!a || a.v1 <= 0) return;
-    if ((p || '').includes('Вейс(рук)')) return; // Вейс — отдельно, с переносом
+    // Вейс(рук)-Рынок с 30.06.2026 считается как обычная пара (без ↪ переноса),
+    // поэтому отдельного исключения больше нет — он идёт этим же общим потоком.
     // Выдача на руки («Получено на руки») за эту неделю по паре ВЫЧИТАЕТСЯ из
     // накопленной суммы пары — задолженность уменьшается на выданное.
     // Полностью выданная (остаток ≤ 0) пара уходит из блока.
@@ -2741,20 +2775,8 @@ function renderWeekDebtSummary() {
                 pct1: a.pct1, pct2: a.pct2, carry: false });
   });
 
-  // Вейс(рук)-Рынок — отдельная логика (↪ перенос): непогашенный остаток
-  // (приход после % минус выдачи) с переносом на следующую неделю.
-  {
-    const dbt = pairWeekDebt(currentDate, 'Вейс(рук)-Рынок');
-    if (dbt.remaining > 0) {
-      rows.push({
-        name: 'Вейс(рук)-Рынок',
-        v1: dbt.remaining,
-        v2: (dbt.has2 && dbt.remaining2 > 0) ? dbt.remaining2 : null,
-        has2: dbt.has2 && dbt.remaining2 > 0,
-        pct1: dbt.pct1, pct2: dbt.pct2, carry: true
-      });
-    }
-  }
+  // Вейс(рук)-Рынок с 30.06.2026 больше не имеет отдельного переноса — он уже
+  // учтён общим потоком выше как обычная пара (недельный итог за вычетом выдач).
 
   // Ручные коррекции пар (задаются в ручном режиме через ✏️):
   // заданная сумма ЗАМЕНЯЕТ расчётную и дальше считается основной.
@@ -2781,7 +2803,7 @@ function renderWeekDebtSummary() {
         rows.push({ name: pname, v1: r100(o.v1),
                     v2: (o.v2 !== null && o.v2 !== undefined) ? r100(o.v2) : null,
                     has2: (o.v2 !== null && o.v2 !== undefined),
-                    pct1: null, pct2: null, carry: pname.includes('Вейс(рук)'), manual: true });
+                    pct1: null, pct2: null, carry: false, manual: true });
       }
     }
   }
@@ -2823,8 +2845,93 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %) за вычетом выданного на руки. Выдача на руки по паре уменьшает её сумму на выданное; полностью выданная пара уходит. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %) за вычетом выданного на руки. Выдача на руки по паре уменьшает её сумму на выданное; полностью выданная пара уходит. Вейс(рук)-Рынок с 30.06.2026 считается как обычная пара (без переноса).${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
+}
+
+// ── ДОЛГ К ОТДАЧЕ НА СЕГОДНЯ ПО ПАРАМ ────────────────────────────────────────
+// Для КАЖДОЙ пары клиент-получатель считаем непогашенный остаток к отдаче на
+// текущий день: нарастающий итог прихода ПОСЛЕ % за все незакрытые недели
+// (закрытая неделя обнуляется, положительный остаток переносится) за вычетом
+// выданного на руки. Проценты (13%, 15% и т.п.) — реальные ставки пары.
+// Даты обнуления учтены внутри pairWeekDebt (Вейс(рук)-Рынок — с 30.06.2026).
+function computeDebtOut() {
+  const rows = [];
+  allClientPairs().forEach(pair => {
+    if (!isClientPair(pair)) return;              // только пары «клиент-получатель»
+    const d = pairWeekDebt(currentDate, pair);
+    const rem = r100(d.remaining);
+    if (rem <= 0) return;                          // ничего не должны — пропускаем
+    rows.push({
+      name: pair,
+      v1: rem,
+      v2: (d.has2 && d.remaining2 > 0) ? r100(d.remaining2) : null,
+      has2: d.has2 && d.remaining2 > 0,
+      pct1: d.pct1, pct2: d.pct2
+    });
+  });
+  rows.sort((a, b) => b.v1 - a.v1);
+  const total = rows.reduce((s, r) => s + r.v1, 0);
+  return { rows, total };
+}
+
+// Заполняет плитку доски: общая сумма + первые пары; клик открывает разбивку.
+function renderDebtOutTile() {
+  const body = document.getElementById('tileDebtOutBody');
+  if (!body) return;
+  const { rows, total } = computeDebtOut();
+  if (!rows.length) {
+    body.innerHTML = 'Непогашенного долга к отдаче по парам на сегодня нет.';
+    return;
+  }
+  const top = rows.slice(0, 3).map(r =>
+    `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
+       <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
+       <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
+     </div>`).join('');
+  const more = rows.length > 3
+    ? `<div style="color:var(--muted);font-size:10.5px;margin-top:2px">…ещё ${rows.length - 3} пар — открыть</div>` : '';
+  body.innerHTML =
+    `<div style="font-family:var(--font-num);font-size:20px;font-weight:700;color:#ff8a4a;margin-bottom:6px">${fmt(total)}</div>${top}${more}`;
+}
+
+// Открывает модалку с полной разбивкой долга к отдаче по парам на текущий день.
+function openDebtOutModal() {
+  const box = document.getElementById('debt-out-body');
+  if (box) {
+    const { rows, total } = computeDebtOut();
+    const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
+    if (!rows.length) {
+      box.innerHTML = '<div style="color:var(--muted);padding:8px 0">На сегодня непогашенного долга к отдаче по парам нет.</div>';
+    } else {
+      const bodyRows = rows.map(r => {
+        // Базовая сумма (до вычета %), от которой считаются проценты
+        const base = (r.pct1 != null && r.pct1 > 0 && r.pct1 < 100) ? r100(r.v1 / (1 - r.pct1 / 100)) : null;
+        const baseHtml = (base != null) ? ` <span style="color:var(--muted-bright);font-weight:600" title="Базовая сумма, от которой считаются проценты">${fmt(base)}</span>` : '';
+        const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
+        let sec = '';
+        if (r.has2 && r.v2 != null) {
+          const lbl2 = r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%';
+          sec = ` · ${lbl2}: <b style="color:#ff8a4a">${fmt(r.v2)}</b>`;
+        }
+        return `<div class="wds-row">
+          <span class="wds-pair">${escapeHtml(r.name)}${baseHtml}</span>
+          <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b>${sec}</span>
+        </div>`;
+      }).join('');
+      box.innerHTML =
+        `<div class="week-debt-block">
+          <div class="wds-head">
+            <span>💸 На день: ${formatDateShort(currentDate)}</span>
+            <span class="wds-total">всего к отдаче: <b style="color:#ff8a4a">${fmt(total)}</b></span>
+          </div>
+          ${bodyRows}
+          <div class="wds-foot">Непогашенный долг к отдаче по каждой паре на текущий день: нарастающий итог прихода после % за все незакрытые недели (с переносом непогашенного остатка) за вычетом выданного на руки. Проценты (13%, 15% и т.п.) — реальные ставки пары. Вейс(рук)-Рынок считается с 30.06.2026.</div>
+        </div>`;
+    }
+  }
+  const m = document.getElementById('debt-out-modal');
+  if (m) m.classList.add('open');
 }
 
 function renderSummary(day) {
@@ -3039,13 +3146,9 @@ function setCarryover() {
 function resetCarryover() {
   const day = getDay(currentDate);
   day.carryoverManual = false;
-  // Пересчитаем для текущего дня
-  const prev = getPrevDayStr(currentDate);
-  if (prev && state.days[prev]) {
-    day.carryover = calcBalance(prev);
-  } else {
-    day.carryover = 0;
-  }
+  // Пересчитаем для текущего дня — от последнего дня С ДАННЫМИ (через пропуски)
+  const prev = prevDayWithData(currentDate);
+  day.carryover = prev ? calcBalance(prev) : 0;
   recalcCarryoversAfter(currentDate);
   saveState();
   render();
@@ -3077,8 +3180,8 @@ function recalcAllCarryovers() {
   for (let i = 0; i < allDays.length; i++) {
     const d = allDays[i];
     const day = state.days[d];
-    const prev = getPrevDayStr(d);
-    const hasPrev = !!state.days[prev];
+    const prev = i > 0 ? allDays[i - 1] : null;   // предыдущий день С ДАННЫМИ (мостим пропуски)
+    const hasPrev = !!prev;
 
     if (mode === 'soft') {
       // Пропускаем ручные и дни без предыдущего
@@ -3279,8 +3382,8 @@ function editRow(type, i) {
     if (newAmt === null) return;
     const parsed = parseSumString(newAmt);
     if (!parsed || parsed.sum <= 0) { showToast('Неверная сумма', true); return; }
-    r.amount = parsed.sum;
-    r.parts = parsed.parts.length > 1 ? parsed.parts : null;
+    const newAmount = parsed.sum;
+    const newParts = parsed.parts.length > 1 ? parsed.parts : null;
     const newPct = prompt('Первый процент комиссии (например 13):', r.pct || '');
     if (newPct === null) return;
     const p1 = parseDecimal(newPct);
@@ -3292,6 +3395,10 @@ function editRow(type, i) {
       p2 = parseDecimal(newPct2);
       if (isNaN(p2) || p2 <= 0) { showToast('Неверный второй процент', true); return; }
     }
+    // Всё провалидировано — только теперь мутируем строку. Иначе отмена или ошибка
+    // на любом промпте выше оставляла бы amount новым, а pct/total — старыми (рассинхрон).
+    r.amount = newAmount;
+    r.parts = newParts;
     r.pct = p1;
     r.pct2 = p2;
     r.total = r.amount * (1 - p1/100);
@@ -3353,6 +3460,7 @@ function updateBoardHero() {
   set('boardDate', txt('currentDate'));
   set('boardOut', txt('s-out'));
   set('boardCarry', txt('s-carryover'));
+  try { renderDebtOutTile(); } catch (e) {}
 }
 function showBoard() {
   try { updateBoardHero(); } catch (e) {}
@@ -3447,6 +3555,9 @@ function clientAnalytics(pair, from, to) {
   let allDays = Object.keys(state.days).sort();
   if (from) allDays = allDays.filter(d => d >= from);   // даты в формате YYYY-MM-DD сравниваются как строки
   if (to)   allDays = allDays.filter(d => d <= to);
+  // Учитываем дату обнуления пары (Вейс(рук)-Рынок — с 30.06.2026): дни строго
+  // до неё не входят в движение, как и в pairWeekDebt/плитке «Долг к отдаче».
+  allDays = allDays.filter(d => pairDayCounts(pair, d));
   const weeksOrder = [...new Set(allDays.map(weekMondayStr))].sort();
   // Точные суммы после процентов (без округления каждой строки)
   const ex1 = (r) => (r.total != null && r.total !== undefined) ? r.total : (r.amount || 0) * (1 - (r.pct || 0) / 100);
@@ -3462,7 +3573,7 @@ function clientAnalytics(pair, from, to) {
       if (weekMondayStr(d) !== wk) continue;
       const dd = state.days[d]; if (!dd) continue;
       let dIn1x = 0, dIn2x = 0, dPaid = 0, dRaw = 0, dHas2 = false, dp1 = null, dp2 = null;
-      if (isWeekday(d) && Array.isArray(dd.in)) {     // приход копим по будням (как в модели)
+      if (Array.isArray(dd.in)) {     // приход учитываем во все дни, включая выходные
         dd.in.forEach(r => {
           if ((r.client || '').trim() !== pair) return;
           dRaw += (r.amount || 0);
@@ -4297,8 +4408,8 @@ function renderAudit() {
   let checkedCount = 0;
 
   for (const d of allDays) {
-    const prev = getPrevDayStr(d);
-    if (!state.days[prev]) continue;
+    const prev = prevDayWithData(d);
+    if (!prev) continue;
     checkedCount++;
     const prevBalance = calcBalance(prev);
     const currentCo = state.days[d].carryover || 0;
@@ -4355,8 +4466,8 @@ function goToDateFromAudit(d) {
 }
 
 function fixIssueFromAudit(d) {
-  const prev = getPrevDayStr(d);
-  if (!state.days[prev]) return;
+  const prev = prevDayWithData(d);
+  if (!prev) return;
   const prevBalance = calcBalance(prev);
   if (!confirm(`Подтянуть переходящий остаток ${formatDateShort(d)} с итога ${formatDateShort(prev)}?\n\nБудет установлено: ${fmt(prevBalance)}\n(было: ${fmt(state.days[d].carryover || 0)})`)) return;
   state.days[d].carryover = prevBalance;
