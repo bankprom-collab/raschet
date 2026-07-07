@@ -1555,6 +1555,9 @@ const PAIR_RESET_DATE = { 'Вейс(рук)-Рынок': '2026-06-30' };
 function pairResetDate(pair) { return PAIR_RESET_DATE[(pair || '').trim()] || null; }
 // true, если день d нужно учитывать для пары (т.е. d не раньше даты обнуления).
 function pairDayCounts(pair, d) { const r = pairResetDate(pair); return !r || d >= r; }
+// Дата, С КОТОРОЙ считается долг к отдаче (перенос). Всё строго раньше неё в
+// перенос НЕ идёт — старый долг не тянется. Перенос работает с этой даты и дальше.
+const DEBT_CARRY_START = '2026-06-30';
 // Текущая версия схемы данных. Объявлена ДО loadState(), т.к. миграция к ней
 // обращается на старте (иначе обращение в «мёртвой зоне» рушит загрузку и
 // данные молча сбрасываются в пустое состояние).
@@ -2008,7 +2011,7 @@ function pairWeekDebt(dayStr, pairName) {
   const targetWeek = weekMondayStr(dayStr);
   // Учитываем только дни этой пары не раньше её даты обнуления (перенос до неё
   // не тянется). Для Вейс(рук)-Рынок всё до 30 июня 2026 отбрасывается.
-  const allDays = Object.keys(state.days).sort().filter(d => pairDayCounts(pair, d));
+  const allDays = Object.keys(state.days).sort().filter(d => pairDayCounts(pair, d) && d >= DEBT_CARRY_START);
   // Недели по возрастанию, не позже недели текущего дня
   const weeks = [...new Set(allDays.map(weekMondayStr))].filter(w => w <= targetWeek).sort();
   // Перенос: gross1/gross2 — валовое начисление к отдаче по основной и второй
