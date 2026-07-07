@@ -1555,8 +1555,9 @@ const PAIR_RESET_DATE = { 'Вейс(рук)-Рынок': '2026-06-30' };
 function pairResetDate(pair) { return PAIR_RESET_DATE[(pair || '').trim()] || null; }
 // true, если день d нужно учитывать для пары (т.е. d не раньше даты обнуления).
 function pairDayCounts(pair, d) { const r = pairResetDate(pair); return !r || d >= r; }
-// Дата, С КОТОРОЙ считается долг к отдаче (перенос). Всё строго раньше неё в
-// перенос НЕ идёт — старый долг не тянется. Перенос работает с этой даты и дальше.
+// ГЛОБАЛЬНАЯ ДАТА ОТСЕЧКИ. Всё строго раньше неё отсечено и НЕ участвует в
+// расчётах — ни в долге к отдаче (перенос), ни в переходящем остатке (касса).
+// Цепочка переходящего остатка начинается с этой даты; дни до неё не трогаются.
 const DEBT_CARRY_START = '2026-06-30';
 // Текущая версия схемы данных. Объявлена ДО loadState(), т.к. миграция к ней
 // обращается на старте (иначе обращение в «мёртвой зоне» рушит загрузку и
@@ -1865,11 +1866,12 @@ function getDay(d) {
 function recalcCarryoversAfter(d) {
   // Ручной режим: автопересчёт на паузе — ничего не трогаем
   if (state.manualMode === true) return;
-  const allDays = Object.keys(state.days).sort();
+  // Только дни С ОТСЕЧКИ и позже — старые дни отсечены, в цепочку не входят.
+  const allDays = Object.keys(state.days).sort().filter(x => x >= DEBT_CARRY_START);
   for (let i = 0; i < allDays.length; i++) {
     const day = allDays[i];
     if (day <= d) continue;                 // только дни строго ПОСЛЕ d
-    if (i === 0) continue;                   // нет предыдущего дня с данными
+    if (i === 0) continue;                   // первый день после отсечки — опора, не трогаем
     // Ручной carryover — опорная точка, не трогаем (цепочка продолжается после него)
     if (state.days[day].carryoverManual === true) continue;
     // Предыдущий день С ДАННЫМИ = allDays[i-1] (мостим календарные пропуски)
@@ -1887,6 +1889,7 @@ function getPrevDayStr(d) {
 function prevDayWithData(d) {
   let best = null;
   for (const k in state.days) {
+    if (k < DEBT_CARRY_START) continue;   // дни до отсечки не участвуют в цепочке кассы
     if (k < d && (best === null || k > best)) best = k;
   }
   return best;
@@ -3137,7 +3140,8 @@ function recalcAllCarryovers() {
     showToast('✋ Ручной режим: пересчёт на паузе. Выключи его кнопкой в шапке, чтобы пересчитать.', true);
     return 'manual';
   }
-  const allDays = Object.keys(state.days).sort();
+  // Только дни С ОТСЕЧКИ и позже — старые дни отсечены, не пересчитываем.
+  const allDays = Object.keys(state.days).sort().filter(x => x >= DEBT_CARRY_START);
   if (!allDays.length) { showToast('Нет данных для пересчёта', true); return 'nodata'; }
 
   const choice = prompt(
