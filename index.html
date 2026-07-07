@@ -1816,15 +1816,19 @@ function migrateState(s) {
   // ВАЖНО: после умной разметки carryoverManual делаем мягкий пересчёт цепочки.
   // Это исправит дни, у которых остаток "застрял" со старой версии.
   // Не трогаем дни, помеченные как "вручную" (опорные точки).
+  // УВАЖАЕМ ОТСЕЧКУ (DEBT_CARRY_START): всё до неё — ноль; первый день эпохи
+  // стартует с нуля (старое накопление НЕ подтягивается через отсечку).
   const sortedDays = Object.keys(s.days).sort();
   for (const d of sortedDays) {
     const day = s.days[d];
+    if (d < DEBT_CARRY_START) { day.carryover = 0; continue; }  // до отсечки (29 июня и раньше) — НОЛЬ
     if (day.carryoverManual === true) continue;
     const prev = prevDayStr(d);
-    if (s.days[prev]) {
-      const prevBalance = localCalc(s.days[prev]);
-      day.carryover = prevBalance;
+    if (prev >= DEBT_CARRY_START && s.days[prev]) {
+      day.carryover = localCalc(s.days[prev]); // наследуем ВНУТРИ эпохи
     }
+    // Первый день эпохи (30 июня; prev до отсечки) — остаток НЕ трогаем: это
+    // твоя стартовая касса, введённая на 30 июня. Через отсечку не тянем и не занулям.
   }
 
   return s;
