@@ -2727,47 +2727,56 @@ function pairClosedDebt(dayStr, pairName) {
   return { gross1, gross2, has2, received, remaining, remaining2, pct1, pct2 };
 }
 
-// ЕДИНЫЙ расчёт «Задолженность по парам за неделю»: только ТЕКУЩАЯ неделя,
-// после %, за вычетом выданного на руки; полностью выданная пара уходит.
-// Ручные коррекции недели (✏️ weekDebtOverrides) заменяют/добавляют/убирают пару.
-// ОДИН источник и для блока внизу, и для плитки «Долг к отдаче сегодня» — поэтому
-// их суммы ВСЕГДА совпадают. Вейс(рук)-Рынок — обычная пара (обнуление учтено
-// в pairWeekAccruals/pairWeekReceived). Возвращает { rows, total }.
+// ЕДИНЫЙ расчёт долга к отдаче по парам. Для каждой пары — непогашенный остаток
+// С ПЕРЕНОСОМ (pairWeekDebt): приход после % минус выданное, накопительно по
+// неделям. Долг ДЕРЖИТСЯ, пока пару физически не закроют выдачами (remaining ≤ 0);
+// закрытая пара исчезает. НЕ обнуляется при переходе недели.
+// Ручные коррекции (✏️ weekDebtOverrides) текущей недели замещают расчёт.
+// ОДИН источник и для блока «Задолженность по парам», и для плитки «Долг к отдаче
+// сегодня» — поэтому их суммы ВСЕГДА совпадают. Вейс(рук)-Рынок — обычная пара
+// (обнуление до 30.06.2026 учтено внутри pairWeekDebt). Возвращает { rows, total }.
 function computeWeekPairDebt() {
-  const accr = pairWeekAccruals(currentDate);
   const thisWeek = weekMondayStr(currentDate);
-  const rows = [];
-  Object.keys(accr).forEach(p => {
-    const a = accr[p];
-    if (!a || a.v1 <= 0) return;
-    const received = pairWeekReceived(currentDate, p);
-    const rem = Math.max(0, r100(a.v1 - received));
-    if (rem <= 0) return;                 // всё выдано — пара уходит
-    const frac = a.v1 > 0 ? rem / a.v1 : 0;
-    const v2 = (a.has2 && a.v2 !== null && a.v2 !== undefined) ? r100(a.v2 * frac) : null;
-    rows.push({ name: p, v1: rem, v2, has2: a.has2 && v2 !== null,
-                pct1: a.pct1, pct2: a.pct2, carry: false, manual: false });
-  });
-  // Ручные коррекции недели (✏️): заменяют расчётную сумму / добавляют / убирают.
   const ov = state.weekDebtOverrides || {};
+  const rows = [];
+  const seen = new Set();
+  allClientPairs().forEach(pair => {
+    if (!isClientPair(pair)) return;
+    seen.add(pair);
+    // Ручная сумма (✏️) текущей недели ЗАМЕЩАЕТ расчёт и становится основной.
+    const o = ov[thisWeek + '::' + pair];
+    if (o && o.v1 !== null && o.v1 !== undefined) {
+      if (o.v1 <= 0) return;                        // ручной ноль — пара уходит
+      rows.push({ name: pair, v1: r100(o.v1),
+                  v2: (o.v2 !== null && o.v2 !== undefined) ? r100(o.v2) : null,
+                  has2: (o.v2 !== null && o.v2 !== undefined),
+                  pct1: null, pct2: null, carry: false, manual: true });
+      return;
+    }
+    // Непогашенный остаток С ПЕРЕНОСОМ: держится, пока пара физически не закрыта
+    // выдачами (remaining ≤ 0). Закрытая пара исчезает.
+    const d = pairWeekDebt(currentDate, pair);
+    const rem = r100(d.remaining);
+    if (rem <= 0) return;
+    rows.push({
+      name: pair, v1: rem,
+      v2: (d.has2 && d.remaining2 > 0) ? r100(d.remaining2) : null,
+      has2: d.has2 && d.remaining2 > 0,
+      pct1: d.pct1, pct2: d.pct2, carry: false, manual: false
+    });
+  });
+  // Ручная сумма для пары, которой нет среди клиентов/данных — добавляем отдельно.
   for (const key in ov) {
     const sep = key.indexOf('::');
     if (sep < 0 || key.slice(0, sep) !== thisWeek) continue;
     const pname = key.slice(sep + 2);
+    if (seen.has(pname)) continue;
     const o = ov[key] || {};
-    if (o.v1 === null || o.v1 === undefined) continue;
-    const idx = rows.findIndex(r => r.name === pname);
-    if (o.v1 <= 0) { if (idx >= 0) rows.splice(idx, 1); continue; }
-    if (idx >= 0) {
-      rows[idx].v1 = r100(o.v1);
-      if (o.v2 !== null && o.v2 !== undefined) { rows[idx].v2 = r100(o.v2); rows[idx].has2 = true; }
-      rows[idx].manual = true;
-    } else {
-      rows.push({ name: pname, v1: r100(o.v1),
-                  v2: (o.v2 !== null && o.v2 !== undefined) ? r100(o.v2) : null,
-                  has2: (o.v2 !== null && o.v2 !== undefined),
-                  pct1: null, pct2: null, carry: false, manual: true });
-    }
+    if (o.v1 === null || o.v1 === undefined || o.v1 <= 0) continue;
+    rows.push({ name: pname, v1: r100(o.v1),
+                v2: (o.v2 !== null && o.v2 !== undefined) ? r100(o.v2) : null,
+                has2: (o.v2 !== null && o.v2 !== undefined),
+                pct1: null, pct2: null, carry: false, manual: true });
   }
   rows.sort((x, y) => y.v1 - x.v1);
   const total = rows.reduce((s, r) => s + r.v1, 0);
@@ -2775,13 +2784,10 @@ function computeWeekPairDebt() {
 }
 
 // Блок «Задолженность по парам за неделю».
-// ЛОГИКА (зафиксирована): это ТОЛЬКО ТЕКУЩАЯ неделя, БЕЗ переноса прошлых.
-//  • Показывается накопительный итог по парам за текущую неделю (пн–пт, после %)
-//    ЗА ВЫЧЕТОМ выданного на руки на этой же неделе. Полностью выданная пара
-//    (остаток ≤ 0) из блока уходит.
-//  • Перенос непогашенного долга прошлых недель здесь НЕ считается — для этого
-//    есть отдельная плитка «Долг к отдаче сегодня» (computeDebtOut/pairWeekDebt).
-//  • Вейс(рук)-Рынок с 30.06.2026 — обычная пара в этом же потоке (без ↪ переноса).
+// ЛОГИКА: непогашенный долг по парам С ПЕРЕНОСОМ (единый расчёт computeWeekPairDebt,
+// тот же, что в плитке «Долг к отдаче сегодня» — суммы совпадают). Долг держится,
+// пока пару не закроют физически выдачами; тогда пара уходит. Не обнуляется при
+// переходе недели. Вейс(рук)-Рынок — обычная пара (обнуление до 30.06.2026 учтено).
 function renderWeekDebtSummary() {
   const box = document.getElementById('week-debt-summary');
   if (!box) return;
@@ -2827,7 +2833,7 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %) за вычетом выданного на руки. Выдача на руки по паре уменьшает её сумму на выданное; полностью выданная пара уходит. Вейс(рук)-Рынок с 30.06.2026 считается как обычная пара (без переноса).${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    <div class="wds-foot">Непогашенный долг по парам (после %) с ПЕРЕНОСОМ: держится, пока пару не закроют физически выдачами — при переходе недели не обнуляется. Выдача на руки уменьшает долг; полностью закрытая пара уходит. Совпадает с плиткой «Долг к отдаче сегодня». Вейс(рук)-Рынок — обычная пара (обнуление до 30.06.2026 учтено).${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
 }
 
@@ -2890,7 +2896,7 @@ function openDebtOutModal() {
             <span class="wds-total">всего к отдаче: <b style="color:#ff8a4a">${fmt(total)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">Непогашенный долг к отдаче по каждой паре на текущий день: нарастающий итог прихода после % за все незакрытые недели (с переносом непогашенного остатка) за вычетом выданного на руки. Проценты (13%, 15% и т.п.) — реальные ставки пары. Вейс(рук)-Рынок считается с 30.06.2026.</div>
+          <div class="wds-foot">Непогашенный долг к отдаче по каждой паре с ПЕРЕНОСОМ: приход после % минус выданное, накопительно по неделям. Держится, пока пару не закроют физически выдачами; закрытая пара исчезает. При переходе недели не обнуляется. Совпадает с блоком «Задолженность по парам за неделю». Проценты (13%, 15% и т.п.) — реальные ставки пары. Вейс(рук)-Рынок считается с 30.06.2026.</div>
         </div>`;
     }
   }
