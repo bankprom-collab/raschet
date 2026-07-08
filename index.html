@@ -1695,46 +1695,9 @@ function migrateState(s) {
     }
   }
 
-  // Нормализация Вейс. В пару «Вейс(рук)-Рынок» сводим ТОЛЬКО то, что относится
-  // к Рынку; голый «Вейс(рук)» оставляем отдельной парой. Разделяем так:
-  //   • ПРИХОДЫ — по наличию второго процента (14%): настоящие записи по Рынку
-  //     всегда с двумя процентами (12% и 14%), а голый «Вейс(рук)» — только с одним.
-  //     (Имя не годится: часть приходов по Рынку записана как «Вейс(рук)».)
-  //   • ВЫДАЧИ и база клиентов — по имени: упоминание Рынка («Рынок/Рынка/Рынку»).
-  // Идемпотентно и работает, даже если раньше всё было слито в одну пару.
-  {
-    const RYNOK = 'Вейс(рук)-Рынок';
-    const BARE = 'Вейс(рук)';
-    const isWeis = (n) => !!(n && n.includes('Вейс(рук)'));
-    const refsRynok = (n) => !!(n && n.includes('Рын'));
-    const normIn = (r) => {
-      if (!isWeis(r.client)) return r.client;
-      return (r.pct2 !== null && r.pct2 !== undefined) ? RYNOK : BARE;
-    };
-    const normName = (n) => {
-      if (!isWeis(n)) return n;
-      return refsRynok(n) ? RYNOK : BARE;
-    };
-    Object.keys(s.days).forEach(d => {
-      const day = s.days[d];
-      if (!day) return;
-      if (Array.isArray(day.in)) day.in.forEach(r => { if (r.client) r.client = normIn(r); });
-      if (Array.isArray(day.out)) day.out.forEach(r => { if (r.client) r.client = normName(r.client); });
-    });
-    if (Array.isArray(s.clients)) {
-      s.clients = s.clients.map(normName).filter((v, i, a) => a.indexOf(v) === i);
-    }
-    if (s.tagWeekCorrections && typeof s.tagWeekCorrections === 'object') {
-      const fixed = {};
-      for (const key in s.tagWeekCorrections) {
-        const sep = key.indexOf('::');
-        let nk = key;
-        if (sep >= 0) nk = key.slice(0, sep) + '::' + normName(key.slice(sep + 2));
-        fixed[nk] = s.tagWeekCorrections[key];
-      }
-      s.tagWeekCorrections = fixed;
-    }
-  }
+  // (Убрана «Нормализация Вейс» — разовый чистильщик старых данных, который
+  // переписывал ЛЮБУЮ пару с «Вейс(рук)» в «Вейс(рук)-Рынок». Он ломал новые
+  // пары вида «Вейс(рук)-Ленин». Теперь такие пары — обычные, ничего не сводится.)
 
   // База клиентов — ТОЛЬКО пары «клиент-получатель». Одиночные имена удаляем.
   // Пополняем парами, встречающимися в данных. Одиночные из данных НЕ добавляем.
@@ -2720,7 +2683,7 @@ function computeWeekPairDebt() {
   pairsSet.forEach(p => {
     const a = accr[p];
     if (!a || a.v1 <= 0) return;
-    if ((p || '').includes('Вейс(рук)')) return; // Вейс — отдельно, с переносом
+    if ((p || '').trim() === 'Вейс(рук)-Рынок') return; // только Рынок — отдельно, с переносом; прочие «Вейс(рук)-…» — обычные
     const thisWeekVals = [];
     for (const d of Object.keys(state.days).sort()) {
       if (d > currentDate || weekMondayStr(d) !== thisWeek || !isWeekday(d)) continue;
@@ -2784,7 +2747,7 @@ function computeWeekPairDebt() {
         rows.push({ name: pname, v1: r100(o.v1),
                     v2: (o.v2 !== null && o.v2 !== undefined) ? r100(o.v2) : null,
                     has2: (o.v2 !== null && o.v2 !== undefined),
-                    pct1: null, pct2: null, carry: pname.includes('Вейс(рук)'), manual: true });
+                    pct1: null, pct2: null, carry: pname.trim() === 'Вейс(рук)-Рынок', manual: true });
       }
     }
   }
