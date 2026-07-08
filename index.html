@@ -785,7 +785,7 @@
         <div class="s">Дневник: приходы, выдачи, переходящий остаток. Здесь вводишь данные.</div>
       </div>
       <div class="board-tile feature" id="tileDebtOut" style="--tile-c:#ff8a4a" onclick="openDebtOutModal()">
-        <div class="ic">💸</div><div class="t">Долг к отдаче сегодня</div>
+        <div class="ic">💸</div><div class="t">Сумма к отдаче</div>
         <div class="s" id="tileDebtOutBody">—</div>
       </div>
       <div class="board-tile" style="--tile-c:#818cf8" onclick="openClientPickModal()">
@@ -1002,7 +1002,7 @@
 <!-- ── ДОЛГ К ОТДАЧЕ СЕГОДНЯ ── -->
 <div class="modal-overlay" id="debt-out-modal">
   <div class="modal" style="max-width:640px">
-    <h2 style="color:#ff8a4a">💸 Долг к отдаче сегодня по парам</h2>
+    <h2 style="color:#ff8a4a">💸 Сумма к отдаче по парам</h2>
     <div id="debt-out-body"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('debt-out-modal')">Закрыть</button>
@@ -1779,15 +1779,11 @@ function saveState() {
 }
 function getDay(d) {
   if (!state.days[d]) state.days[d] = { carryover: null, out: [], in: [], note: '', carryoverManual: false, curatorPaid: 0 };
-  // Auto-inherit carryover from previous day if not set
+  // Auto-inherit carryover from the last day WITH DATA (мостит пропуски: если
+  // перескочили календарём через незаполненный день, остаток не обнуляется).
   if (state.days[d].carryover === null) {
-    const prev = getPrevDayStr(d);
-    if (prev && state.days[prev]) {
-      const prevBalance = calcBalance(prev);
-      state.days[d].carryover = prevBalance;
-    } else {
-      state.days[d].carryover = 0;
-    }
+    const prev = prevDayWithData(d);
+    state.days[d].carryover = prev ? calcBalance(prev) : 0;
   }
   return state.days[d];
 }
@@ -1800,26 +1796,25 @@ function recalcCarryoversAfter(d) {
   // Ручной режим: автопересчёт на паузе — ничего не трогаем
   if (state.manualMode === true) return;
   const allDays = Object.keys(state.days).sort();
-  // Берём только дни строго ПОСЛЕ d
-  const afterDays = allDays.filter(x => x > d);
-  for (const day of afterDays) {
-    const prev = getPrevDayStr(day);
-    if (!state.days[prev]) continue;
-    // Если carryover установлен вручную — не трогаем и НЕ продолжаем дальше,
-    // потому что ручной carryover разрывает цепочку
-    if (state.days[day].carryoverManual === true) {
-      // продолжаем пересчёт после этого дня — он сам стартовая точка
-      continue;
-    }
-    const prevBalance = calcBalance(prev);
-    state.days[day].carryover = prevBalance;
+  for (let i = 0; i < allDays.length; i++) {
+    const day = allDays[i];
+    if (day <= d) continue;                 // только дни строго ПОСЛЕ d
+    if (i === 0) continue;                   // нет предыдущего дня с данными
+    // Ручной carryover — опорная точка, не трогаем (цепочка продолжается после него)
+    if (state.days[day].carryoverManual === true) continue;
+    // Предыдущий день С ДАННЫМИ = allDays[i-1] (мостит календарные пропуски)
+    state.days[day].carryover = calcBalance(allDays[i - 1]);
   }
 }
-function getPrevDayStr(d) {
-  // Привязка к полудню, чтобы сдвиг часового пояса не «перепрыгивал» день
-  const dt = new Date(d + 'T12:00:00');
-  dt.setDate(dt.getDate() - 1);
-  return dt.toISOString().slice(0,10);
+// Последний день С ДАННЫМИ строго раньше d. Мостит пропуски: выходные без
+// записей, дни, до которых перескочили календарём/поиском по дате. Без этого
+// переходящий остаток при переходе через день без данных молча обнулялся бы.
+function prevDayWithData(d) {
+  let best = null;
+  for (const k in state.days) {
+    if (k < d && (best === null || k > best)) best = k;
+  }
+  return best;
 }
 function calcBalance(d) {
   const day = state.days[d];
@@ -2395,8 +2390,8 @@ function render() {
   // Проверка расхождения с итогом предыдущего дня
   const mismatchEl = document.getElementById('carryover-mismatch');
   if (mismatchEl) {
-    const prev = getPrevDayStr(currentDate);
-    if (prev && state.days[prev]) {
+    const prev = prevDayWithData(currentDate);
+    if (prev) {
       const prevBalance = calcBalance(prev);
       const diff = co - prevBalance;
       if (Math.abs(diff) > 0.5) {
@@ -2597,7 +2592,7 @@ function pairWeekReceived(dayStr, pairName) {
   const thisWeek = weekMondayStr(dayStr);
   let rec = 0;
   for (const d of Object.keys(state.days)) {
-    if (weekMondayStr(d) !== thisWeek) continue;
+    if (d > dayStr || weekMondayStr(d) !== thisWeek) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.out)) continue;
     dd.out.forEach(o => {
@@ -2607,66 +2602,14 @@ function pairWeekReceived(dayStr, pairName) {
   return rec;
 }
 
-// ── ДОЛГ ПО ЗАКРЫТЫМ НЕДЕЛЯМ ────────────────────────────────────────────────
-// НОВАЯ ЛОГИКА: выдачи на руки гасят суммы ПРОШЛЫХ (закрытых) недель.
-// Неделя «закрывается» в понедельник следующей недели. Накопления ТЕКУЩЕЙ
-// недели в долг НЕ входят — они станут долгом к выдаче только со следующего
-// понедельника. Непогашенный остаток старых недель переносится дальше.
-// Долг = сумма начислений ВСЕХ закрытых недель (после %, с учётом ручных
-// коррекций ✎ этих недель) − ВСЕ выдачи на руки по паре (по день dayStr
-// включительно). Ниже нуля не уходит. Второй процент гасится пропорционально.
-function pairClosedDebt(dayStr, pairName) {
-  const pair = (pairName || '').trim();
-  if (!pair) return { gross1: 0, gross2: 0, has2: false, received: 0, remaining: 0, remaining2: 0, pct1: null, pct2: null };
-  const targetWeek = weekMondayStr(dayStr);
-  let gross1 = 0, gross2 = 0, received = 0;
-  let pct1 = null, pct2 = null, has2 = false;
-  const allDays = Object.keys(state.days).sort();
-  for (const d of allDays) {
-    if (d > dayStr) break;
-    const dd = state.days[d];
-    if (!dd) continue;
-    // Выдачи на руки гасят долг в любой день (по dayStr включительно)
-    if (Array.isArray(dd.out)) {
-      dd.out.forEach(o => { if ((o.client || '').trim() === pair) received += (o.amount || 0); });
-    }
-    // Начисления к отдаче — только из ЗАКРЫТЫХ недель (раньше текущей), пн–пт
-    if (weekMondayStr(d) >= targetWeek || !isWeekday(d) || !Array.isArray(dd.in)) continue;
-    dd.in.forEach(r => {
-      if ((r.client || '').trim() !== pair) return;
-      gross1 += calcInRowFinal(r);
-      if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
-      if (hasSecondPct(r)) { gross2 += r100(r.total2); has2 = true; pct2 = r.pct2; }
-    });
-  }
-  // Ручные коррекции (✎) закрытых недель — это стартовые значения тех недель,
-  // прибавляем их к валовому начислению
-  const corr = state.tagWeekCorrections || {};
-  for (const key in corr) {
-    const sep = key.indexOf('::');
-    if (sep < 0 || key.slice(sep + 2) !== pair) continue;
-    if (key.slice(0, sep) >= targetWeek) continue; // текущая неделя долг не трогает
-    const c = corr[key] || {};
-    if (c.v1 !== null && c.v1 !== undefined) gross1 += c.v1;
-    if (c.v2 !== null && c.v2 !== undefined) { gross2 += c.v2; has2 = true; }
-  }
-  const remaining = Math.max(0, r100(gross1 - received));
-  const frac = gross1 > 0 ? remaining / gross1 : 0;
-  const remaining2 = has2 ? r100(gross2 * frac) : 0;
-  return { gross1, gross2, has2, received, remaining, remaining2, pct1, pct2 };
-}
-
-// Блок «Задолженность по парам за неделю».
-// ЛОГИКА (зафиксирована):
-//  • Текущая неделя — НАКОПИТЕЛЬНЫЙ итог по парам (пн–пт, после %): приходы
-//    от клиентов копятся внизу. Выдачи на руки текущую неделю НЕ ТРОГАЮТ.
-//  • Выдачи на руки гасят только суммы ПРОШЛЫХ (закрытых) недель.
-//  • Показывается: непогашенный остаток прошлых недель (метка ↪ перенос)
-//    + накопление текущей недели. Когда старое выдано полностью — остаётся
-//    только накопление текущей недели.
-// ЕДИНЫЙ расчёт «Задолженность по парам за неделю». Возвращает { rows, total }.
-// Один источник и для блока внизу, и для плитки «Долг к отдаче сегодня» —
-// поэтому их суммы ВСЕГДА совпадают.
+// ЕДИНЫЙ расчёт «Задолженность по парам за неделю»: для каждой пары — начислено
+// за текущую неделю (пн–пт, после %) минус реально выдано ей на руки за эту же
+// неделю (по currentDate включительно). Пара с остатком ≤ 0 в список не входит.
+// По каждой паре дополнительно v2 (после 2-го %, = v1 если второй % не задан)
+// и diff = v1 - v2 («нам должны» минус «мы должны отдать»).
+// Возвращает { rows, total (=Σv1, «нам должны»), total2 (=Σv2, «мы должны
+// отдать»), totalDiff (=Σdiff) }. Один источник и для блока внизу, и для
+// плитки «Сумма к отдаче» на доске — поэтому их суммы ВСЕГДА совпадают.
 function computeWeekPairDebt() {
   // Накопление текущей недели (выдачи его не трогают)
   const accr = pairWeekAccruals(currentDate);
@@ -2684,30 +2627,14 @@ function computeWeekPairDebt() {
     const a = accr[p];
     if (!a || a.v1 <= 0) return;
     if ((p || '').trim() === 'Вейс(рук)-Рынок') return; // только Рынок — отдельно, с переносом; прочие «Вейс(рук)-…» — обычные
-    const thisWeekVals = [];
-    for (const d of Object.keys(state.days).sort()) {
-      if (d > currentDate || weekMondayStr(d) !== thisWeek || !isWeekday(d)) continue;
-      const dd = state.days[d];
-      if (!dd || !Array.isArray(dd.in)) continue;
-      dd.in.forEach(r => {
-        if ((r.client || '').trim() === p) thisWeekVals.push(r100(calcInRowFinal(r)));
-      });
-    }
-    let rem = a.v1;
-    for (const d of Object.keys(state.days).sort()) {
-      if (d > currentDate || weekMondayStr(d) !== thisWeek) continue;
-      const dd = state.days[d];
-      if (!dd || !Array.isArray(dd.out)) continue;
-      dd.out.forEach(o => {
-        if ((o.client || '').trim() !== p) return;
-        const amt = r100(o.amount || 0);
-        if (amt <= 0) return;
-        if (amt === r100(rem)) { rem = 0; return; }
-        const idx = thisWeekVals.indexOf(amt);
-        if (idx >= 0) { rem = r100(rem - amt); thisWeekVals.splice(idx, 1); }
-      });
-    }
-    rem = Math.max(0, rem);
+    // Долг = начислено за неделю МИНУС реально выдано этой паре на этой неделе
+    // (по currentDate включительно). Раньше выдача гасила долг только если её
+    // сумма СОВПАДАЛА С точностью до рубля с начисленным (или с одной из
+    // дневных сумм) — случайное совпадение цифр у другой выдачи той же пары
+    // могло ошибочно обнулить ещё не выплаченный долг. Теперь просто вычитаем
+    // фактически выданное — предсказуемо и без угадывания.
+    const received = pairWeekReceived(currentDate, p);
+    const rem = Math.max(0, r100(a.v1 - received));
     if (rem <= 0) return;
     const frac = a.v1 > 0 ? rem / a.v1 : 0;
     const v2 = (a.has2 && a.v2 !== null && a.v2 !== undefined) ? r100(a.v2 * frac) : null;
@@ -2752,9 +2679,18 @@ function computeWeekPairDebt() {
     }
   }
 
+  // По каждой паре — разница между суммой после 1-го % («нам должны») и суммой
+  // после 2-го % («мы должны отдать»). Если второй % не задан — считаем, что
+  // второго вычета нет (v2 = v1), разница = 0 (но сама строка разницы есть всегда).
+  rows.forEach(r => {
+    if (r.v2 === null || r.v2 === undefined) r.v2 = r.v1;
+    r.diff = r100(r.v1 - r.v2);
+  });
   rows.sort((x, y) => y.v1 - x.v1);
-  const total = rows.reduce((s, r) => s + r.v1, 0);
-  return { rows, total };
+  const total = rows.reduce((s, r) => s + r.v1, 0);       // сумма, которую нам должны (после 1-го %)
+  const total2 = rows.reduce((s, r) => s + r.v2, 0);      // сумма, которую мы должны отдать (после 2-го %)
+  const totalDiff = rows.reduce((s, r) => s + r.diff, 0); // общая разница
+  return { rows, total, total2, totalDiff };
 }
 
 function renderWeekDebtSummary() {
@@ -2765,17 +2701,12 @@ function renderWeekDebtSummary() {
   // Подпись процента: 13 → «13», 15.5 → «15,5»
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
 
-  const { rows, total } = computeWeekPairDebt();
+  const { rows, total, total2, totalDiff } = computeWeekPairDebt();
   if (!rows.length) { box.innerHTML = ''; return; }
 
-  const totalOwed = total;
   const body = rows.map(r => {
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
-    let sec = '';
-    if (r.has2 && r.v2 !== null && r.v2 !== undefined) {
-      const lbl2 = r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%';
-      sec = ` · ${lbl2}: <b style="color:#ff8a4a">${fmt(r.v2)}</b>`;
-    }
+    const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
     const tag = r.carry ? ` <span style="font-size:10px;color:#a78bfa">↪ перенос</span>` : '';
     const man = r.manual ? ` <span style="font-size:10px;color:#ff8a4a">✋ ручная</span>` : '';
     const editBtn = (state.manualMode === true)
@@ -2783,11 +2714,11 @@ function renderWeekDebtSummary() {
       : '';
     return `<div class="wds-row">
       <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}</span>
-      <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b>${sec}</span>
+      <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
     </div>`;
   }).join('');
 
-  const totalLine = `всего к отдаче: <b style="color:#ff8a4a">${fmt(totalOwed)}</b>`;
+  const totalLine = `нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>`;
 
   box.innerHTML = `<div class="week-debt-block${isFri ? ' fri' : ''}">
     <div class="wds-head">
@@ -2795,60 +2726,66 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">Нарастающий итог по парам за текущую неделю (пн–пт, после %). Выдача на руки гасит начисленную сумму пары, когда совпадает с ней (или с её недельным итогом) — выдано, пара уходит. Прочие выдачи относятся к старым долгам и текущую неделю не трогают. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
 }
 
-// ── ПЛИТКА «ДОЛГ К ОТДАЧЕ СЕГОДНЯ» ───────────────────────────────────────────
-// Показывает ровно то же, что блок «Задолженность по парам за неделю».
+// ── ПЛИТКА «СУММА К ОТДАЧЕ» ──────────────────────────────────────────────────
+// Показывает ровно то же, что блок «Задолженность по парам за неделю»: по
+// каждой паре — сумму после 1-го % («нам должны»), после 2-го % («мы должны
+// отдать») и разницу между ними.
 function computeDebtOut() { return computeWeekPairDebt(); }
 
 function renderDebtOutTile() {
   const body = document.getElementById('tileDebtOutBody');
   if (!body) return;
-  const { rows, total } = computeWeekPairDebt();
-  if (!rows.length) { body.innerHTML = 'Долга к отдаче сегодня нет.'; return; }
+  const { rows, total, total2, totalDiff } = computeWeekPairDebt();
+  if (!rows.length) { body.innerHTML = 'Сумм к отдаче сегодня нет.'; return; }
   const top = rows.slice(0, 3).map(r =>
     `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
        <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
-       <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
+       <span style="text-align:right;white-space:nowrap">
+         <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
+         <span style="color:var(--muted);font-size:10px"> / </span>
+         <b style="color:#818cf8;font-family:var(--font-num)">${fmt(r.v2)}</b>
+       </span>
      </div>`).join('');
   const more = rows.length > 3
     ? `<div style="color:var(--muted);font-size:10.5px;margin-top:2px">…ещё ${rows.length - 3} — открыть</div>` : '';
   body.innerHTML =
-    `<div style="font-family:var(--font-num);font-size:20px;font-weight:700;color:#ff8a4a;margin-bottom:6px">${fmt(total)}</div>${top}${more}`;
+    `<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:6px;font-family:var(--font-num)">
+       <span style="font-size:15px;font-weight:700;color:#ff8a4a" title="Нам должны (после 1-го %)">${fmt(total)}</span>
+       <span style="font-size:15px;font-weight:700;color:#818cf8" title="Мы должны отдать (после 2-го %)">${fmt(total2)}</span>
+       <span style="font-size:15px;font-weight:700;color:var(--accent)" title="Разница">${fmt(totalDiff)}</span>
+     </div>${top}${more}`;
 }
 
 function openDebtOutModal() {
   const box = document.getElementById('debt-out-body');
   if (box) {
-    const { rows, total } = computeWeekPairDebt();
+    const { rows, total, total2, totalDiff } = computeWeekPairDebt();
     const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
     if (!rows.length) {
-      box.innerHTML = '<div style="color:var(--muted);padding:8px 0">Долга к отдаче сегодня нет.</div>';
+      box.innerHTML = '<div style="color:var(--muted);padding:8px 0">Сумм к отдаче сегодня нет.</div>';
     } else {
       const bodyRows = rows.map(r => {
         const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
-        let sec = '';
-        if (r.has2 && r.v2 != null) {
-          const lbl2 = r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%';
-          sec = ` · ${lbl2}: <b style="color:#ff8a4a">${fmt(r.v2)}</b>`;
-        }
+        const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
         const tag = r.carry ? ` <span style="font-size:10px;color:#a78bfa">↪ перенос</span>` : '';
         const man = r.manual ? ` <span style="font-size:10px;color:#ff8a4a">✋ ручная</span>` : '';
         return `<div class="wds-row">
           <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}</span>
-          <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b>${sec}</span>
+          <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
         </div>`;
       }).join('');
       box.innerHTML =
         `<div class="week-debt-block">
           <div class="wds-head">
-            <span>💸 Долг к отдаче · ${formatDateShort(currentDate)}</span>
-            <span class="wds-total">всего: <b style="color:#ff8a4a">${fmt(total)}</b></span>
+            <span>💸 Сумма к отдаче · ${formatDateShort(currentDate)}</span>
+            <span class="wds-total">нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">Долг к отдаче по парам на сегодня. Та же сумма, что в блоке «Задолженность по парам за неделю».</div>
+          <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними. Совпадает с блоком «Задолженность по парам за неделю».</div>
         </div>`;
     }
   }
@@ -3068,9 +3005,9 @@ function setCarryover() {
 function resetCarryover() {
   const day = getDay(currentDate);
   day.carryoverManual = false;
-  // Пересчитаем для текущего дня
-  const prev = getPrevDayStr(currentDate);
-  if (prev && state.days[prev]) {
+  // Пересчитаем для текущего дня — от последнего дня С ДАННЫМИ (мостит пропуски)
+  const prev = prevDayWithData(currentDate);
+  if (prev) {
     day.carryover = calcBalance(prev);
   } else {
     day.carryover = 0;
@@ -3106,8 +3043,8 @@ function recalcAllCarryovers() {
   for (let i = 0; i < allDays.length; i++) {
     const d = allDays[i];
     const day = state.days[d];
-    const prev = getPrevDayStr(d);
-    const hasPrev = !!state.days[prev];
+    const prev = i > 0 ? allDays[i - 1] : null;   // предыдущий день С ДАННЫМИ (мостит пропуски)
+    const hasPrev = !!prev;
 
     if (mode === 'soft') {
       // Пропускаем ручные и дни без предыдущего
@@ -4331,8 +4268,8 @@ function renderAudit() {
   let checkedCount = 0;
 
   for (const d of allDays) {
-    const prev = getPrevDayStr(d);
-    if (!state.days[prev]) continue;
+    const prev = prevDayWithData(d);
+    if (!prev) continue;
     checkedCount++;
     const prevBalance = calcBalance(prev);
     const currentCo = state.days[d].carryover || 0;
@@ -4389,8 +4326,8 @@ function goToDateFromAudit(d) {
 }
 
 function fixIssueFromAudit(d) {
-  const prev = getPrevDayStr(d);
-  if (!state.days[prev]) return;
+  const prev = prevDayWithData(d);
+  if (!prev) return;
   const prevBalance = calcBalance(prev);
   if (!confirm(`Подтянуть переходящий остаток ${formatDateShort(d)} с итога ${formatDateShort(prev)}?\n\nБудет установлено: ${fmt(prevBalance)}\n(было: ${fmt(state.days[d].carryover || 0)})`)) return;
   state.days[d].carryover = prevBalance;
