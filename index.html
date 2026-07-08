@@ -1606,10 +1606,16 @@ function migrateState(s) {
     }, 0);
     return co - outTotal + inTotal;
   };
+  // Последний день С ДАННЫМИ строго раньше d (мостит пропуски — как глобальная
+  // prevDayWithData, но работает с локальным `s`, т.к. на момент миграции это
+  // ещё не глобальный state). Раньше здесь была ЧИСТО КАЛЕНДАРНАЯ версия —
+  // не мостила пропуски и могла ошибочно помечать дни как «вручную».
   const prevDayStr = (d) => {
-    const dt = new Date(d + 'T12:00:00');
-    dt.setDate(dt.getDate() - 1);
-    return dt.toISOString().slice(0, 10);
+    let best = null;
+    for (const k in s.days) {
+      if (k < d && (best === null || k > best)) best = k;
+    }
+    return best;
   };
 
   // Если данные старее текущей версии — принудительно переопределяем carryoverManual
