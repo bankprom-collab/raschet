@@ -418,6 +418,43 @@
   .cm-paid-inp:focus { outline: none; border-color: #ffb74d; box-shadow: 0 0 0 2px rgba(255,183,77,.15); }
   .cm-paid-inp-amt { flex: 1; min-width: 120px; }
   .cm-paid-add { padding: 6px 14px !important; font-size: 12.5px !important; }
+  /* Партнёр — модалка расшаривания */
+  .ps-lbl {
+    display: block; font-size: 10.5px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em;
+    font-weight: 600; margin-bottom: 4px;
+  }
+  .ps-inp {
+    width: 100%; padding: 8px 12px;
+    background: rgba(167,139,250,.06);
+    border: 1px solid rgba(167,139,250,.25);
+    color: var(--text); border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+  }
+  .ps-inp:focus { outline: none; border-color: #a78bfa; box-shadow: 0 0 0 2px rgba(167,139,250,.15); }
+  .ps-preview-block {
+    padding: 10px 12px; background: rgba(167,139,250,.04);
+    border: 1px solid rgba(167,139,250,.2); border-radius: 8px;
+  }
+  .ps-preview-block .ph {
+    font-size: 10.5px; color: #a78bfa; text-transform: uppercase;
+    letter-spacing: .04em; font-weight: 700; margin-bottom: 8px;
+  }
+  .ps-pair-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 0; font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    border-bottom: 1px dashed rgba(255,255,255,.04);
+  }
+  .ps-pair-row:last-child { border-bottom: none; }
+  .ps-pair-row .amt { color: #a78bfa; font-weight: 700; }
+  .ps-pair-row .dt { color: var(--muted-bright); font-size: 11.5px; }
+  .ps-pair-row .no-dt { color: var(--muted); font-style: italic; font-size: 11px; }
+  .ps-total-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 0 0; margin-top: 4px; border-top: 1px solid rgba(167,139,250,.3);
+    font-weight: 700;
+  }
+  .ps-total-row .amt { color: #a78bfa; font-size: 14px; }
   @media print {
     body.printing-curator-mine .cm-paid-block {
       background: #fff !important; border-color: #ccc !important;
@@ -939,6 +976,10 @@
         <div class="ic">👔</div><div class="t">Куратор ко мне</div>
         <div class="s" id="tileCuratorMineBody">—</div>
       </div>
+      <div class="board-tile" style="--tile-c:#a78bfa" onclick="openPartnerShareModal()">
+        <div class="ic">📤</div><div class="t">Партнёру</div>
+        <div class="s">Ссылка для партнёра — его пары, суммы и числа отдачи. Пароль защищает данные.</div>
+      </div>
       <div class="board-tile" style="--tile-c:#818cf8" onclick="openClientPickModal()">
         <div class="ic">👤</div><div class="t">Выборка по клиентам</div>
         <div class="s">Движение по парам: пришло, %, выдано, остаток. С печатью.</div>
@@ -1157,6 +1198,52 @@
     <div id="debt-out-body"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('debt-out-modal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ССЫЛКА ДЛЯ ПАРТНЁРА ── -->
+<div class="modal-overlay" id="partner-share-modal">
+  <div class="modal" style="max-width:680px">
+    <h2 style="color:#a78bfa">📤 Ссылка для партнёра</h2>
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:14px;font-style:italic">
+      Партнёр получает ссылку и пароль. Открывает страницу
+      <b style="color:var(--muted-bright)">partner.html</b>, вводит пароль — видит
+      свои пары, суммы к отдаче (после 1-го %) и планируемые числа отдачи.
+      Данные зашифрованы паролем — без него ссылка бесполезна.
+    </div>
+
+    <label class="ps-lbl">Партнёр (получатель):</label>
+    <select id="ps-partner" class="ps-inp" onchange="updatePartnerPreview()">
+      <option value="">— выбери —</option>
+    </select>
+
+    <label class="ps-lbl" style="margin-top:10px">Пароль для партнёра:</label>
+    <div style="display:flex;gap:6px">
+      <input type="text" id="ps-password" class="ps-inp" placeholder="Придумай или используй прежний" oninput="updatePartnerPreview()">
+      <button class="btn btn-ghost" onclick="generatePartnerPassword()" title="Сгенерировать случайный">🎲</button>
+    </div>
+    <div style="font-size:10.5px;color:var(--muted);margin-top:4px;font-style:italic">
+      Отправь партнёру пароль отдельным сообщением. При обновлении ссылки — пароль можно оставить прежним.
+    </div>
+
+    <div id="ps-preview" style="margin-top:14px"></div>
+
+    <div id="ps-link-block" style="display:none;margin-top:14px">
+      <label class="ps-lbl">Ссылка (скопируй и отправь партнёру):</label>
+      <textarea id="ps-link" class="ps-inp" rows="3" readonly style="font-size:11px;resize:vertical"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="copyPartnerLink()"
+          style="background:#a78bfa;border-color:#a78bfa;color:#000;font-weight:700">📋 Скопировать ссылку</button>
+        <button class="btn btn-ghost" onclick="testPartnerLink()" title="Открыть в новой вкладке для проверки">🧪 Открыть для проверки</button>
+      </div>
+      <div id="ps-link-info" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="buildPartnerLink()"
+        style="background:#a78bfa;border-color:#a78bfa;color:#000;font-weight:700">🔗 Создать ссылку</button>
+      <button class="btn btn-ghost" onclick="closeModal('partner-share-modal')">Закрыть</button>
     </div>
   </div>
 </div>
@@ -2977,6 +3064,182 @@ function openDebtOutModal() {
   }
   const m = document.getElementById('debt-out-modal');
   if (m) m.classList.add('open');
+}
+
+// ── ПАРТНЁРСКАЯ ССЫЛКА (шифрование AES-GCM + PBKDF2) ────────────────────────
+// Уникальные получатели (вторые части пар) — по имени `Клиент-Получатель`.
+function collectPartners() {
+  const set = new Set();
+  const src = Array.isArray(state.clients) ? state.clients : [];
+  src.forEach(c => {
+    if (!c || typeof c !== 'string') return;
+    const idx = c.indexOf('-');
+    if (idx > 0 && idx < c.length - 1) set.add(c.slice(idx + 1).trim());
+  });
+  // Также из истории — на случай, если пара уже удалена из базы, но данные есть
+  Object.values(state.days || {}).forEach(day => {
+    ['in', 'out'].forEach(k => {
+      (day[k] || []).forEach(r => {
+        const c = r.client || '';
+        const idx = c.indexOf('-');
+        if (idx > 0 && idx < c.length - 1) set.add(c.slice(idx + 1).trim());
+      });
+    });
+  });
+  return Array.from(set).filter(Boolean).sort();
+}
+
+// Пары данного партнёра (получателя) — совпадение по второй части имени.
+// Ищем и в state.clients, и в фактических приходах/выдачах — партнёр может
+// иметь пары, которых уже нет в базе клиентов (появились как приходы «на лету»).
+function pairsForPartner(partner) {
+  const p = (partner || '').trim();
+  const set = new Set();
+  const check = (c) => {
+    if (!c || typeof c !== 'string') return;
+    const idx = c.indexOf('-');
+    if (idx <= 0) return;
+    if (c.slice(idx + 1).trim() === p) set.add(c);
+  };
+  (Array.isArray(state.clients) ? state.clients : []).forEach(check);
+  Object.values(state.days || {}).forEach(day => {
+    ['in', 'out'].forEach(k => (day[k] || []).forEach(r => check(r.client)));
+  });
+  return Array.from(set).sort();
+}
+
+// Расчёт партнёрской выгрузки: v1 (после 1-го %) + планируемая дата.
+// v1 берётся из существующего computeWeekPairDebt() — расчётной логики не меняем.
+function buildPartnerPayload(partner) {
+  const partnerPairs = new Set(pairsForPartner(partner));
+  const { rows } = computeWeekPairDebt();
+  const wk = weekMondayStr(currentDate);
+  const items = rows
+    .filter(r => partnerPairs.has(r.name))
+    .map(r => ({
+      pair: r.name,
+      amount: r.v1,  // сумма после 1-го % (то, что видит партнёр)
+      date: (state.debtOutDates || {})[wk + '::' + r.name] || null,
+    }));
+  return {
+    partner,
+    rows: items,
+    issuedAt: currentDate + 'T12:00:00',
+    v: 1,
+  };
+}
+
+// Шифрование: base64url(salt[16] | iv[12] | ciphertext)
+function bytesToB64Url(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+async function derivePartnerKey(password, salt) {
+  const km = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' },
+    km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function encryptForPartner(obj, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await derivePartnerKey(password, salt);
+  const pt = new TextEncoder().encode(JSON.stringify(obj));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, pt));
+  const out = new Uint8Array(16 + 12 + ct.length);
+  out.set(salt, 0); out.set(iv, 16); out.set(ct, 28);
+  return bytesToB64Url(out);
+}
+
+// UI ─────────────────────────────────────────────────────────────────────────
+function openPartnerShareModal() {
+  const sel = document.getElementById('ps-partner');
+  const list = collectPartners();
+  sel.innerHTML = '<option value="">— выбери —</option>' +
+    list.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+  document.getElementById('ps-password').value = '';
+  document.getElementById('ps-preview').innerHTML = '';
+  document.getElementById('ps-link-block').style.display = 'none';
+  document.getElementById('partner-share-modal').classList.add('open');
+}
+
+function updatePartnerPreview() {
+  const partner = document.getElementById('ps-partner').value;
+  const box = document.getElementById('ps-preview');
+  document.getElementById('ps-link-block').style.display = 'none';
+  if (!partner) { box.innerHTML = ''; return; }
+  const payload = buildPartnerPayload(partner);
+  if (!payload.rows.length) {
+    box.innerHTML = `<div class="ps-preview-block" style="color:var(--muted);font-style:italic">
+      На этой неделе по парам <b style="color:#a78bfa">${escapeHtml(partner)}</b> ничего к отдаче не числится.
+      Ссылка получится пустая — партнёр увидит «на эту дату ничего нет».
+    </div>`;
+    return;
+  }
+  const rows = payload.rows.map(r => `
+    <div class="ps-pair-row">
+      <span>${escapeHtml(r.pair)}</span>
+      <span style="display:flex;gap:12px;align-items:center">
+        <span class="amt">${fmt(r.amount)}</span>
+        <span class="${r.date ? 'dt' : 'no-dt'}">${r.date ? formatDateShort(r.date) : 'дата не задана'}</span>
+      </span>
+    </div>`).join('');
+  const total = payload.rows.reduce((s, r) => s + (r.amount || 0), 0);
+  box.innerHTML = `
+    <div class="ps-preview-block">
+      <div class="ph">Партнёр увидит (${payload.rows.length} ${payload.rows.length === 1 ? 'пара' : 'пар'}):</div>
+      ${rows}
+      <div class="ps-total-row">
+        <span>Общая сумма к отдаче:</span>
+        <span class="amt">${fmt(total)}</span>
+      </div>
+    </div>`;
+}
+
+function generatePartnerPassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  const arr = crypto.getRandomValues(new Uint8Array(10));
+  for (let i = 0; i < 10; i++) out += chars[arr[i] % chars.length];
+  document.getElementById('ps-password').value = out;
+}
+
+async function buildPartnerLink() {
+  const partner = document.getElementById('ps-partner').value;
+  const password = document.getElementById('ps-password').value.trim();
+  if (!partner) { alert('Выбери партнёра.'); return; }
+  if (!password || password.length < 4) { alert('Придумай пароль (хотя бы 4 символа).'); return; }
+  const payload = buildPartnerPayload(partner);
+  try {
+    const b64 = await encryptForPartner(payload, password);
+    const base = location.href.replace(/\/[^/]*$/, '/');
+    const url = base + 'partner.html#data=' + b64;
+    document.getElementById('ps-link').value = url;
+    document.getElementById('ps-link-block').style.display = 'block';
+    const info = document.getElementById('ps-link-info');
+    info.textContent = `Длина ссылки: ${url.length} симв. Пароль: «${password}» — отправь отдельным сообщением.`;
+  } catch (e) {
+    alert('Ошибка при создании ссылки: ' + (e && e.message ? e.message : e));
+  }
+}
+
+async function copyPartnerLink() {
+  const el = document.getElementById('ps-link');
+  el.select();
+  try {
+    await navigator.clipboard.writeText(el.value);
+    showToast('Ссылка скопирована');
+  } catch (e) {
+    document.execCommand('copy');
+    showToast('Ссылка скопирована');
+  }
+}
+
+function testPartnerLink() {
+  const url = document.getElementById('ps-link').value;
+  if (url) window.open(url, '_blank');
 }
 
 // Собрать список всех приходов текущей недели (пн–пт), в которых задан
