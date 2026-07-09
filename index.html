@@ -306,6 +306,90 @@
   .wds-pair { font-family: 'JetBrains Mono', monospace; color: var(--text); }
   .wds-val { font-family: 'JetBrains Mono', monospace; color: var(--muted); white-space: nowrap; }
   .wds-foot { font-size: 10px; color: var(--muted); font-style: italic; margin-top: 8px; opacity: .8; }
+  /* Ряд долга с полем даты — переносим на две строки, чтобы дата не жалась */
+  .wds-row-debt { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 0; }
+  .wds-row-main {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 10px; flex-wrap: wrap;
+  }
+  .wds-date {
+    display: flex; align-items: center; gap: 6px;
+    padding-left: 12px; margin-top: 2px;
+    border-left: 2px solid rgba(255,183,77,.35);
+  }
+  .wds-date-lbl {
+    font-size: 10.5px; color: #ffb74d; text-transform: uppercase;
+    letter-spacing: .04em; font-weight: 600;
+  }
+  .wds-date-inp {
+    background: rgba(255,183,77,.06); border: 1px solid rgba(255,183,77,.25);
+    color: var(--text); border-radius: 6px; padding: 3px 7px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color-scheme: dark;
+  }
+  .wds-date-inp:hover { border-color: rgba(255,183,77,.5); }
+  .wds-date-inp:focus { outline: none; border-color: #ffb74d; box-shadow: 0 0 0 2px rgba(255,183,77,.15); }
+  .wds-date-clear {
+    background: transparent; border: none; color: var(--muted); cursor: pointer;
+    font-size: 12px; padding: 2px 6px; border-radius: 4px;
+  }
+  .wds-date-clear:hover { color: var(--expense); background: rgba(255,107,74,.1); }
+  /* Куратор ко мне — модалка */
+  .cm-head { margin-bottom: 12px; }
+  .cm-period {
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    color: #ffb74d; font-weight: 700; margin-bottom: 4px;
+  }
+  .cm-note { font-size: 11px; color: var(--muted); font-style: italic; }
+  .cm-table {
+    width: 100%; border-collapse: collapse; font-size: 12.5px;
+    background: rgba(255,183,77,.03); border: 1px solid rgba(255,183,77,.2);
+    border-radius: 10px; overflow: hidden;
+  }
+  .cm-table th {
+    background: rgba(255,183,77,.08); padding: 8px 10px; text-align: left;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+    color: #ffb74d; font-weight: 700;
+    border-bottom: 1px solid rgba(255,183,77,.25);
+  }
+  .cm-table td {
+    padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.04);
+    color: var(--text);
+  }
+  .cm-table tbody tr:hover { background: rgba(255,183,77,.04); }
+  .cm-table tbody tr:last-child td { border-bottom: none; }
+  .cm-table tfoot td { border-bottom: none; padding-top: 8px; }
+  .cm-total-row td { border-top: 1px solid rgba(255,183,77,.25); padding-top: 10px; }
+  .cm-paid-row td { padding-top: 2px; padding-bottom: 2px; }
+  .cm-grand-row td {
+    padding-top: 10px; padding-bottom: 10px;
+    background: rgba(255,183,77,.06);
+    border-top: 1px solid rgba(255,183,77,.35);
+  }
+  /* Печать: показываем только модалку куратора */
+  @media print {
+    body.printing-curator-mine * { visibility: hidden; }
+    body.printing-curator-mine #curator-mine-modal,
+    body.printing-curator-mine #curator-mine-modal * { visibility: visible; }
+    body.printing-curator-mine #curator-mine-modal {
+      position: fixed !important; inset: 0 !important; background: #fff !important;
+      overflow: visible !important; display: block !important;
+    }
+    body.printing-curator-mine #curator-mine-modal .modal {
+      position: relative !important; top: 0 !important; left: 0 !important;
+      transform: none !important; max-width: 100% !important; width: 100% !important;
+      margin: 0 !important; padding: 20px !important; box-shadow: none !important;
+      background: #fff !important; color: #000 !important;
+    }
+    body.printing-curator-mine #curator-mine-modal h2 { color: #b36a00 !important; }
+    body.printing-curator-mine .cm-table { background: #fff !important; border-color: #ccc !important; }
+    body.printing-curator-mine .cm-table th { background: #f5e6c8 !important; color: #7a4d00 !important; }
+    body.printing-curator-mine .cm-table td { color: #000 !important; border-color: #eee !important; }
+    body.printing-curator-mine .cm-period { color: #7a4d00 !important; }
+    body.printing-curator-mine .cm-note { color: #555 !important; }
+    body.printing-curator-mine .cm-grand-row td { background: #fdf1d9 !important; color: #7a4d00 !important; }
+    body.printing-curator-mine .no-print { display: none !important; }
+  }
   .ab-grand {
     background: var(--card); border: 1px solid #00e5b0; border-radius: 10px;
     padding: 12px 14px; margin-bottom: 14px;
@@ -788,6 +872,10 @@
         <div class="ic">💸</div><div class="t">Сумма к отдаче</div>
         <div class="s" id="tileDebtOutBody">—</div>
       </div>
+      <div class="board-tile feature" id="tileCuratorMine" style="--tile-c:#ffb74d" onclick="openCuratorMineModal()">
+        <div class="ic">👔</div><div class="t">Куратор ко мне</div>
+        <div class="s" id="tileCuratorMineBody">—</div>
+      </div>
       <div class="board-tile" style="--tile-c:#818cf8" onclick="openClientPickModal()">
         <div class="ic">👤</div><div class="t">Выборка по клиентам</div>
         <div class="s">Движение по парам: пришло, %, выдано, остаток. С печатью.</div>
@@ -1001,11 +1089,23 @@
 <!-- ── CLIENTS MODAL ── -->
 <!-- ── ДОЛГ К ОТДАЧЕ СЕГОДНЯ ── -->
 <div class="modal-overlay" id="debt-out-modal">
-  <div class="modal" style="max-width:640px">
+  <div class="modal" style="max-width:720px">
     <h2 style="color:#ff8a4a">💸 Сумма к отдаче по парам</h2>
     <div id="debt-out-body"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('debt-out-modal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── КУРАТОР КО МНЕ (плитка на доске) ── -->
+<div class="modal-overlay" id="curator-mine-modal">
+  <div class="modal curator-mine-modal-body" style="max-width:820px">
+    <h2 style="color:#ffb74d">👔 Куратор ко мне</h2>
+    <div id="curator-mine-body"></div>
+    <div class="modal-footer no-print">
+      <button class="btn btn-primary" onclick="printCuratorMine()" style="background:#ffb74d;border-color:#ffb74d;color:#000;font-weight:700">🖨 Печать</button>
+      <button class="btn btn-ghost" onclick="closeModal('curator-mine-modal')">Закрыть</button>
     </div>
   </div>
 </div>
@@ -1677,6 +1777,10 @@ function migrateState(s) {
   }
 
   s._migrationVersion = MIGRATION_VERSION;
+
+  // Хранилище дат отдачи по парам, ключ 'YYYY-MM-DD_понедельник::пара' → 'YYYY-MM-DD'.
+  // Только метаданные для планирования — на расчёт долгов/куратора не влияют.
+  if (!s.debtOutDates || typeof s.debtOutDates !== 'object') s.debtOutDates = {};
 
   // Переименование: «Пащенко» → «Пр.Мира» во всех именах пар (идемпотентно).
   // Затрагивает записи приходов/выдач, базу клиентов и ключи недельных коррекций.
@@ -2771,6 +2875,7 @@ function openDebtOutModal() {
   if (box) {
     const { rows, total, total2, totalDiff } = computeWeekPairDebt();
     const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
+    const wk = weekMondayStr(currentDate);
     if (!rows.length) {
       box.innerHTML = '<div style="color:var(--muted);padding:8px 0">Сумм к отдаче сегодня нет.</div>';
     } else {
@@ -2779,9 +2884,21 @@ function openDebtOutModal() {
         const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
         const tag = r.carry ? ` <span style="font-size:10px;color:#a78bfa">↪ перенос</span>` : '';
         const man = r.manual ? ` <span style="font-size:10px;color:#ff8a4a">✋ ручная</span>` : '';
-        return `<div class="wds-row">
-          <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}</span>
-          <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+        const dateKey = wk + '::' + r.name;
+        const savedDate = (state.debtOutDates && state.debtOutDates[dateKey]) || '';
+        const nameAttr = encodeURIComponent(r.name);
+        return `<div class="wds-row wds-row-debt">
+          <div class="wds-row-main">
+            <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}</span>
+            <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+          </div>
+          <div class="wds-date">
+            <span class="wds-date-lbl">📅 Число отдачи:</span>
+            <input type="date" class="wds-date-inp" value="${savedDate}"
+              onchange="setDebtOutDate('${nameAttr}', this.value)"
+              title="Планируемая дата выдачи. На расчёт не влияет.">
+            ${savedDate ? `<button class="wds-date-clear" onclick="setDebtOutDate('${nameAttr}', '')" title="Убрать дату">✕</button>` : ''}
+          </div>
         </div>`;
       }).join('');
       box.innerHTML =
@@ -2791,12 +2908,162 @@ function openDebtOutModal() {
             <span class="wds-total">нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними. Совпадает с блоком «Задолженность по парам за неделю».</div>
+          <div class="wds-foot">По каждой паре: сумма после 1-го %, после 2-го % и разница. «Число отдачи» — планируемая дата выдачи, только для заметки, на суммы не влияет.</div>
         </div>`;
     }
   }
   const m = document.getElementById('debt-out-modal');
   if (m) m.classList.add('open');
+}
+
+// Собрать список всех приходов текущей недели (пн–пт), в которых задан
+// процент куратора. НИЧЕГО НЕ ПЕРЕСЧИТЫВАЕТ — читает те же поля, что и
+// curatorWeeklyAccrued, и в той же формуле (r.amount * pctCur/100, floor100).
+function collectCuratorMineRows(dayStr) {
+  const rows = [];
+  const thisWeek = weekMondayStr(dayStr);
+  const allDays = Object.keys(state.days).sort();
+  for (const d of allDays) {
+    if (d > dayStr) break;
+    if (weekMondayStr(d) !== thisWeek) continue;
+    if (!isWeekday(d)) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+        rows.push({
+          date: d,
+          pair: r.client || '—',
+          amount: r.amount || 0,
+          pctCur: r.pctCur,
+          curatorSum: floor100((r.amount || 0) * r.pctCur / 100),
+          idx: idx,
+        });
+      }
+    });
+  }
+  return rows;
+}
+
+function renderCuratorTile() {
+  const body = document.getElementById('tileCuratorMineBody');
+  if (!body) return;
+  const accrued = curatorWeeklyAccrued(currentDate);
+  const paid = curatorPaidTotal(currentDate);
+  const remain = accrued - paid;
+  if (accrued <= 0) { body.innerHTML = 'На этой неделе куратору ничего не начислено.'; return; }
+  const rows = collectCuratorMineRows(currentDate);
+  const topByPair = {};
+  rows.forEach(r => { topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
+  const topList = Object.entries(topByPair).sort((a,b) => b[1] - a[1]).slice(0, 3);
+  const topHtml = topList.map(([p, v]) =>
+    `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
+       <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p)}</span>
+       <span style="font-family:var(--font-num);color:#ffb74d;font-weight:700">${fmt(v)}</span>
+     </div>`).join('');
+  body.innerHTML =
+    `<div style="display:flex;flex-direction:column;gap:2px;margin-bottom:6px;font-family:var(--font-num)">
+       <div style="display:flex;justify-content:space-between;gap:8px">
+         <span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Накоплено</span>
+         <span style="font-size:14px;font-weight:700;color:#ffb74d">${fmt(accrued)}</span>
+       </div>
+       <div style="display:flex;justify-content:space-between;gap:8px">
+         <span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">− Отдано</span>
+         <span style="font-size:12px;color:var(--muted-bright)">${fmt(paid)}</span>
+       </div>
+       <div style="display:flex;justify-content:space-between;gap:8px;border-top:1px dashed rgba(255,183,77,.25);padding-top:3px;margin-top:2px">
+         <span style="font-size:10.5px;color:#ffb74d;text-transform:uppercase;letter-spacing:.04em;font-weight:700">= К отдаче</span>
+         <span style="font-size:15px;font-weight:700;color:#ffb74d">${fmt(remain)}</span>
+       </div>
+     </div>${topHtml}`;
+}
+
+function openCuratorMineModal() {
+  const box = document.getElementById('curator-mine-body');
+  if (!box) return;
+  const rows = collectCuratorMineRows(currentDate);
+  const accrued = curatorWeeklyAccrued(currentDate);
+  const paid = curatorPaidTotal(currentDate);
+  const remain = accrued - paid;
+  const wkStart = weekMondayStr(currentDate);
+  const wkEndDt = new Date(wkStart + 'T12:00:00');
+  wkEndDt.setDate(wkEndDt.getDate() + 4);
+  const wkEnd = wkEndDt.toISOString().slice(0, 10);
+  if (!rows.length) {
+    box.innerHTML = `<div style="color:var(--muted);padding:8px 0">
+      На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора.
+    </div>`;
+  } else {
+    const trs = rows.map(r => `
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
+        <td>${escapeHtml(r.pair)}</td>
+        <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
+        <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
+        <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
+      </tr>
+    `).join('');
+    box.innerHTML = `
+      <div class="cm-head">
+        <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
+        <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.</div>
+      </div>
+      <table class="cm-table">
+        <thead>
+          <tr>
+            <th style="width:1%;white-space:nowrap">Дата</th>
+            <th>Пара</th>
+            <th style="text-align:right">Сумма прихода</th>
+            <th style="text-align:right">%кур</th>
+            <th style="text-align:right">К куратору</th>
+          </tr>
+        </thead>
+        <tbody>${trs}</tbody>
+        <tfoot>
+          <tr class="cm-total-row">
+            <td colspan="4" style="text-align:right;font-weight:700">ИТОГО начислено:</td>
+            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(accrued)}</td>
+          </tr>
+          <tr class="cm-paid-row">
+            <td colspan="4" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
+            <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
+          </tr>
+          <tr class="cm-grand-row">
+            <td colspan="4" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">К ОТДАЧЕ:</td>
+            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(remain)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+  }
+  const m = document.getElementById('curator-mine-modal');
+  if (m) m.classList.add('open');
+}
+
+function printCuratorMine() {
+  document.body.classList.add('printing-curator-mine');
+  const cleanup = () => {
+    document.body.classList.remove('printing-curator-mine');
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+}
+
+// Сохраняет планируемую дату отдачи по паре в рамках текущей недели.
+// Не влияет ни на один расчёт — только метаданные для UI.
+function setDebtOutDate(encodedPair, dateStr) {
+  const pair = decodeURIComponent(encodedPair);
+  const wk = weekMondayStr(currentDate);
+  const key = wk + '::' + pair;
+  if (!state.debtOutDates) state.debtOutDates = {};
+  if (dateStr) {
+    state.debtOutDates[key] = dateStr;
+  } else {
+    delete state.debtOutDates[key];
+  }
+  saveState();
+  openDebtOutModal();
 }
 
 function renderSummary(day) {
@@ -3330,6 +3597,7 @@ function updateBoardHero() {
   set('boardOut', txt('s-out'));
   set('boardCarry', txt('s-carryover'));
   try { renderDebtOutTile(); } catch (e) {}
+  try { renderCuratorTile(); } catch (e) {}
 }
 function showBoard() {
   try { updateBoardHero(); } catch (e) {}
