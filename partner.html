@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Расчёт · Партнёр</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;600;700&family=Unbounded:wght@700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f14; --surface: #161920; --card: #1e2230;
+    --border: #2a2f3f; --accent: #ffb74d; --text: #e8ecf4;
+    --muted: #8590b3; --muted-bright: #b4bdd9;
+    --font-ui: 'Inter', -apple-system, system-ui, sans-serif;
+    --font-num: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(900px 500px at 15% -8%, rgba(255,183,77,.06), transparent 60%),
+      radial-gradient(800px 500px at 100% 0%, rgba(123,140,255,.05), transparent 55%);
+    background-attachment: fixed;
+    color: var(--text); font-family: var(--font-num); font-size: 14px;
+    min-height: 100vh;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 24px 16px;
+  }
+  .wrap { width: 100%; max-width: 760px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px; box-shadow: 0 24px 60px rgba(0,0,0,.4);
+  }
+  h1 {
+    font-family: 'Unbounded', sans-serif; font-size: 18px;
+    color: var(--accent); margin-bottom: 4px;
+  }
+  .sub {
+    font-size: 12px; color: var(--muted); margin-bottom: 20px;
+    letter-spacing: .02em;
+  }
+  /* ── ЭКРАН ПАРОЛЯ ── */
+  .lock-icon {
+    text-align: center; font-size: 44px; margin: 8px 0 12px; opacity: .8;
+  }
+  .lock-label {
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .06em; margin-bottom: 8px; text-align: center;
+  }
+  input[type=password], input[type=text] {
+    width: 100%; padding: 12px 14px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font-family: var(--font-num); font-size: 14px;
+    outline: none; transition: border-color .15s;
+  }
+  input[type=password]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255,183,77,.15); }
+  .btn {
+    display: block; width: 100%; margin-top: 12px;
+    padding: 12px 16px; border: none; border-radius: 10px;
+    font-family: var(--font-num); font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: filter .15s, transform .05s;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-primary:active { transform: scale(.98); }
+  .btn-ghost {
+    background: transparent; border: 1px solid var(--border); color: var(--muted-bright);
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .error {
+    color: #ff6b4a; font-size: 12px; margin-top: 10px;
+    text-align: center; min-height: 16px;
+  }
+  .hint {
+    font-size: 11px; color: var(--muted); font-style: italic;
+    text-align: center; margin-top: 14px;
+  }
+  /* ── СОДЕРЖИМОЕ ── */
+  .partner-name {
+    display: inline-block; padding: 4px 12px; border-radius: 8px;
+    background: rgba(255,183,77,.1); color: var(--accent);
+    font-weight: 700; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .totals {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 14px 16px; margin-bottom: 16px;
+    background: rgba(255,183,77,.06); border: 1px solid rgba(255,183,77,.25);
+    border-radius: 12px;
+  }
+  .totals-lbl {
+    font-size: 10.5px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .05em; font-weight: 600;
+  }
+  .totals-val {
+    font-family: var(--font-num); font-size: 22px; font-weight: 700;
+    color: var(--accent);
+  }
+  table.debts {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  table.debts th {
+    background: rgba(255,183,77,.08); padding: 10px 12px; text-align: left;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--accent); font-weight: 700;
+    border-bottom: 1px solid rgba(255,183,77,.25);
+  }
+  table.debts td {
+    padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.04);
+  }
+  table.debts tbody tr:last-child td { border-bottom: none; }
+  table.debts tbody tr:hover { background: rgba(255,183,77,.03); }
+  .amt { color: var(--accent); font-weight: 700; text-align: right; font-family: var(--font-num); }
+  .dt { color: var(--muted-bright); text-align: right; font-family: var(--font-num); }
+  .no-date { color: var(--muted); font-style: italic; font-size: 11.5px; }
+  .footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+  }
+  .actions { display: flex; gap: 8px; }
+  .actions .btn { margin-top: 0; width: auto; padding: 8px 14px; font-size: 12px; }
+  .empty {
+    text-align: center; padding: 30px 12px; color: var(--muted); font-style: italic;
+  }
+  /* ── ПЕЧАТЬ ── */
+  @media print {
+    body {
+      background: #fff !important; color: #000 !important;
+      display: block; padding: 0;
+    }
+    .card {
+      background: #fff !important; border: none !important;
+      box-shadow: none !important; padding: 12px 20px;
+    }
+    h1, .totals-val, .amt, .partner-name { color: #b36a00 !important; }
+    .partner-name { background: #fdf1d9 !important; }
+    .totals { background: #fdf9ee !important; border-color: #d9c088 !important; }
+    table.debts { background: #fff !important; border-color: #ccc !important; }
+    table.debts th { background: #f5e6c8 !important; color: #7a4d00 !important; }
+    table.debts td { color: #000 !important; border-color: #eee !important; }
+    .dt { color: #333 !important; }
+    .sub, .totals-lbl, .footer { color: #555 !important; }
+    .actions, .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Экран пароля -->
+    <div class="card" id="pwd-screen">
+      <h1>👔 Расчёт · Партнёр</h1>
+      <div class="sub">Персональная страница расчётов</div>
+      <div class="lock-icon">🔐</div>
+      <div class="lock-label">Введите пароль для просмотра</div>
+      <input type="password" id="pwd-input" autocomplete="off" autofocus placeholder="Пароль">
+      <button class="btn btn-primary" id="pwd-btn" onclick="tryUnlock()">Открыть</button>
+      <div class="error" id="pwd-err"></div>
+      <div class="hint">
+        Данные зашифрованы в этой ссылке. Без пароля увидеть их нельзя.<br>
+        Если ссылка не открывается — попроси прислать новую.
+      </div>
+    </div>
+
+    <!-- Содержимое -->
+    <div class="card" id="content" style="display:none">
+      <h1>👔 Расчёт · Партнёр</h1>
+      <div class="sub" id="content-sub">Ситуация на выбранную дату</div>
+      <span class="partner-name" id="partner-name">—</span>
+      <div class="totals">
+        <div>
+          <div class="totals-lbl">Общая сумма к отдаче</div>
+        </div>
+        <div class="totals-val" id="total-val">—</div>
+      </div>
+      <div id="debts-area"></div>
+      <div class="footer">
+        <div id="issued-at">—</div>
+        <div class="actions no-print">
+          <button class="btn btn-ghost" onclick="window.print()">🖨 Печать</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ── ФОРМАТ СУММ ─────────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  const r = Math.round(n * 100) / 100;
+  return r.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' ₽';
+}
+function fmtDate(d) {
+  if (!d) return '';
+  const [y, m, day] = d.split('-');
+  const months = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+  return `${parseInt(day, 10)} ${months[parseInt(m, 10) - 1]} ${y}`;
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── РАСШИФРОВКА (AES-GCM + PBKDF2) ──────────────────────────────────────────
+// Формат: base64(salt[16] | iv[12] | ciphertext)
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder();
+  const km = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' },
+    km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  );
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function decryptPayload(b64, password) {
+  const raw = b64ToBytes(b64);
+  if (raw.length < 28) throw new Error('too_short');
+  const salt = raw.slice(0, 16);
+  const iv = raw.slice(16, 28);
+  const ct = raw.slice(28);
+  const key = await deriveKey(password, salt);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+// ── UI ──────────────────────────────────────────────────────────────────────
+function getHashPayload() {
+  const h = location.hash || '';
+  const m = h.match(/^#data=(.+)$/);
+  return m ? m[1] : '';
+}
+async function tryUnlock() {
+  const err = document.getElementById('pwd-err');
+  const pwd = document.getElementById('pwd-input').value;
+  err.textContent = '';
+  if (!pwd) { err.textContent = 'Введите пароль'; return; }
+  const payload = getHashPayload();
+  if (!payload) { err.textContent = 'В ссылке нет данных. Попроси прислать корректную ссылку.'; return; }
+  const btn = document.getElementById('pwd-btn');
+  btn.disabled = true; btn.textContent = 'Расшифровка…';
+  try {
+    const data = await decryptPayload(payload, pwd);
+    render(data);
+    document.getElementById('pwd-screen').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  } catch (e) {
+    err.textContent = 'Неверный пароль или повреждённая ссылка.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Открыть';
+  }
+}
+function render(data) {
+  document.getElementById('partner-name').textContent = data.partner || '—';
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const total = rows.reduce((s, r) => s + (r.amount || 0), 0);
+  document.getElementById('total-val').textContent = fmt(total);
+  const issuedTxt = data.issuedAt ? `Ситуация на ${fmtDate(data.issuedAt.slice(0,10))}` : '';
+  document.getElementById('content-sub').textContent = issuedTxt || 'Ситуация по расчётам';
+  document.getElementById('issued-at').textContent = issuedTxt;
+  const area = document.getElementById('debts-area');
+  if (!rows.length) {
+    area.innerHTML = `<div class="empty">На эту дату по вашим парам ничего не числится.</div>`;
+    return;
+  }
+  const trs = rows.map(r => `
+    <tr>
+      <td>${esc(r.pair || '—')}</td>
+      <td class="amt">${fmt(r.amount || 0)}</td>
+      <td class="dt">${r.date ? esc(fmtDate(r.date)) : '<span class="no-date">не назначено</span>'}</td>
+    </tr>
+  `).join('');
+  area.innerHTML = `
+    <table class="debts">
+      <thead>
+        <tr>
+          <th>Пара</th>
+          <th style="text-align:right">Сумма к отдаче</th>
+          <th style="text-align:right">Число отдачи</th>
+        </tr>
+      </thead>
+      <tbody>${trs}</tbody>
+    </table>
+  `;
+}
+
+// Enter в поле пароля
+document.getElementById('pwd-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryUnlock();
+});
+
+// Если в ссылке нет данных — сообщим сразу
+if (!getHashPayload()) {
+  document.getElementById('pwd-err').textContent = 'В ссылке нет данных. Попроси прислать корректную ссылку.';
+}
+</script>
+</body>
+</html>
