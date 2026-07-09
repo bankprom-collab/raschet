@@ -366,6 +366,69 @@
     background: rgba(255,183,77,.06);
     border-top: 1px solid rgba(255,183,77,.35);
   }
+  /* Блок «Отдано куратору в этой неделе» + форма ввода */
+  .cm-paid-block {
+    margin-top: 16px; padding: 12px 14px;
+    background: rgba(255,183,77,.04);
+    border: 1px solid rgba(255,183,77,.18);
+    border-radius: 10px;
+  }
+  .cm-paid-head {
+    font-size: 11px; font-weight: 700; color: #ffb74d;
+    text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px;
+  }
+  .cm-pay-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .cm-pay-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px; border-radius: 6px;
+    background: rgba(255,255,255,.02);
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+  }
+  .cm-pay-row:hover { background: rgba(255,183,77,.06); }
+  .cm-pay-date { color: var(--muted); min-width: 68px; }
+  .cm-pay-amt { flex: 1; color: #ffb74d; font-weight: 700; }
+  .cm-pay-del {
+    background: transparent; border: none; color: var(--muted); cursor: pointer;
+    font-size: 12px; padding: 2px 8px; border-radius: 4px;
+  }
+  .cm-pay-del:hover { color: var(--expense); background: rgba(255,107,74,.12); }
+  .cm-pay-empty {
+    color: var(--muted); font-style: italic; font-size: 12px;
+    padding: 6px 8px;
+  }
+  .cm-paid-total {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 8px 4px; margin-top: 4px;
+    border-top: 1px dashed rgba(255,183,77,.25);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted-bright);
+  }
+  .cm-paid-total b { color: #ffb74d; font-size: 13px; }
+  .cm-paid-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,183,77,.15); }
+  .cm-paid-form-lbl {
+    font-size: 10.5px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .04em; margin-bottom: 6px;
+  }
+  .cm-paid-form-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .cm-paid-inp {
+    background: rgba(255,183,77,.06); border: 1px solid rgba(255,183,77,.25);
+    color: var(--text); border-radius: 6px; padding: 6px 10px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    color-scheme: dark;
+  }
+  .cm-paid-inp:focus { outline: none; border-color: #ffb74d; box-shadow: 0 0 0 2px rgba(255,183,77,.15); }
+  .cm-paid-inp-amt { flex: 1; min-width: 120px; }
+  .cm-paid-add { padding: 6px 14px !important; font-size: 12.5px !important; }
+  @media print {
+    body.printing-curator-mine .cm-paid-block {
+      background: #fff !important; border-color: #ccc !important;
+    }
+    body.printing-curator-mine .cm-paid-head,
+    body.printing-curator-mine .cm-pay-amt,
+    body.printing-curator-mine .cm-paid-total b { color: #7a4d00 !important; }
+    body.printing-curator-mine .cm-pay-row { background: #fdf9ee !important; }
+    body.printing-curator-mine .cm-pay-date,
+    body.printing-curator-mine .cm-paid-total { color: #555 !important; }
+  }
   /* Печать: показываем только модалку куратора */
   @media print {
     body.printing-curator-mine * { visibility: hidden; }
@@ -2978,6 +3041,22 @@ function renderCuratorTile() {
      </div>${topHtml}`;
 }
 
+// Список дней текущей недели, в которых была отдача куратору (curatorPaid > 0).
+// Читает то же поле, что и curatorPaidTotal — расчётной логики не трогает.
+function collectCuratorPayments(dayStr) {
+  const rows = [];
+  const thisWeek = weekMondayStr(dayStr);
+  const allDays = Object.keys(state.days).sort();
+  for (const d of allDays) {
+    if (weekMondayStr(d) !== thisWeek) continue;
+    const dd = state.days[d];
+    if (dd && typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
+      rows.push({ date: d, amount: dd.curatorPaid });
+    }
+  }
+  return rows;
+}
+
 function openCuratorMineModal() {
   const box = document.getElementById('curator-mine-body');
   if (!box) return;
@@ -2989,55 +3068,122 @@ function openCuratorMineModal() {
   const wkEndDt = new Date(wkStart + 'T12:00:00');
   wkEndDt.setDate(wkEndDt.getDate() + 4);
   const wkEnd = wkEndDt.toISOString().slice(0, 10);
-  if (!rows.length) {
-    box.innerHTML = `<div style="color:var(--muted);padding:8px 0">
-      На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора.
-    </div>`;
-  } else {
-    const trs = rows.map(r => `
-      <tr>
-        <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
-        <td>${escapeHtml(r.pair)}</td>
-        <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
-        <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
-        <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
-      </tr>
-    `).join('');
-    box.innerHTML = `
-      <div class="cm-head">
-        <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
-        <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.</div>
-      </div>
-      <table class="cm-table">
-        <thead>
+
+  const table = !rows.length
+    ? `<div style="color:var(--muted);padding:8px 0">
+        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора.
+      </div>`
+    : (() => {
+        const trs = rows.map(r => `
           <tr>
-            <th style="width:1%;white-space:nowrap">Дата</th>
-            <th>Пара</th>
-            <th style="text-align:right">Сумма прихода</th>
-            <th style="text-align:right">%кур</th>
-            <th style="text-align:right">К куратору</th>
+            <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
+            <td>${escapeHtml(r.pair)}</td>
+            <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
+            <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
+            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
           </tr>
-        </thead>
-        <tbody>${trs}</tbody>
-        <tfoot>
-          <tr class="cm-total-row">
-            <td colspan="4" style="text-align:right;font-weight:700">ИТОГО начислено:</td>
-            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(accrued)}</td>
-          </tr>
-          <tr class="cm-paid-row">
-            <td colspan="4" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
-            <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
-          </tr>
-          <tr class="cm-grand-row">
-            <td colspan="4" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">К ОТДАЧЕ:</td>
-            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(remain)}</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  }
+        `).join('');
+        return `<table class="cm-table">
+          <thead>
+            <tr>
+              <th style="width:1%;white-space:nowrap">Дата</th>
+              <th>Пара</th>
+              <th style="text-align:right">Сумма прихода</th>
+              <th style="text-align:right">%кур</th>
+              <th style="text-align:right">К куратору</th>
+            </tr>
+          </thead>
+          <tbody>${trs}</tbody>
+          <tfoot>
+            <tr class="cm-total-row">
+              <td colspan="4" style="text-align:right;font-weight:700">ИТОГО начислено:</td>
+              <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(accrued)}</td>
+            </tr>
+            <tr class="cm-paid-row">
+              <td colspan="4" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
+              <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
+            </tr>
+            <tr class="cm-grand-row">
+              <td colspan="4" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">К ОТДАЧЕ:</td>
+              <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(remain)}</td>
+            </tr>
+          </tfoot>
+        </table>`;
+      })();
+
+  // Блок «Отдано в этой неделе» + форма ввода отдачи
+  const paidRows = collectCuratorPayments(currentDate);
+  const paidList = paidRows.length
+    ? paidRows.map(p => `
+        <div class="cm-pay-row">
+          <span class="cm-pay-date">${formatDateShort(p.date)}</span>
+          <span class="cm-pay-amt">${fmt(p.amount)}</span>
+          <button class="cm-pay-del no-print" onclick="removeCuratorPayment('${p.date}')" title="Убрать отметку об отдаче за этот день">✕</button>
+        </div>
+      `).join('')
+    : `<div class="cm-pay-empty">Пока ничего не отдано в этой неделе.</div>`;
+
+  const payBlock = `
+    <div class="cm-paid-block">
+      <div class="cm-paid-head">📤 Отдано куратору в этой неделе</div>
+      <div class="cm-pay-list">${paidList}</div>
+      <div class="cm-paid-total">
+        <span>Итого отдано:</span>
+        <b>${fmt(paid)}</b>
+      </div>
+      <div class="cm-paid-form no-print">
+        <div class="cm-paid-form-lbl">Записать новую отдачу:</div>
+        <div class="cm-paid-form-row">
+          <input type="date" id="cm-pay-date" value="${currentDate}" class="cm-paid-inp" title="Число, которым записываем отдачу">
+          <input type="text" id="cm-pay-amt" inputmode="decimal" placeholder="Сумма ₽" class="cm-paid-inp cm-paid-inp-amt" oninput="numericInputFilter(event)">
+          <button class="btn btn-primary cm-paid-add" onclick="addCuratorPayment()" style="background:#ffb74d;border-color:#ffb74d;color:#000;font-weight:700">+ Добавить</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  box.innerHTML = `
+    <div class="cm-head">
+      <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.</div>
+    </div>
+    ${table}
+    ${payBlock}
+  `;
   const m = document.getElementById('curator-mine-modal');
   if (m) m.classList.add('open');
+}
+
+// Добавить новую отдачу куратору (сумму на выбранную дату).
+// Прибавляется к day.curatorPaid этого дня — тот же механизм, что кнопка «Отдана» в шапке.
+function addCuratorPayment() {
+  const dateEl = document.getElementById('cm-pay-date');
+  const amtEl = document.getElementById('cm-pay-amt');
+  if (!dateEl || !amtEl) return;
+  const dateStr = dateEl.value;
+  if (!dateStr) { alert('Выбери число, на которое записать отдачу.'); return; }
+  const cleaned = (amtEl.value || '').trim().replace(/\s/g, '').replace(',', '.');
+  const amount = parseFloat(cleaned);
+  if (isNaN(amount) || amount <= 0) { alert('Введи сумму больше нуля.'); return; }
+  // getDay создаст день, если его ещё нет, и подтянет carryover от prev-with-data
+  const day = getDay(dateStr);
+  day.curatorPaid = (day.curatorPaid || 0) + amount;
+  saveState();
+  render();
+  amtEl.value = '';
+  openCuratorMineModal();
+  if (typeof showToast === 'function') showToast('Записано: отдано ' + fmt(amount) + ' (' + formatDateShort(dateStr) + ')');
+}
+
+// Убрать отметку об отдаче за конкретный день недели (обнуляет day.curatorPaid).
+function removeCuratorPayment(dateStr) {
+  const day = state.days[dateStr];
+  if (!day || !day.curatorPaid) return;
+  if (!confirm('Убрать отметку «отдано куратору» за ' + formatDateShort(dateStr) + ' (' + fmt(day.curatorPaid) + ')?')) return;
+  day.curatorPaid = 0;
+  saveState();
+  render();
+  openCuratorMineModal();
 }
 
 function printCuratorMine() {
