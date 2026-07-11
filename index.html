@@ -1197,6 +1197,7 @@
     <h2 style="color:#ff8a4a">💸 Сумма к отдаче по парам</h2>
     <div id="debt-out-body"></div>
     <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="diagnosePair()" title="Проверить, почему конкретная пара не в списке">🔍 Проверить пару</button>
       <button class="btn btn-ghost" onclick="closeModal('debt-out-modal')">Закрыть</button>
     </div>
   </div>
@@ -2190,13 +2191,19 @@ function computeTagRunningTotals(dayStr) {
 // переноса (её итог может быть и отрицательным — это переплата текущей недели).
 // accrued/accrued2 — к отдаче за неделю с учётом переноса; received — выдано за
 // неделю; remaining/remaining2 — остаток. pct1/pct2 — реальные проценты пары.
-function pairWeekDebt(dayStr, pairName) {
+// startWeek (опц.) — понедельник недели, с которой начинается перенос. Приходы
+// и выдачи из более ранних недель полностью игнорируются (для «Вейс(рук)-Рынок»
+// не передавай, он переносит от самого начала истории; для остальных пар
+// передавай PAIR_CARRY_START_DATE).
+function pairWeekDebt(dayStr, pairName, startWeek) {
   const pair = (pairName || '').trim();
   if (!pair) return { accrued: 0, accrued2: 0, has2: false, received: 0, remaining: 0, remaining2: 0, pct1: null, pct2: null };
   const targetWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
-  // Недели по возрастанию, не позже недели текущего дня
-  const weeks = [...new Set(allDays.map(weekMondayStr))].filter(w => w <= targetWeek).sort();
+  // Недели по возрастанию, не позже недели текущего дня; при startWeek — не раньше её
+  const weeks = [...new Set(allDays.map(weekMondayStr))]
+    .filter(w => w <= targetWeek && (!startWeek || w >= startWeek))
+    .sort();
   // Перенос: gross1/gross2 — валовое начисление к отдаче по основной и второй
   // ставке, net1 — непогашенный остаток по ОСНОВНОЙ ставке. Закрытая неделя
   // (net1 ≤ 0) обнуляет всё. Второй столбец = валовое начисление по второй
@@ -2870,6 +2877,11 @@ function pairWeekReceived(dayStr, pairName) {
 // Возвращает { rows, total (=Σv1, «нам должны»), total2 (=Σv2, «мы должны
 // отдать»), totalDiff (=Σdiff) }. Один источник и для блока внизу, и для
 // плитки «Сумма к отдаче» на доске — поэтому их суммы ВСЕГДА совпадают.
+// С понедельника этой недели ВСЕ пары переносят непогашенный остаток через
+// недели (правило подтверждено пользователем 10.07.2026). Раньше (до этой
+// даты) — только «Вейс(рук)-Рынок» переносил, остальные считались с нуля.
+const PAIR_CARRY_START_DATE = '2026-06-29';
+
 function computeWeekPairDebt() {
   // Накопление текущей недели (выдачи его не трогают)
   const accr = pairWeekAccruals(currentDate);
@@ -2882,17 +2894,30 @@ function computeWeekPairDebt() {
     dd.in.forEach(r => { const p = (r.client || '').trim(); if (p) pairsSet.add(p); });
   }
 
+  // Работает ли перенос для не-Рынка в этой неделе?
+  const carryAllPairs = thisWeek >= PAIR_CARRY_START_DATE;
+
   const rows = [];
   pairsSet.forEach(p => {
+    if ((p || '').trim() === 'Вейс(рук)-Рынок') return; // Рынок — всегда отдельно ниже
+    if (carryAllPairs) {
+      // Новая логика: та же формула, что у Рынка, но с ограничением по стартовой
+      // неделе — старую историю до 29.06.2026 не трогаем.
+      const dbt = pairWeekDebt(currentDate, p, PAIR_CARRY_START_DATE);
+      if (dbt.remaining <= 0) return;
+      const a = accr[p];
+      const wasCarried = dbt.accrued > (a ? a.v1 : 0);
+      rows.push({
+        name: p, v1: dbt.remaining,
+        v2: (dbt.has2 && dbt.remaining2 > 0) ? dbt.remaining2 : null,
+        has2: dbt.has2 && dbt.remaining2 > 0,
+        pct1: dbt.pct1, pct2: dbt.pct2, carry: wasCarried
+      });
+      return;
+    }
+    // Старое поведение до 29.06.2026: пара считается только за эту неделю.
     const a = accr[p];
     if (!a || a.v1 <= 0) return;
-    if ((p || '').trim() === 'Вейс(рук)-Рынок') return; // только Рынок — отдельно, с переносом; прочие «Вейс(рук)-…» — обычные
-    // Долг = начислено за неделю МИНУС реально выдано этой паре на этой неделе
-    // (по currentDate включительно). Раньше выдача гасила долг только если её
-    // сумма СОВПАДАЛА С точностью до рубля с начисленным (или с одной из
-    // дневных сумм) — случайное совпадение цифр у другой выдачи той же пары
-    // могло ошибочно обнулить ещё не выплаченный долг. Теперь просто вычитаем
-    // фактически выданное — предсказуемо и без угадывания.
     const received = pairWeekReceived(currentDate, p);
     const rem = Math.max(0, r100(a.v1 - received));
     if (rem <= 0) return;
@@ -3064,6 +3089,73 @@ function openDebtOutModal() {
   }
   const m = document.getElementById('debt-out-modal');
   if (m) m.classList.add('open');
+}
+
+// ── ДИАГНОСТИКА ПАРЫ В СПИСКЕ ДОЛГОВ ────────────────────────────────────────
+// Показывает, почему конкретная пара НЕ появляется в «Сумма к отдаче» /
+// «Задолженность по парам за неделю». Ничего не меняет — только читает.
+// Вызывать из плитки «💸 Сумма к отдаче» → кнопка «🔍 Проверить пару».
+function diagnosePair() {
+  const p = (prompt(
+    'Название пары для проверки (в точности как в программе):\n\n' +
+    'Например:  Вейс(рук)-Ленин',
+    'Вейс(рук)-Ленин'
+  ) || '').trim();
+  if (!p) return;
+  const wk = weekMondayStr(currentDate);
+  const accr = pairWeekAccruals(currentDate);
+  const a = accr[p] || null;
+  const received = pairWeekReceived(currentDate, p);
+  const rem = a ? Math.max(0, r100((a.v1 || 0) - received)) : 0;
+  const overrideKey = wk + '::' + p;
+  const override = (state.weekDebtOverrides || {})[overrideKey];
+  // Все реальные записи прихода и выдачи по этой паре за неделю
+  const inRows = [], outRows = [];
+  Object.keys(state.days).sort().forEach(d => {
+    if (weekMondayStr(d) !== wk) return;
+    const dd = state.days[d];
+    if (!dd) return;
+    (dd.in || []).forEach(r => {
+      if ((r.client || '').trim() === p) inRows.push({
+        date: d, weekday: new Date(d + 'T12:00:00').getDay(),
+        amount: r.amount, pct: r.pct, pct2: r.pct2, total: r.total
+      });
+    });
+    (dd.out || []).forEach(r => {
+      if ((r.client || '').trim() === p) outRows.push({ date: d, amount: r.amount });
+    });
+  });
+  const isFriChk = new Date(currentDate + 'T12:00:00').getDay();
+  const dowRu = ['вс','пн','вт','ср','чт','пт','сб'];
+  const inLines = inRows.map(r =>
+    `  ${r.date} (${dowRu[r.weekday]}, будни:${r.weekday>=1&&r.weekday<=5?'да':'НЕТ'}): сумма ${fmt(r.amount)}, %1=${r.pct ?? '—'}, %2=${r.pct2 ?? '—'}, total(после 1-го %)=${fmt(r.total)}`).join('\n') || '  — нет записей прихода —';
+  const outLines = outRows.map(r => `  ${r.date}: выдано ${fmt(r.amount)}`).join('\n') || '  — нет выдач —';
+  const inList = computeWeekPairDebt().rows.find(r => r.name === p);
+  const conclusion = (() => {
+    if (!a) return '❌ Пара НЕ найдена в накоплениях (pairWeekAccruals). Причины:\n' +
+      '   • нет ни одного прихода с этим именем на текущей неделе (пн–пт), ИЛИ\n' +
+      '   • дата прихода не в текущей неделе (currentDate=' + currentDate + '), ИЛИ\n' +
+      '   • имя пары отличается на пробел/регистр/дефис.';
+    if (override && (override.v1 === 0 || override.v1 === null)) return
+      '⚠ Ручная коррекция ✏️ на эту пару стоит 0 или null — она УДАЛЯЕТ пару из списка.\n' +
+      'Проверь state.weekDebtOverrides["' + overrideKey + '"] = ' + JSON.stringify(override);
+    if (rem <= 0) return '⚠ Выдано (out) за неделю (' + fmt(received) + ') ≥ начислено (' + fmt(a.v1) + ') → остаток ≤ 0, пара не показывается.';
+    if (!inList) return '⚠ Пара НЕ в итоговых rows, хотя rem=' + fmt(rem) + '. Странно — проверь ручные коррекции или отладь computeWeekPairDebt.';
+    return '✅ Пара В списке. Отражена как v1=' + fmt(inList.v1) + ', v2=' + fmt(inList.v2) + '. Если ты её не видишь — проверь модалку и блок под таблицей.';
+  })();
+  const report =
+    `🔍 ДИАГНОСТИКА: «${p}»\n` +
+    `Сегодня в программе: ${currentDate} (${dowRu[isFriChk]})\n` +
+    `Понедельник этой недели: ${wk}\n\n` +
+    `Приходы этой пары за неделю (in):\n${inLines}\n\n` +
+    `Выдачи этой пары за неделю (out):\n${outLines}\n\n` +
+    `Накопление pairWeekAccruals: ${a ? `v1=${fmt(a.v1)}, v2=${fmt(a.v2)}, %1=${a.pct1 ?? '—'}, %2=${a.pct2 ?? '—'}` : '— нет —'}\n` +
+    `Выдано за неделю (pairWeekReceived): ${fmt(received)}\n` +
+    `Остаток (rem = round100(v1 − выдано)): ${fmt(rem)}\n` +
+    `Ручная коррекция ✏️: ${override ? JSON.stringify(override) : '— нет —'}\n\n` +
+    `${conclusion}`;
+  alert(report);
+  console.log(report);
 }
 
 // ── ПАРТНЁРСКАЯ ССЫЛКА (шифрование AES-GCM + PBKDF2) ────────────────────────
