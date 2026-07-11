@@ -376,6 +376,18 @@
   }
   .wds-break-total b { color: #ff8a4a; }
   .wds-break-empty { color: var(--muted); font-style: italic; padding: 4px 0; }
+  /* Кнопка «переименовать пару» — 🏷️ рядом с именем пары */
+  .wds-rename {
+    background: transparent; border: 1px solid transparent;
+    color: var(--muted); cursor: pointer; font-size: 12px;
+    padding: 1px 5px; border-radius: 5px; margin-left: 4px;
+    transition: color .15s, background .15s, border-color .15s;
+    vertical-align: middle;
+  }
+  .wds-rename:hover {
+    color: var(--accent); background: rgba(0,229,176,.08);
+    border-color: rgba(0,229,176,.2);
+  }
   /* Куратор ко мне — модалка */
   .cm-head { margin-bottom: 12px; }
   .cm-period {
@@ -3059,9 +3071,12 @@ function renderWeekDebtSummary() {
     const baseHtml = (r.base > 0)
       ? `база: <b style="color:var(--muted-bright)">${fmt(r.base)}</b> · `
       : '';
+    const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
     return `<div class="wds-row wds-row-debt">
       <div class="wds-row-main">
-        <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}</span>
+        <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}
+          <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button>
+        </span>
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
       <details class="wds-break-details">
@@ -3142,9 +3157,12 @@ function openDebtOutModal() {
         const baseHtml = (r.base > 0)
           ? `база: <b style="color:var(--muted-bright)">${fmt(r.base)}</b> · `
           : '';
+        const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
         return `<div class="wds-row wds-row-debt">
           <div class="wds-row-main">
-            <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}</span>
+            <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}
+              <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс, напр. «-Авангард»)">🏷️</button>
+            </span>
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
           </div>
           <details class="wds-break-details">
@@ -3416,6 +3434,95 @@ async function copyPartnerLink() {
 function testPartnerLink() {
   const url = document.getElementById('ps-link').value;
   if (url) window.open(url, '_blank');
+}
+
+// ── ПЕРЕИМЕНОВАНИЕ ПАРЫ ─────────────────────────────────────────────────────
+// Заменяет ИМЯ ПАРЫ во всех местах, где оно фигурирует, БЕЗ ИЗМЕНЕНИЯ СУММ И
+// РАСЧЁТНОЙ ЛОГИКИ. Затрагивает: state.days[d].in[i].client, state.days[d].out[i].client,
+// state.clients (база пар), state.debtOutDates (ключи «неделя::пара»),
+// state.weekDebtOverrides (то же), state.tagWeekCorrections (то же). Если newName
+// совпадает с существующей парой — записи сольются в неё (для override/corrections
+// приоритет у уже существующей ручной коррекции этой недели).
+function renamePairEverywhere(oldName, newName) {
+  const oldN = (oldName || '').trim();
+  const newN = (newName || '').trim();
+  if (!oldN || !newN || oldN === newN) return { renamed: 0 };
+  let renamed = 0;
+  // 1. Приходы и выдачи
+  Object.values(state.days || {}).forEach(day => {
+    ['in', 'out'].forEach(k => {
+      (day[k] || []).forEach(r => {
+        if ((r.client || '').trim() === oldN) { r.client = newN; renamed++; }
+      });
+    });
+  });
+  // 2. База клиентов — снимаем дубликаты
+  if (Array.isArray(state.clients)) {
+    const set = new Set();
+    state.clients = state.clients.map(c => (c && c.trim() === oldN) ? newN : c).filter(c => {
+      if (!c) return false;
+      if (set.has(c)) return false;
+      set.add(c);
+      return true;
+    });
+  }
+  // 3. Ключи «неделя::пара» — три структуры
+  const remapKeys = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const out = {};
+    for (const key in obj) {
+      const sep = key.indexOf('::');
+      if (sep < 0) { out[key] = obj[key]; continue; }
+      const wk = key.slice(0, sep);
+      const pair = key.slice(sep + 2);
+      const nk = (pair === oldN) ? (wk + '::' + newN) : key;
+      // Слияние если целевой ключ уже есть — приоритет у УЖЕ существующей записи (не перезаписываем)
+      if (nk in out) continue;
+      out[nk] = obj[key];
+    }
+    return out;
+  };
+  state.debtOutDates = remapKeys(state.debtOutDates);
+  state.weekDebtOverrides = remapKeys(state.weekDebtOverrides);
+  state.tagWeekCorrections = remapKeys(state.tagWeekCorrections);
+  return { renamed };
+}
+
+// UI: вызвать переименование через prompt.
+function editPairName(oldName) {
+  const oldN = (oldName || '').trim();
+  if (!oldN) return;
+  const raw = prompt(
+    'Переименовать пару\n\n' +
+    'Текущее имя: «' + oldN + '»\n\n' +
+    'Введи новое имя (или очисти суффикс, чтобы укоротить).\n' +
+    'Пример: «Вейс(рук)-Ленин-Авангард» → «Вейс(рук)-Ленин-Спартак»,\n' +
+    'или → «Вейс(рук)-Ленин» (без суффикса).',
+    oldN
+  );
+  if (raw === null) return;
+  const newN = raw.trim();
+  if (!newN) { alert('Имя не может быть пустым. Отменено.'); return; }
+  if (newN === oldN) return;
+  // Проверяем, не сольётся ли с существующей парой
+  const willMerge = Array.isArray(state.clients) && state.clients.some(c => c && c.trim() === newN);
+  const dataHasNew = Object.values(state.days || {}).some(day =>
+    ['in','out'].some(k => (day[k] || []).some(r => (r.client || '').trim() === newN)));
+  if (willMerge || dataHasNew) {
+    if (!confirm(
+      'Пара «' + newN + '» уже существует.\n\n' +
+      'При переименовании ВСЕ записи «' + oldN + '» превратятся в «' + newN + '»\n' +
+      'и сольются с уже существующими.\n\n' +
+      'Продолжить?'
+    )) return;
+  }
+  const { renamed } = renamePairEverywhere(oldN, newN);
+  saveState();
+  render();
+  // Перерисуем модалку долгов, если она открыта, чтобы новое имя появилось сразу
+  const m = document.getElementById('debt-out-modal');
+  if (m && m.classList.contains('open')) openDebtOutModal();
+  showToast('Переименовано в «' + newN + '»: обновлено записей — ' + renamed);
 }
 
 // ── РАСКРЫТИЕ БАЗЫ ПАРЫ ─────────────────────────────────────────────────────
