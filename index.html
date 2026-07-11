@@ -334,6 +334,48 @@
     font-size: 12px; padding: 2px 6px; border-radius: 4px;
   }
   .wds-date-clear:hover { color: var(--expense); background: rgba(255,107,74,.1); }
+  /* Раскрытие базы пары — из чего складывается сумма */
+  .wds-break-details { margin-top: 6px; }
+  .wds-break-details > summary {
+    cursor: pointer; list-style: none;
+    font-size: 11px; color: var(--muted); padding: 3px 8px;
+    border-radius: 6px; display: inline-block;
+    transition: background .15s, color .15s;
+    user-select: none;
+  }
+  .wds-break-details > summary::-webkit-details-marker { display: none; }
+  .wds-break-details > summary:hover { background: rgba(255,138,74,.08); color: #ff8a4a; }
+  .wds-break-details[open] > summary { color: #ff8a4a; margin-bottom: 6px; }
+  .wds-break {
+    padding: 10px 12px; margin: 4px 0 6px;
+    background: rgba(255,138,74,.04); border: 1px solid rgba(255,138,74,.15);
+    border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
+  }
+  .wds-break-head {
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .04em; padding-bottom: 4px;
+    border-bottom: 1px dashed rgba(255,138,74,.2); margin-bottom: 4px;
+  }
+  .wds-break-row {
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,.03);
+    align-items: center;
+  }
+  .wds-break-row:last-of-type { border-bottom: none; }
+  .wds-break-date { color: var(--muted-bright); }
+  .wds-break-amt { color: var(--text); font-weight: 600; }
+  .wds-break-pct { color: var(--muted); font-size: 11px; }
+  .wds-break-after { color: #ff8a4a; font-weight: 600; }
+  .wds-break-out .wds-break-amt { color: var(--expense); }
+  .wds-break-total {
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    padding: 6px 0 2px; margin-top: 4px;
+    border-top: 1px solid rgba(255,138,74,.3);
+    font-size: 12px; color: var(--muted-bright);
+  }
+  .wds-break-total b { color: #ff8a4a; }
+  .wds-break-empty { color: var(--muted); font-style: italic; padding: 4px 0; }
   /* Куратор ко мне — модалка */
   .cm-head { margin-bottom: 12px; }
   .cm-period {
@@ -3017,9 +3059,15 @@ function renderWeekDebtSummary() {
     const baseHtml = (r.base > 0)
       ? `база: <b style="color:var(--muted-bright)">${fmt(r.base)}</b> · `
       : '';
-    return `<div class="wds-row">
-      <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}</span>
-      <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+    return `<div class="wds-row wds-row-debt">
+      <div class="wds-row-main">
+        <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}</span>
+        <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+      </div>
+      <details class="wds-break-details">
+        <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
+        ${renderPairBaseBreakdownHtml(r.name)}
+      </details>
     </div>`;
   }).join('');
 
@@ -3099,6 +3147,10 @@ function openDebtOutModal() {
             <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}</span>
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
           </div>
+          <details class="wds-break-details">
+            <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
+            ${renderPairBaseBreakdownHtml(r.name)}
+          </details>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
             <input type="date" class="wds-date-inp" value="${savedDate}"
@@ -3364,6 +3416,104 @@ async function copyPartnerLink() {
 function testPartnerLink() {
   const url = document.getElementById('ps-link').value;
   if (url) window.open(url, '_blank');
+}
+
+// ── РАСКРЫТИЕ БАЗЫ ПАРЫ ─────────────────────────────────────────────────────
+// Собирает все приходы данной пары за недели, входящие в «активный период»
+// (для «Вейс(рук)-Рынок» — от начала истории; для остальных с учётом переноса —
+// от PAIR_CARRY_START_DATE до currentDate). НИЧЕГО НЕ ПЕРЕСЧИТЫВАЕТ:
+// читает поля state.days[d].in[i] и возвращает как есть.
+function collectPairBaseBreakdown(pair) {
+  const p = (pair || '').trim();
+  if (!p) return { inRows: [], outRows: [] };
+  const targetWeek = weekMondayStr(currentDate);
+  const isRynok = p === 'Вейс(рук)-Рынок';
+  const carryAllPairs = targetWeek >= PAIR_CARRY_START_DATE;
+  // Начало активного периода для этой пары
+  let startWeek;
+  if (isRynok) startWeek = null;            // Рынок — от начала истории
+  else if (carryAllPairs) startWeek = PAIR_CARRY_START_DATE;
+  else startWeek = targetWeek;              // старая логика: только текущая неделя
+  const inRows = [], outRows = [];
+  Object.keys(state.days).sort().forEach(d => {
+    const wk = weekMondayStr(d);
+    if (wk > targetWeek) return;
+    if (startWeek && wk < startWeek) return;
+    const dd = state.days[d];
+    if (!dd) return;
+    (dd.in || []).forEach(r => {
+      if ((r.client || '').trim() !== p) return;
+      if (!isWeekday(d)) return;   // приход участвует в базе только по будням — как в pairWeekDebt
+      inRows.push({
+        date: d, week: wk,
+        amount: r.amount || 0,
+        pct: r.pct, pct2: r.pct2,
+        after1: (r.pct !== null && r.pct !== undefined && r.pct > 0 && r.total !== null && r.total !== undefined)
+                ? r100(r.total) : (r.total || 0),
+        after2: (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0 && r.total2 !== null && r.total2 !== undefined)
+                ? r100(r.total2) : null,
+      });
+    });
+    (dd.out || []).forEach(o => {
+      if ((o.client || '').trim() !== p) return;
+      outRows.push({ date: d, week: wk, amount: o.amount || 0 });
+    });
+  });
+  return { inRows, outRows };
+}
+
+// HTML разбивки базы: список приходов + выдач + итог. Вставляется под парой
+// в модалке долгов и в блоке «Задолженность за неделю».
+function renderPairBaseBreakdownHtml(pair) {
+  const { inRows, outRows } = collectPairBaseBreakdown(pair);
+  const totalBase = inRows.reduce((s, r) => s + r.amount, 0);
+  const totalAfter1 = inRows.reduce((s, r) => s + r.after1, 0);
+  const totalReceived = outRows.reduce((s, r) => s + r.amount, 0);
+  if (!inRows.length && !outRows.length) {
+    return `<div class="wds-break-empty">Приходов и выдач этой пары за активный период нет.</div>`;
+  }
+  const inHtml = inRows.map(r => {
+    const pcts = [
+      (r.pct !== null && r.pct !== undefined && r.pct > 0) ? `${String(r.pct).replace('.', ',')}%` : '',
+      (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0) ? `${String(r.pct2).replace('.', ',')}%` : '',
+    ].filter(Boolean).join(' / ');
+    return `<div class="wds-break-row">
+      <span class="wds-break-date">${formatDateShort(r.date)}</span>
+      <span class="wds-break-amt">${fmt(r.amount)}</span>
+      <span class="wds-break-pct">${pcts || '—'}</span>
+      <span class="wds-break-after">→ ${fmt(r.after1)}</span>
+    </div>`;
+  }).join('');
+  const outHtml = outRows.map(r => `<div class="wds-break-row wds-break-out">
+      <span class="wds-break-date">${formatDateShort(r.date)}</span>
+      <span class="wds-break-amt">− ${fmt(r.amount)}</span>
+      <span class="wds-break-pct">выдано</span>
+      <span class="wds-break-after"></span>
+    </div>`).join('');
+  return `<div class="wds-break">
+    <div class="wds-break-head">
+      <span>Приходы:</span>
+      <span>сумма</span>
+      <span>%</span>
+      <span>после 1-го %</span>
+    </div>
+    ${inHtml || '<div class="wds-break-empty">— нет приходов —</div>'}
+    <div class="wds-break-total">
+      <span>Итого база:</span>
+      <span><b>${fmt(totalBase)}</b></span>
+      <span></span>
+      <span><b>${fmt(totalAfter1)}</b></span>
+    </div>
+    ${outRows.length ? `<div class="wds-break-head" style="margin-top:8px">
+      <span>Выдачи (получено на руки):</span><span></span><span></span><span></span>
+    </div>
+    ${outHtml}
+    <div class="wds-break-total">
+      <span>Итого выдано:</span>
+      <span><b style="color:var(--expense)">${fmt(totalReceived)}</b></span>
+      <span></span><span></span>
+    </div>` : ''}
+  </div>`;
 }
 
 // Собрать список всех приходов текущей недели (пн–пт), в которых задан
