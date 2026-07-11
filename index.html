@@ -384,6 +384,30 @@
     font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
     vertical-align: middle;
   }
+  .pair-tag-clickable {
+    cursor: pointer; user-select: none;
+    transition: background .15s, color .15s;
+  }
+  .pair-tag-clickable:hover {
+    background: rgba(255,107,74,.18); color: var(--expense);
+  }
+  .pair-tag-x {
+    display: inline-block; margin-left: 3px; opacity: .55;
+    font-size: 10px; font-weight: 700;
+  }
+  .pair-tag-clickable:hover .pair-tag-x { opacity: 1; }
+  /* Кликабельный последний суффикс в имени пары («-Авангард» и т.п.) */
+  .pair-suffix {
+    color: #a78bfa; cursor: pointer;
+    border-bottom: 1px dashed rgba(167,139,250,.45);
+    padding: 0 2px; border-radius: 3px;
+    transition: color .15s, background .15s, border-color .15s;
+  }
+  .pair-suffix:hover {
+    color: var(--expense); background: rgba(255,107,74,.1);
+    border-bottom-color: var(--expense);
+  }
+  .pair-suffix:hover .pair-tag-x { opacity: 1; color: var(--expense); }
   /* Кнопка «переименовать пару» — 🏷️ рядом с именем пары */
   .wds-rename {
     background: transparent; border: 1px solid transparent;
@@ -2858,17 +2882,32 @@ function renderInBody(day) {
       const noteHtml = (r.note && r.note.trim())
         ? `<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:3px;font-style:italic">📝 ${escapeHtml(r.note)}</div>`
         : '';
-      // Метка (r.tag) — примечание к паре, не участвует в расчётах, только для отображения
+      // Метка (r.tag) — примечание к паре, не участвует в расчётах, только для отображения.
+      // Кликабельна: клик = убрать метку.
       const tagHtml = (r.tag && r.tag.trim())
-        ? `<span class="pair-tag" title="Метка — не участвует в расчёте пары">🏷 ${escapeHtml(r.tag)}</span>`
+        ? `<span class="pair-tag pair-tag-clickable" onclick="clearRowTag(${i})" title="Клик — убрать метку «${escapeHtml(r.tag)}». В расчёте пары метка не участвует.">🏷 ${escapeHtml(r.tag)} <span class="pair-tag-x">✕</span></span>`
         : '';
+      // Имя пары: если у client 2+ дефисов, последний сегмент делаем кликабельным
+      // (клик = убрать суффикс и слить с укороченной парой).
+      const client = r.client || '';
+      const firstDash = client.indexOf('-');
+      const lastDash = client.lastIndexOf('-');
+      let clientHtml;
+      if (lastDash > firstDash && lastDash > 0) {
+        const head = client.slice(0, lastDash);
+        const suffix = client.slice(lastDash);   // включая «-»
+        clientHtml = `${escapeHtml(head)}<span class="pair-suffix" onclick="trimPairSuffixInRow(${i})" title="Клик — убрать «${escapeHtml(suffix)}», сложить с парой «${escapeHtml(head)}»">${escapeHtml(suffix)} <span class="pair-tag-x">✕</span></span>`;
+      } else {
+        clientHtml = escapeHtml(client);
+      }
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}${tagHtml}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
+        <td class="client-name">${clientHtml}${tagHtml}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
         <td class="pct">${pctDisplay}</td>
         <td class="amount pos">${totalDisplay}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="editRow('in',${i})" title="Редактировать">✏️</button>
+          <button class="icon-btn" onclick="trimPairSuffixInRow(${i})" title="Убрать метку или последний суффикс">✂️</button>
           <button class="icon-btn" onclick="deleteRow('in',${i})" title="Удалить">🗑</button>
         </div></td>
       </tr>`;
@@ -3501,6 +3540,60 @@ function renamePairEverywhere(oldName, newName) {
   state.weekDebtOverrides = remapKeys(state.weekDebtOverrides);
   state.tagWeekCorrections = remapKeys(state.tagWeekCorrections);
   return { renamed };
+}
+
+// Быстрое удаление метки/суффикса ОДНОЙ КНОПКОЙ у конкретной строки прихода.
+// Три сценария:
+//  1) r.tag заполнено → убираем метку (r.tag = null). Пара не меняется.
+//  2) r.tag пусто, но у r.client есть 2+ дефиса → убираем ПОСЛЕДНИЙ сегмент
+//     (напр. «Вейс(рук)-Ленин-Авангард» → «Вейс(рук)-Ленин»). Запись сольётся
+//     с уже существующими записями пары «Вейс(рук)-Ленин» в расчёте.
+//  3) Ни того ни другого — нечего резать, сообщаем.
+function trimPairSuffixInRow(rowIdx) {
+  const day = getDay(currentDate);
+  const r = day.in && day.in[rowIdx];
+  if (!r) return;
+  if (r.tag && r.tag.trim()) {
+    const t = r.tag.trim();
+    if (!confirm('Убрать метку «' + t + '»?\n\nПара «' + (r.client || '') + '» останется как есть — суммы уже считаются в неё.')) return;
+    r.tag = null;
+    saveState();
+    render();
+    showToast('Метка «' + t + '» убрана');
+    return;
+  }
+  const client = (r.client || '').trim();
+  const lastDash = client.lastIndexOf('-');
+  const firstDash = client.indexOf('-');
+  if (lastDash <= firstDash || lastDash <= 0) {
+    alert('У этой пары один дефис («Клиент-Получатель») — резать нечего.\n\nЕсли надо изменить имя пары полностью — жми ✏️.');
+    return;
+  }
+  const trimmed = client.slice(0, lastDash);
+  const suffix = client.slice(lastDash + 1);
+  if (!confirm(
+    'Убрать суффикс «-' + suffix + '» из имени?\n\n' +
+    '«' + client + '» → «' + trimmed + '»\n\n' +
+    'Все записи с этим приходом попадут в пару «' + trimmed + '»,\n' +
+    'и суммы автоматически сложатся с уже существующими.'
+  )) return;
+  r.client = trimmed;
+  saveState();
+  render();
+  showToast('Слито в пару «' + trimmed + '»');
+}
+
+// Быстрое удаление метки по клику на сам чип «🏷 …» в таблице приходов.
+function clearRowTag(rowIdx) {
+  const day = getDay(currentDate);
+  const r = day.in && day.in[rowIdx];
+  if (!r || !r.tag) return;
+  const t = r.tag;
+  if (!confirm('Убрать метку «' + t + '»? Пара останется как есть.')) return;
+  r.tag = null;
+  saveState();
+  render();
+  showToast('Метка «' + t + '» убрана');
 }
 
 // UI: вызвать переименование через prompt.
