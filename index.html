@@ -2197,7 +2197,7 @@ function computeTagRunningTotals(dayStr) {
 // передавай PAIR_CARRY_START_DATE).
 function pairWeekDebt(dayStr, pairName, startWeek) {
   const pair = (pairName || '').trim();
-  if (!pair) return { accrued: 0, accrued2: 0, has2: false, received: 0, remaining: 0, remaining2: 0, pct1: null, pct2: null };
+  if (!pair) return { accrued: 0, accrued2: 0, accruedBase: 0, has2: false, received: 0, remaining: 0, remaining2: 0, remainingBase: 0, pct1: null, pct2: null };
   const targetWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
   // Недели по возрастанию, не позже недели текущего дня; при startWeek — не раньше её
@@ -2208,11 +2208,12 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
   // ставке, net1 — непогашенный остаток по ОСНОВНОЙ ставке. Закрытая неделя
   // (net1 ≤ 0) обнуляет всё. Второй столбец = валовое начисление по второй
   // ставке × доля непогашенного основного долга — так две ставки идут параллельно
-  // и вторая не зануляется отдельно из-за одной выдачи.
-  let cGross1 = 0, cGross2 = 0, cNet1 = 0;
+  // и вторая не зануляется отдельно из-за одной выдачи. cGrossBase — валовое
+  // накопление ДО процентов (нужно для отображения «базы» в UI, на расчёт не влияет).
+  let cGross1 = 0, cGross2 = 0, cGrossBase = 0, cNet1 = 0;
   let pct1 = null, pct2 = null, has2 = false;
   for (const wk of weeks) {
-    let acc1 = 0, acc2 = 0, rec = 0;
+    let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
     for (const d of allDays) {
       if (weekMondayStr(d) !== wk) continue;
       const dd = state.days[d];
@@ -2220,6 +2221,7 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
       if (isWeekday(d) && Array.isArray(dd.in)) {
         dd.in.forEach(r => {
           if ((r.client || '').trim() !== pair) return;
+          accBase += (r.amount || 0);
           acc1 += calcInRowFinal(r);
           if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
           if (hasSecondPct(r)) { acc2 += r100(r.total2); has2 = true; pct2 = r.pct2; }
@@ -2233,44 +2235,51 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
     }
     const gross1 = cGross1 + acc1;
     const gross2 = cGross2 + acc2;
+    const grossBase = cGrossBase + accBase;
     const net1   = cNet1 + acc1 - rec;
     // Ручная коррекция этой недели (✏️ в ручном режиме) — заменяет расчёт
     const ov = (state.weekDebtOverrides || {})[wk + '::' + pair];
     if (wk === targetWeek) {
       if (ov && ov.v1 !== null && ov.v1 !== undefined) {
         return {
-          accrued: gross1, accrued2: gross2, has2: has2 || (ov.v2 !== null && ov.v2 !== undefined),
+          accrued: gross1, accrued2: gross2, accruedBase: grossBase,
+          has2: has2 || (ov.v2 !== null && ov.v2 !== undefined),
           received: rec, pct1, pct2,
           remaining: ov.v1,
-          remaining2: (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0
+          remaining2: (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0,
+          remainingBase: grossBase   // база показывается как валовое накопление; ручной override её не меняет
         };
       }
       const frac = gross1 > 0 ? Math.max(0, net1 / gross1) : 0;
       return {
-        accrued: gross1, accrued2: gross2, has2,
+        accrued: gross1, accrued2: gross2, accruedBase: grossBase, has2,
         received: rec, pct1, pct2,
         remaining: net1,
-        remaining2: (has2 && net1 > 0) ? r100(gross2 * frac) : 0
+        remaining2: (has2 && net1 > 0) ? r100(gross2 * frac) : 0,
+        remainingBase: net1 > 0 ? r100(grossBase * frac) : 0
       };
     }
     // Прошлая неделя: ручная коррекция заменяет её итог в переносе.
     if (ov && ov.v1 !== null && ov.v1 !== undefined) {
-      if (ov.v1 <= 0) { cGross1 = 0; cGross2 = 0; cNet1 = 0; }
+      if (ov.v1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
       else {
         cGross1 = ov.v1; cNet1 = ov.v1;
         cGross2 = (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0;
+        cGrossBase = grossBase;   // база — то, что накоплено; коррекция v1 не отменяет уже пришедших сумм
         if (cGross2 > 0) has2 = true;
       }
       continue;
     }
     // Прошлая неделя: закрытую (net1 ≤ 0) обнуляем; иначе переносим валовое и остаток.
-    if (net1 <= 0) { cGross1 = 0; cGross2 = 0; cNet1 = 0; }
-    else { cGross1 = gross1; cGross2 = gross2; cNet1 = net1; }
+    if (net1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
+    else { cGross1 = gross1; cGross2 = gross2; cGrossBase = grossBase; cNet1 = net1; }
   }
   // В неделе текущего дня данных не было — остаётся только перенос.
   const fracC = cGross1 > 0 ? Math.max(0, cNet1 / cGross1) : 0;
-  return { accrued: cGross1, accrued2: cGross2, has2, received: 0, pct1, pct2,
-           remaining: cNet1, remaining2: (has2 && cNet1 > 0) ? r100(cGross2 * fracC) : 0 };
+  return { accrued: cGross1, accrued2: cGross2, accruedBase: cGrossBase, has2,
+           received: 0, pct1, pct2,
+           remaining: cNet1, remaining2: (has2 && cNet1 > 0) ? r100(cGross2 * fracC) : 0,
+           remainingBase: cNet1 > 0 ? r100(cGrossBase * fracC) : 0 };
 }
 // Коррекция привязана к неделе текущего дня. Пусто = убрать коррекцию.
 function correctTagWeek(rowIdx) {
@@ -2811,7 +2820,7 @@ function renderInBody(day) {
 function pairWeekAccruals(dayStr) {
   const thisWeek = weekMondayStr(dayStr);
   const corr = state.tagWeekCorrections || {};
-  const acc1 = {}, acc2 = {}, has2m = {}, p1 = {}, p2 = {};
+  const acc1 = {}, acc2 = {}, accBase = {}, has2m = {}, p1 = {}, p2 = {};
   // Стартовые значения недели — из ручной коррекции (если задана)
   for (const key in corr) {
     const sep = key.indexOf('::');
@@ -2831,6 +2840,7 @@ function pairWeekAccruals(dayStr) {
     dd.in.forEach(r => {
       const pair = (r.client || '').trim();
       if (!pair) return;
+      accBase[pair] = (accBase[pair] || 0) + (r.amount || 0);
       acc1[pair] = (acc1[pair] || 0) + calcInRowFinal(r);
       if (r.pct !== null && r.pct !== undefined && r.pct > 0) p1[pair] = r.pct;
       if (hasSecondPct(r)) {
@@ -2842,6 +2852,7 @@ function pairWeekAccruals(dayStr) {
   const out = {};
   Object.keys(acc1).forEach(pair => {
     out[pair] = {
+      base: accBase[pair] || 0,   // сумма ДО процентов (для отображения)
       v1: acc1[pair] || 0,
       v2: has2m[pair] ? (acc2[pair] || 0) : null,
       has2: !!has2m[pair],
@@ -2908,7 +2919,8 @@ function computeWeekPairDebt() {
       const a = accr[p];
       const wasCarried = dbt.accrued > (a ? a.v1 : 0);
       rows.push({
-        name: p, v1: dbt.remaining,
+        name: p, base: dbt.remainingBase || 0,
+        v1: dbt.remaining,
         v2: (dbt.has2 && dbt.remaining2 > 0) ? dbt.remaining2 : null,
         has2: dbt.has2 && dbt.remaining2 > 0,
         pct1: dbt.pct1, pct2: dbt.pct2, carry: wasCarried
@@ -2923,7 +2935,8 @@ function computeWeekPairDebt() {
     if (rem <= 0) return;
     const frac = a.v1 > 0 ? rem / a.v1 : 0;
     const v2 = (a.has2 && a.v2 !== null && a.v2 !== undefined) ? r100(a.v2 * frac) : null;
-    rows.push({ name: p, v1: rem, v2, has2: a.has2 && v2 !== null,
+    rows.push({ name: p, base: r100((a.base || 0) * frac),
+                v1: rem, v2, has2: a.has2 && v2 !== null,
                 pct1: a.pct1, pct2: a.pct2, carry: false });
   });
 
@@ -2932,7 +2945,8 @@ function computeWeekPairDebt() {
     const dbt = pairWeekDebt(currentDate, 'Вейс(рук)-Рынок');
     if (dbt.remaining > 0) {
       rows.push({
-        name: 'Вейс(рук)-Рынок', v1: dbt.remaining,
+        name: 'Вейс(рук)-Рынок', base: dbt.remainingBase || 0,
+        v1: dbt.remaining,
         v2: (dbt.has2 && dbt.remaining2 > 0) ? dbt.remaining2 : null,
         has2: dbt.has2 && dbt.remaining2 > 0,
         pct1: dbt.pct1, pct2: dbt.pct2, carry: true
@@ -2956,7 +2970,8 @@ function computeWeekPairDebt() {
         if (o.v2 !== null && o.v2 !== undefined) { rows[idx].v2 = r100(o.v2); rows[idx].has2 = true; }
         rows[idx].manual = true;
       } else {
-        rows.push({ name: pname, v1: r100(o.v1),
+        rows.push({ name: pname, base: 0,
+                    v1: r100(o.v1),
                     v2: (o.v2 !== null && o.v2 !== undefined) ? r100(o.v2) : null,
                     has2: (o.v2 !== null && o.v2 !== undefined),
                     pct1: null, pct2: null, carry: pname.trim() === 'Вейс(рук)-Рынок', manual: true });
@@ -2970,12 +2985,14 @@ function computeWeekPairDebt() {
   rows.forEach(r => {
     if (r.v2 === null || r.v2 === undefined) r.v2 = r.v1;
     r.diff = r100(r.v1 - r.v2);
+    if (r.base === null || r.base === undefined) r.base = 0;
   });
   rows.sort((x, y) => y.v1 - x.v1);
+  const totalBase = rows.reduce((s, r) => s + (r.base || 0), 0); // сумма ДО процентов (для отображения)
   const total = rows.reduce((s, r) => s + r.v1, 0);       // сумма, которую нам должны (после 1-го %)
   const total2 = rows.reduce((s, r) => s + r.v2, 0);      // сумма, которую мы должны отдать (после 2-го %)
   const totalDiff = rows.reduce((s, r) => s + r.diff, 0); // общая разница
-  return { rows, total, total2, totalDiff };
+  return { rows, totalBase, total, total2, totalDiff };
 }
 
 function renderWeekDebtSummary() {
@@ -2986,7 +3003,7 @@ function renderWeekDebtSummary() {
   // Подпись процента: 13 → «13», 15.5 → «15,5»
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
 
-  const { rows, total, total2, totalDiff } = computeWeekPairDebt();
+  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
   if (!rows.length) { box.innerHTML = ''; return; }
 
   const body = rows.map(r => {
@@ -2997,13 +3014,16 @@ function renderWeekDebtSummary() {
     const editBtn = (state.manualMode === true)
       ? ` <span style="cursor:pointer" title="Изменить сумму пары вручную" onclick="editWeekDebtPair('${escapeHtml(r.name).replace(/'/g, "\\'")}')">✏️</span>`
       : '';
+    const baseHtml = (r.base > 0)
+      ? `база: <b style="color:var(--muted-bright)">${fmt(r.base)}</b> · `
+      : '';
     return `<div class="wds-row">
       <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}</span>
-      <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+      <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
     </div>`;
   }).join('');
 
-  const totalLine = `нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>`;
+  const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>`;
 
   box.innerHTML = `<div class="week-debt-block${isFri ? ' fri' : ''}">
     <div class="wds-head">
@@ -3024,31 +3044,40 @@ function computeDebtOut() { return computeWeekPairDebt(); }
 function renderDebtOutTile() {
   const body = document.getElementById('tileDebtOutBody');
   if (!body) return;
-  const { rows, total, total2, totalDiff } = computeWeekPairDebt();
+  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
   if (!rows.length) { body.innerHTML = 'Сумм к отдаче сегодня нет.'; return; }
-  const top = rows.slice(0, 3).map(r =>
-    `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
+  const top = rows.slice(0, 3).map(r => {
+    const baseLine = (r.base > 0)
+      ? `<div style="font-size:10.5px;color:var(--muted-bright);font-family:var(--font-num);text-align:right">база ${fmt(r.base)}</div>`
+      : '';
+    return `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.35;margin-bottom:3px">
        <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
        <span style="text-align:right;white-space:nowrap">
+         ${baseLine}
          <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
          <span style="color:var(--muted);font-size:10px"> / </span>
          <b style="color:#818cf8;font-family:var(--font-num)">${fmt(r.v2)}</b>
        </span>
-     </div>`).join('');
+     </div>`;
+  }).join('');
   const more = rows.length > 3
     ? `<div style="color:var(--muted);font-size:10.5px;margin-top:2px">…ещё ${rows.length - 3} — открыть</div>` : '';
   body.innerHTML =
-    `<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:6px;font-family:var(--font-num)">
-       <span style="font-size:15px;font-weight:700;color:#ff8a4a" title="Нам должны (после 1-го %)">${fmt(total)}</span>
-       <span style="font-size:15px;font-weight:700;color:#818cf8" title="Мы должны отдать (после 2-го %)">${fmt(total2)}</span>
-       <span style="font-size:15px;font-weight:700;color:var(--accent)" title="Разница">${fmt(totalDiff)}</span>
+    `<div style="display:flex;justify-content:space-between;gap:6px;margin-bottom:4px;font-family:var(--font-num);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">
+       <span>база</span><span>−%1</span><span>−%2</span><span>разн.</span>
+     </div>
+     <div style="display:flex;justify-content:space-between;gap:6px;margin-bottom:8px;font-family:var(--font-num)">
+       <span style="font-size:13px;font-weight:700;color:var(--muted-bright)" title="Сумма ДО процентов">${fmt(totalBase)}</span>
+       <span style="font-size:13px;font-weight:700;color:#ff8a4a" title="Нам должны (после 1-го %)">${fmt(total)}</span>
+       <span style="font-size:13px;font-weight:700;color:#818cf8" title="Мы должны отдать (после 2-го %)">${fmt(total2)}</span>
+       <span style="font-size:13px;font-weight:700;color:var(--accent)" title="Разница">${fmt(totalDiff)}</span>
      </div>${top}${more}`;
 }
 
 function openDebtOutModal() {
   const box = document.getElementById('debt-out-body');
   if (box) {
-    const { rows, total, total2, totalDiff } = computeWeekPairDebt();
+    const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
     const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
     const wk = weekMondayStr(currentDate);
     if (!rows.length) {
@@ -3062,10 +3091,13 @@ function openDebtOutModal() {
         const dateKey = wk + '::' + r.name;
         const savedDate = (state.debtOutDates && state.debtOutDates[dateKey]) || '';
         const nameAttr = encodeURIComponent(r.name);
+        const baseHtml = (r.base > 0)
+          ? `база: <b style="color:var(--muted-bright)">${fmt(r.base)}</b> · `
+          : '';
         return `<div class="wds-row wds-row-debt">
           <div class="wds-row-main">
             <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}</span>
-            <span class="wds-val">${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+            <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
           </div>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
@@ -3080,10 +3112,10 @@ function openDebtOutModal() {
         `<div class="week-debt-block">
           <div class="wds-head">
             <span>💸 Сумма к отдаче · ${formatDateShort(currentDate)}</span>
-            <span class="wds-total">нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
+            <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">По каждой паре: сумма после 1-го %, после 2-го % и разница. «Число отдачи» — планируемая дата выдачи, только для заметки, на суммы не влияет.</div>
+          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — планируемая дата выдачи, только для заметки, на суммы не влияет.</div>
         </div>`;
     }
   }
