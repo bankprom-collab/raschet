@@ -376,6 +376,14 @@
   }
   .wds-break-total b { color: #ff8a4a; }
   .wds-break-empty { color: var(--muted); font-style: italic; padding: 4px 0; }
+  /* Метка (r.tag) — не участвует в расчётах, только для отображения */
+  .pair-tag {
+    display: inline-block; margin-left: 6px;
+    padding: 1px 8px; border-radius: 6px;
+    background: rgba(167,139,250,.14); color: #a78bfa;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+    vertical-align: middle;
+  }
   /* Кнопка «переименовать пару» — 🏷️ рядом с именем пары */
   .wds-rename {
     background: transparent; border: 1px solid transparent;
@@ -1955,6 +1963,9 @@ function migrateState(s) {
       if (r.total2 === undefined) r.total2 = null;
       // Процент куратора — null если не задан
       if (r.pctCur === undefined) r.pctCur = null;
+      // Метка/примечание к приходу — НЕ участвует в имени пары и НЕ в расчётах.
+      // В отличие от старого r.note, r.tag НЕ склеивается в client при миграции.
+      if (r.tag === undefined) r.tag = null;
       // Пересчитываем total2 по актуальной формуле (от исходной суммы)
       // Это исправит записи, сохранённые в более старых версиях, где
       // total2 считался от результата после первого процента
@@ -2847,9 +2858,13 @@ function renderInBody(day) {
       const noteHtml = (r.note && r.note.trim())
         ? `<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:3px;font-style:italic">📝 ${escapeHtml(r.note)}</div>`
         : '';
+      // Метка (r.tag) — примечание к паре, не участвует в расчётах, только для отображения
+      const tagHtml = (r.tag && r.tag.trim())
+        ? `<span class="pair-tag" title="Метка — не участвует в расчёте пары">🏷 ${escapeHtml(r.tag)}</span>`
+        : '';
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
+        <td class="client-name">${escapeHtml(r.client)}${tagHtml}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
         <td class="pct">${pctDisplay}</td>
         <td class="amount pos">${totalDisplay}</td>
         <td><div class="row-actions">
@@ -3555,6 +3570,7 @@ function collectPairBaseBreakdown(pair) {
         date: d, week: wk,
         amount: r.amount || 0,
         pct: r.pct, pct2: r.pct2,
+        tag: r.tag || null,
         after1: (r.pct !== null && r.pct !== undefined && r.pct > 0 && r.total !== null && r.total !== undefined)
                 ? r100(r.total) : (r.total || 0),
         after2: (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0 && r.total2 !== null && r.total2 !== undefined)
@@ -3584,8 +3600,9 @@ function renderPairBaseBreakdownHtml(pair) {
       (r.pct !== null && r.pct !== undefined && r.pct > 0) ? `${String(r.pct).replace('.', ',')}%` : '',
       (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0) ? `${String(r.pct2).replace('.', ',')}%` : '',
     ].filter(Boolean).join(' / ');
+    const tagChip = r.tag ? `<span class="pair-tag" style="margin-left:6px" title="Метка — не участвует в расчёте">🏷 ${escapeHtml(r.tag)}</span>` : '';
     return `<div class="wds-break-row">
-      <span class="wds-break-date">${formatDateShort(r.date)}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}</span>
       <span class="wds-break-amt">${fmt(r.amount)}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
       <span class="wds-break-after">→ ${fmt(r.after1)}</span>
@@ -4334,7 +4351,30 @@ function editRow(type, i) {
       const pc = parseDecimal(newPctCur);
       r.pctCur = (isNaN(pc) || pc <= 0) ? null : pc;
     }
-    const newNote = prompt('Примечание к сумме (пусто = убрать):', r.note || '');
+    // Имя пары (что участвует в расчёте). Обычный формат «Клиент-Получатель».
+    // Пример: если было «Вейс(рук)-Ленин-Авангард» и «Авангард» — просто пометка,
+    // то здесь оставляем «Вейс(рук)-Ленин», а «Авангард» вбиваем в метку ниже.
+    const newClient = prompt(
+      'Название пары (что участвует в расчёте):\n\n' +
+      'Пример: если было «Вейс(рук)-Ленин-Авангард» и «Авангард» — только пометка,\n' +
+      'здесь оставь «Вейс(рук)-Ленин», а «Авангард» вбей в поле «Метка» на следующем шаге.',
+      r.client || ''
+    );
+    if (newClient !== null) {
+      const nc = newClient.trim();
+      if (nc) r.client = nc;
+    }
+    // Метка/примечание к приходу — НЕ участвует в расчёте, только для отображения.
+    const newTag = prompt(
+      'Метка (примечание к приходу, НЕ участвует в расчёте, пусто = убрать):\n\n' +
+      'Пример: «Авангард» — покажется рядом с парой, но в расчёте пары не участвует.',
+      r.tag || ''
+    );
+    if (newTag !== null) {
+      const t = newTag.trim();
+      r.tag = t || null;
+    }
+    const newNote = prompt('Дополнительное примечание к сумме (пусто = убрать):', r.note || '');
     if (newNote !== null) {
       r.note = newNote.trim();
     }
