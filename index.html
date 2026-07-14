@@ -876,6 +876,8 @@
     border-radius: 16px;
     padding: 24px;
     width: 100%; max-width: 480px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
     transform: translateY(20px); transition: transform .2s;
     box-shadow: 0 24px 60px rgba(0,0,0,.5);
   }
@@ -3736,14 +3738,51 @@ function renderPairBaseBreakdownHtml(pair) {
 // Собрать список всех приходов текущей недели (пн–пт), в которых задан
 // процент куратора. НИЧЕГО НЕ ПЕРЕСЧИТЫВАЕТ — читает те же поля, что и
 // curatorWeeklyAccrued, и в той же формуле (r.amount * pctCur/100, floor100).
-function collectCuratorMineRows(dayStr) {
-  const rows = [];
+function curatorWeekMaps(dayStr) {
   const thisWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
+  const accrByWeek = {};
+  const paidByWeek = {};
   for (const d of allDays) {
     if (d > dayStr) break;
-    if (weekMondayStr(d) !== thisWeek) continue;
+    const dd = state.days[d];
+    if (!dd) continue;
+    const wk = weekMondayStr(d);
+    if (typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
+      paidByWeek[wk] = (paidByWeek[wk] || 0) + dd.curatorPaid;
+    }
+    if (isWeekday(d) && Array.isArray(dd.in)) {
+      dd.in.forEach(r => {
+        if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+          accrByWeek[wk] = (accrByWeek[wk] || 0) + floor100((r.amount || 0) * r.pctCur / 100);
+        }
+      });
+    }
+  }
+  const isShownWeek = (wk) => wk === thisWeek || (paidByWeek[wk] || 0) < (accrByWeek[wk] || 0);
+  return { thisWeek, allDays, accrByWeek, paidByWeek, isShownWeek };
+}
+
+function curatorMineTotals(dayStr) {
+  const M = curatorWeekMaps(dayStr);
+  let accrued = 0, paid = 0;
+  const weeks = new Set([...Object.keys(M.accrByWeek), ...Object.keys(M.paidByWeek)]);
+  weeks.forEach(wk => {
+    if (!M.isShownWeek(wk)) return;
+    accrued += (M.accrByWeek[wk] || 0);
+    paid += (M.paidByWeek[wk] || 0);
+  });
+  return { accrued, paid, remain: accrued - paid };
+}
+
+function collectCuratorMineRows(dayStr) {
+  const rows = [];
+  const M = curatorWeekMaps(dayStr);
+  for (const d of M.allDays) {
+    if (d > dayStr) break;
     if (!isWeekday(d)) continue;
+    const wk = weekMondayStr(d);
+    if (!M.isShownWeek(wk)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3765,8 +3804,9 @@ function collectCuratorMineRows(dayStr) {
 function renderCuratorTile() {
   const body = document.getElementById('tileCuratorMineBody');
   if (!body) return;
-  const accrued = curatorWeeklyAccrued(currentDate);
-  const paid = curatorPaidTotal(currentDate);
+  const __ctot = curatorMineTotals(currentDate);
+  const accrued = __ctot.accrued;
+  const paid = __ctot.paid;
   const remain = accrued - paid;
   if (accrued <= 0) { body.innerHTML = 'На этой неделе куратору ничего не начислено.'; return; }
   const rows = collectCuratorMineRows(currentDate);
@@ -3799,14 +3839,14 @@ function renderCuratorTile() {
 // Читает то же поле, что и curatorPaidTotal — расчётной логики не трогает.
 function collectCuratorPayments(dayStr) {
   const rows = [];
-  const thisWeek = weekMondayStr(dayStr);
-  const allDays = Object.keys(state.days).sort();
-  for (const d of allDays) {
-    if (weekMondayStr(d) !== thisWeek) continue;
+  const M = curatorWeekMaps(dayStr);
+  for (const d of M.allDays) {
+    if (d > dayStr) break;
     const dd = state.days[d];
-    if (dd && typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
-      rows.push({ date: d, amount: dd.curatorPaid });
-    }
+    if (!dd || !(typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0)) continue;
+    const wk = weekMondayStr(d);
+    if (!M.isShownWeek(wk)) continue;
+    rows.push({ date: d, amount: dd.curatorPaid });
   }
   return rows;
 }
@@ -3815,8 +3855,9 @@ function openCuratorMineModal() {
   const box = document.getElementById('curator-mine-body');
   if (!box) return;
   const rows = collectCuratorMineRows(currentDate);
-  const accrued = curatorWeeklyAccrued(currentDate);
-  const paid = curatorPaidTotal(currentDate);
+  const __ctot = curatorMineTotals(currentDate);
+  const accrued = __ctot.accrued;
+  const paid = __ctot.paid;
   const remain = accrued - paid;
   const wkStart = weekMondayStr(currentDate);
   const wkEndDt = new Date(wkStart + 'T12:00:00');
