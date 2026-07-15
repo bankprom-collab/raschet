@@ -1040,6 +1040,21 @@
   .board-tile.feature .ic { width:52px; height:52px; font-size:27px; }
   .board-tile.feature .t { font-size:17px; }
   @media (max-width:360px){ .board-tile.feature { grid-column:span 1; } }
+
+  /* ── ЗОНЫ ДОСКИ (A3: цвет закреплён за группой) ── */
+  .board-zone { margin-top:26px; }
+  .board-zone .board-grid { margin-top:10px; }
+  .board-zone-head {
+    display:flex; align-items:center; gap:10px;
+    font-family:'Unbounded',sans-serif; font-weight:600;
+    font-size:10.5px; text-transform:uppercase; letter-spacing:1.4px;
+    color:var(--zone-c,var(--muted));
+  }
+  .board-zone-head::after {
+    content:''; flex:1; height:1px;
+    background:color-mix(in srgb, var(--zone-c,var(--border)) 30%, transparent);
+  }
+  .board-zone-note { font-size:10.5px; color:var(--muted); letter-spacing:0; text-transform:none; font-family:'JetBrains Mono',monospace; }
 </style>
 </head>
 <body>
@@ -1070,77 +1085,95 @@
         <div class="board-stat"><div class="l">Переходящий остаток</div><div class="v" id="boardCarry" style="color:var(--accent3)">—</div></div>
       </div>
     </div>
-    <div class="board-grid">
-      <div class="board-tile feature" style="--tile-c:#00e5b0" onclick="hideBoard()">
-        <div class="ic">📝</div><div class="t">Ввод за день</div>
-        <div class="s">Дневник: приходы, выдачи, переходящий остаток. Здесь вводишь данные.</div>
+    <!-- ── ЗОНА 1: ДЕНЬГИ СЕГОДНЯ ── -->
+    <div class="board-zone" style="--zone-c:#00e5b0">
+      <div class="board-zone-head">Деньги сегодня</div>
+      <div class="board-grid">
+        <div class="board-tile feature" style="--tile-c:#00e5b0;border-color:rgba(0,229,176,.4)" onclick="hideBoard()">
+          <div class="ic">📝</div><div class="t">Ввод за день</div>
+          <div class="s">Дневник: приходы, выдачи, переходящий остаток. Здесь вводишь данные.</div>
+        </div>
+        <div class="board-tile feature" id="tileDebtOut" style="--tile-c:#ff6b4a;border-color:rgba(255,107,74,.4)" onclick="openDebtOutModal()">
+          <div class="ic">💸</div><div class="t">Сумма к отдаче</div>
+          <div class="s" id="tileDebtOutBody">—</div>
+        </div>
+        <div class="board-tile feature" id="tileCuratorMine" style="--tile-c:#ffb74d;border-color:rgba(255,183,77,.4)" onclick="openCuratorMineModal()">
+          <div class="ic">👔</div><div class="t">Куратор ко мне</div>
+          <div class="s" id="tileCuratorMineBody">—</div>
+        </div>
       </div>
-      <div class="board-tile feature" id="tileDebtOut" style="--tile-c:#ff8a4a" onclick="openDebtOutModal()">
-        <div class="ic">💸</div><div class="t">Сумма к отдаче</div>
-        <div class="s" id="tileDebtOutBody">—</div>
+    </div>
+
+    <!-- ── ЗОНА 2: ОТЧЁТЫ ── -->
+    <div class="board-zone" style="--zone-c:#7b8cff">
+      <div class="board-zone-head">Отчёты <span class="board-zone-note">только смотришь, ничего не меняешь</span></div>
+      <div class="board-grid">
+        <div class="board-tile" style="--tile-c:#7b8cff" onclick="openAnalyticsModal()">
+          <div class="ic">📈</div><div class="t">Аналитика</div>
+          <div class="s">Приходы и получено на руки по дням.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#7b8cff" onclick="openAnalyticsBaseModal()">
+          <div class="ic">🟢</div><div class="t">База</div>
+          <div class="s">Зелёные суммы, разбор и печать.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#7b8cff" onclick="openStatsModal()">
+          <div class="ic">📊</div><div class="t">Статистика</div>
+          <div class="s">Куратор по периодам.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#7b8cff" onclick="openClientPickModal()">
+          <div class="ic">👤</div><div class="t">Выборка по клиентам</div>
+          <div class="s">Движение по парам: пришло, %, выдано, остаток. С печатью.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#7b8cff" onclick="openAuditModal()">
+          <div class="ic">🩺</div><div class="t">Аудит</div>
+          <div class="s">Проверка цепочки остатков.</div>
+        </div>
       </div>
-      <div class="board-tile feature" id="tileCuratorMine" style="--tile-c:#ffb74d" onclick="openCuratorMineModal()">
-        <div class="ic">👔</div><div class="t">Куратор ко мне</div>
-        <div class="s" id="tileCuratorMineBody">—</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#a78bfa" onclick="openPartnerShareModal()">
-        <div class="ic">📤</div><div class="t">Партнёру</div>
-        <div class="s">Ссылка для партнёра — его пары, суммы и числа отдачи. Пароль защищает данные.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#818cf8" onclick="openClientPickModal()">
-        <div class="ic">👤</div><div class="t">Выборка по клиентам</div>
-        <div class="s">Движение по парам: пришло, %, выдано, остаток. С печатью.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#5fc9b4" onclick="openAnalyticsModal()">
-        <div class="ic">📈</div><div class="t">Аналитика</div>
-        <div class="s">Приходы и получено на руки по дням.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#00e5b0" onclick="openAnalyticsBaseModal()">
-        <div class="ic">🟢</div><div class="t">База</div>
-        <div class="s">Зелёные суммы, разбор и печать.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#ffb74d" onclick="openStatsModal()">
-        <div class="ic">📊</div><div class="t">Статистика</div>
-        <div class="s">Куратор по периодам.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#7b8cff" onclick="openClientsModal()">
-        <div class="ic">👥</div><div class="t">Пары</div>
-        <div class="s">Список пар клиент-получатель.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#ffb74d" onclick="openAuditModal()">
-        <div class="ic">🩺</div><div class="t">Аудит</div>
-        <div class="s">Проверка цепочки остатков.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#7b8cff" onclick="openSyncModal()">
-        <div class="ic">☁️</div><div class="t">Синхронизация</div>
-        <div class="s">Google Drive между устройствами. Здесь же — резервные копии.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#8590b3" onclick="exportData()" oncontextmenu="changeItogoFolder(event)" title="ЛКМ — сохранить. ПКМ — выбрать папку ИТОГ">
-        <div class="ic">⬇️</div><div class="t">Экспорт</div>
-        <div class="s" id="exportTileSub">Сохранить данные в файл.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#8590b3" onclick="importData()">
-        <div class="ic">⬆️</div><div class="t">Импорт</div>
-        <div class="s">Загрузить данные из файла.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#a78bfa" onclick="openMarkdownModal()">
-        <div class="ic">📋</div><div class="t">Markdown</div>
-        <div class="s">Экспорт для Obsidian.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#8590b3" onclick="changePassword()">
-        <div class="ic">🔒</div><div class="t">Сменить пароль</div>
-        <div class="s">Безопасность входа.</div>
-      </div>
-      <div class="board-tile" style="--tile-c:#ff6b4a" onclick="lockApp()">
-        <div class="ic">🚪</div><div class="t">Заблокировать</div>
-        <div class="s">Выйти и закрыть на пароль.</div>
+    </div>
+
+    <!-- ── ЗОНА 3: ДАННЫЕ И ДОСТУП ── -->
+    <div class="board-zone" style="--zone-c:#8590b3">
+      <div class="board-zone-head">Данные и доступ</div>
+      <div class="board-grid">
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="openClientsModal()">
+          <div class="ic">👥</div><div class="t">Пары</div>
+          <div class="s">Список пар клиент-получатель.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="openPartnerShareModal()">
+          <div class="ic">📤</div><div class="t">Партнёру</div>
+          <div class="s">Ссылка для партнёра — его пары, суммы и числа отдачи. Пароль защищает данные.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="openSyncModal()">
+          <div class="ic">☁️</div><div class="t">Синхронизация</div>
+          <div class="s">Google Drive между устройствами. Здесь же — резервные копии.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="exportData()" oncontextmenu="changeItogoFolder(event)" title="ЛКМ — сохранить. ПКМ — выбрать папку ИТОГ">
+          <div class="ic">⬇️</div><div class="t">Экспорт</div>
+          <div class="s" id="exportTileSub">Сохранить данные в файл.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="importData()">
+          <div class="ic">⬆️</div><div class="t">Импорт</div>
+          <div class="s">Загрузить данные из файла.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="openMarkdownModal()">
+          <div class="ic">📋</div><div class="t">Markdown</div>
+          <div class="s">Экспорт для Obsidian.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="changePassword()">
+          <div class="ic">🔒</div><div class="t">Сменить пароль</div>
+          <div class="s">Безопасность входа.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#8590b3" onclick="lockApp()">
+          <div class="ic">🚪</div><div class="t">Заблокировать</div>
+          <div class="s">Выйти и закрыть на пароль.</div>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v107</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v108</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1149,12 +1182,12 @@
     <div id="calPopup" class="cal-popup"></div>
   </div>
   <div class="header-btns">
-    <button class="btn btn-ghost" onclick="showBoard()" title="На доску — домашний экран с разделами" style="border-color:#00e5b0;color:#00e5b0">🏠 Доска</button>
+    <button class="btn btn-ghost" onclick="showBoard()" title="На доску — домашний экран с разделами">🏠 Доска</button>
     <button class="btn btn-primary" onclick="applyAndSave()" id="applySaveBtn"
             style="background:#ffd54f;border-color:#ffd54f;color:#000;font-weight:700"
             title="Пересчитать всю программу, сохранить в браузере и отправить на Google Drive">💾 Сохранить</button>
-    <button class="btn btn-ghost" onclick="toggleManualMode()" id="manualModeBtn" style="border-color:#ff8a4a;color:#ff8a4a" title="Поставить автопересчёт на паузу и править данные вручную">✋ Ручной режим</button>
-    <button class="btn btn-primary" onclick="openSyncModal()" title="Google Drive и резервные копии">☁ Синхр.</button>
+    <button class="btn btn-ghost" onclick="toggleManualMode()" id="manualModeBtn" title="Поставить автопересчёт на паузу и править данные вручную">✋ Ручной режим</button>
+    <button class="btn btn-ghost" onclick="openSyncModal()" title="Google Drive и резервные копии">☁ Синхр.</button>
     <!-- Остальные разделы (Пары, Выборка, Аналитика, База, Статистика, Аудит,
          Экспорт, Импорт, Markdown, пароль, блокировка) открываются с Доски (🏠) -->
   </div>
@@ -4349,7 +4382,7 @@ function updateManualModeBtn() {
     b.textContent = '✋ Ручной режим: ВКЛ';
     b.title = 'Автопересчёт остатков на паузе. Нажми, чтобы включить автопересчёт.';
   } else {
-    b.style.background = 'none'; b.style.borderColor = '#ff8a4a'; b.style.color = '#ff8a4a';
+    b.style.background = 'none'; b.style.borderColor = 'var(--border)'; b.style.color = 'var(--muted)';
     b.textContent = '✋ Ручной режим';
     b.title = 'Поставить автопересчёт на паузу и править данные вручную';
   }
