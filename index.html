@@ -4570,16 +4570,6 @@ function editRow(type, i) {
       const nc = newClient.trim();
       if (nc) r.client = nc;
     }
-    // Метка/примечание к приходу — НЕ участвует в расчёте, только для отображения.
-    const newTag = prompt(
-      'Метка (примечание к приходу, НЕ участвует в расчёте, пусто = убрать):\n\n' +
-      'Пример: «Авангард» — покажется рядом с парой, но в расчёте пары не участвует.',
-      r.tag || ''
-    );
-    if (newTag !== null) {
-      const t = newTag.trim();
-      r.tag = t || null;
-    }
     const newNote = prompt('Дополнительное примечание к сумме (пусто = убрать):', r.note || '');
     if (newNote !== null) {
       r.note = newNote.trim();
