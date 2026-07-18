@@ -4070,11 +4070,18 @@ function openCuratorMineModal() {
     </div>
   `;
 
+  const pendingAll = rows.filter(r => !r.given).length;
+  const bulkBtn = pendingAll > 0
+    ? `<div class="no-print" style="margin:10px 0 4px;text-align:right">
+         <button onclick="confirmAllCuratorGiven()" style="background:rgba(0,229,176,.14);border:1px solid rgba(0,229,176,.45);color:#00e5b0;cursor:pointer;font-size:12px;border-radius:8px;padding:6px 12px;font-weight:600">✓ Подтвердить все в работе (${pendingAll})</button>
+       </div>`
+    : '';
   box.innerHTML = `
     <div class="cm-head">
       <div class="cm-period">Общий итог по всем неделям (нарастающим) · пн–пт</div>
-      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.<br>В расчёт идут только отданные приходы — у пары которых проставлено «число отдачи» в блоке «Сумма к отдаче по парам». Приходы «в работе» не считаются, пока не отданы.</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.<br>В расчёт идут только отданные приходы — у пары которых проставлено «число отдачи» (или подтверждено кнопкой «✓ подтвердить»). Приходы «в работе» не считаются, пока не отданы.</div>
     </div>
+    ${bulkBtn}
     ${table}
     ${payBlock}
   `;
@@ -4157,6 +4164,18 @@ function unconfirmCuratorGiven(dateStr, encodedPair) {
   const pair = decodeURIComponent(encodedPair);
   const wk = weekMondayStr(dateStr);
   if (state.debtOutDates) delete state.debtOutDates[wk + '::' + pair];
+  saveState();
+  render();
+  openCuratorMineModal();
+}
+// Подтвердить все приходы «в работе» разом (для хвоста с начала месяца и т.п.).
+// Ставит «число отдачи» = дате прихода для каждой пары-недели. Обратимо (✕ у строки).
+function confirmAllCuratorGiven() {
+  const rows = collectCuratorMineRows(currentDate).filter(r => !r.given);
+  if (!rows.length) return;
+  if (!confirm('Пометить отданными все приходы «в работе» (' + rows.length + ' шт.)?\n\nОни войдут в расчёт куратору. Любой можно снять по кнопке ✕.')) return;
+  if (!state.debtOutDates) state.debtOutDates = {};
+  rows.forEach(r => { state.debtOutDates[weekMondayStr(r.date) + '::' + r.pair] = r.date; });
   saveState();
   render();
   openCuratorMineModal();
