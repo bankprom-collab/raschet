@@ -2867,8 +2867,8 @@ function renderOutBody(day) {
         : '';
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}${noteHtml}</td>
-        <td class="amount neg">${fmt(r.amount)}</td>
+        <td class="client-name">${escapeHtml(r.client)}</td>
+        <td class="amount neg">${fmt(r.amount)}${noteHtml}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="editRow('out',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="deleteRow('out',${i})" title="Удалить">🗑</button>
