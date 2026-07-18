@@ -3236,14 +3236,27 @@ function renderDebtOutTile() {
     const baseLine = (r.base > 0)
       ? `<div style="font-size:10.5px;color:var(--muted-bright);font-family:var(--font-num);text-align:right">база ${fmt(r.base)}</div>`
       : '';
-    return `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.35;margin-bottom:3px">
-       <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
-       <span style="text-align:right;white-space:nowrap">
-         ${baseLine}
-         <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
-         <span style="color:var(--muted);font-size:10px"> / </span>
-         <b style="color:#818cf8;font-family:var(--font-num)">${fmt(r.v2)}</b>
-       </span>
+    // Разбивка по дням: какой приход и от какой базовой суммы (только отображение)
+    const inRows = collectPairBaseBreakdown(r.name).inRows;
+    const dayHtml = inRows.length
+      ? `<div style="font-size:9.5px;color:var(--muted);font-family:var(--font-num);line-height:1.5;margin:1px 0 5px 6px">`
+        + inRows.map(x => `<div style="display:flex;justify-content:space-between;gap:6px">
+             <span style="color:var(--muted-bright)">${formatDateShort(x.date)}</span>
+             <span><b style="color:var(--text)">${fmt(x.amount)}</b> <span style="color:var(--muted)">−${(x.pct != null ? String(x.pct).replace('.', ',') : '') }%</span> → <b style="color:#ff8a4a">${fmt(x.after1)}</b></span>
+           </div>`).join('')
+        + `</div>`
+      : '';
+    return `<div style="margin-bottom:6px">
+       <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.35;margin-bottom:2px">
+         <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
+         <span style="text-align:right;white-space:nowrap">
+           ${baseLine}
+           <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
+           <span style="color:var(--muted);font-size:10px"> / </span>
+           <b style="color:#818cf8;font-family:var(--font-num)">${fmt(r.v2)}</b>
+         </span>
+       </div>
+       ${dayHtml}
      </div>`;
   }).join('');
   const more = rows.length > 3
