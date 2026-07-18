@@ -2528,6 +2528,16 @@ function editWeekDebtPair(pairName) {
 
 // ── КУРАТОР: НЕДЕЛЬНЫЙ НАРАСТАЮЩИЙ ИТОГ + ОТМЕТКА «ОТДАНО» ───────────────────
 // Приход куратора за пн–пт ТЕКУЩЕЙ недели (день dayStr). На след. неделю не переходит.
+// Приход считается «отданным» (и идёт в расчёт куратору), только если у его
+// пары за ту же неделю проставлено «число отдачи» в блоке «Сумма к отдаче по
+// парам» (state.debtOutDates, ключ «неделя::пара»). Это ТОЛЬКО фильтр учёта —
+// сами суммы/проценты не пересчитываются.
+function curatorGivenFor(dayStr, pair) {
+  if (!state.debtOutDates) return false;
+  const key = weekMondayStr(dayStr) + '::' + (pair || '');
+  const v = state.debtOutDates[key];
+  return !!(v && String(v).trim());
+}
 function curatorWeeklyAccrued(dayStr) {
   let sum = 0;
   const thisWeek = weekMondayStr(dayStr);
@@ -2539,7 +2549,8 @@ function curatorWeeklyAccrued(dayStr) {
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach(r => {
-      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0
+          && curatorGivenFor(d, r.client)) {     // только отданные (есть число отдачи)
         sum += floor100((r.amount || 0) * r.pctCur / 100);
       }
     });
@@ -3309,7 +3320,7 @@ function openDebtOutModal() {
             <span class="wds-date-lbl">📅 Число отдачи:</span>
             <input type="date" class="wds-date-inp" value="${savedDate}"
               onchange="setDebtOutDate('${nameAttr}', this.value)"
-              title="Планируемая дата выдачи. На расчёт не влияет.">
+              title="Дата выдачи. На суммы к отдаче по парам НЕ влияет, но помечает приходы этой пары как отданные — и тогда они идут в расчёт куратору.">
             ${savedDate ? `<button class="wds-date-clear" onclick="setDebtOutDate('${nameAttr}', '')" title="Убрать дату">✕</button>` : ''}
           </div>
         </div>`;
@@ -3321,7 +3332,7 @@ function openDebtOutModal() {
             <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — планируемая дата выдачи, только для заметки, на суммы не влияет.</div>
+          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата выдачи: на суммы к отдаче по парам не влияет, но помечает приходы пары как отданные — и тогда они попадают в расчёт куратору.</div>
         </div>`;
     }
   }
@@ -3830,7 +3841,8 @@ function renderPairBaseBreakdownHtml(pair) {
 function curatorWeekMaps(dayStr) {
   const thisWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
-  const accrByWeek = {};
+  const accrByWeek = {};        // все приходы с %кур — для видимости недель
+  const accrGivenByWeek = {};   // только отданные (есть число отдачи) — для итогов
   const paidByWeek = {};
   for (const d of allDays) {
     if (d > dayStr) break;
@@ -3843,13 +3855,17 @@ function curatorWeekMaps(dayStr) {
     if (isWeekday(d) && Array.isArray(dd.in)) {
       dd.in.forEach(r => {
         if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
-          accrByWeek[wk] = (accrByWeek[wk] || 0) + floor100((r.amount || 0) * r.pctCur / 100);
+          const cur = floor100((r.amount || 0) * r.pctCur / 100);
+          accrByWeek[wk] = (accrByWeek[wk] || 0) + cur;
+          if (curatorGivenFor(d, r.client)) {
+            accrGivenByWeek[wk] = (accrGivenByWeek[wk] || 0) + cur;
+          }
         }
       });
     }
   }
   const isShownWeek = (wk) => wk === thisWeek || (paidByWeek[wk] || 0) < (accrByWeek[wk] || 0);
-  return { thisWeek, allDays, accrByWeek, paidByWeek, isShownWeek };
+  return { thisWeek, allDays, accrByWeek, accrGivenByWeek, paidByWeek, isShownWeek };
 }
 
 function curatorMineTotals(dayStr) {
@@ -3858,7 +3874,7 @@ function curatorMineTotals(dayStr) {
   const weeks = new Set([...Object.keys(M.accrByWeek), ...Object.keys(M.paidByWeek)]);
   weeks.forEach(wk => {
     if (!M.isShownWeek(wk)) return;
-    accrued += (M.accrByWeek[wk] || 0);
+    accrued += (M.accrGivenByWeek[wk] || 0);   // в итог — только отданные
     paid += (M.paidByWeek[wk] || 0);
   });
   return { accrued, paid, remain: accrued - paid };
@@ -3883,6 +3899,7 @@ function collectCuratorMineRows(dayStr) {
           pctCur: r.pctCur,
           curatorSum: floor100((r.amount || 0) * r.pctCur / 100),
           idx: idx,
+          given: curatorGivenFor(d, r.client),   // отдано (есть число отдачи) — идёт в расчёт
         });
       }
     });
@@ -3900,7 +3917,7 @@ function renderCuratorTile() {
   if (accrued <= 0) { body.innerHTML = 'На этой неделе куратору ничего не начислено.'; return; }
   const rows = collectCuratorMineRows(currentDate);
   const topByPair = {};
-  rows.forEach(r => { topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
+  rows.forEach(r => { if (r.given) topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
   const topList = Object.entries(topByPair).sort((a,b) => b[1] - a[1]).slice(0, 3);
   const topHtml = topList.map(([p, v]) =>
     `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
@@ -3958,15 +3975,33 @@ function openCuratorMineModal() {
         На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора.
       </div>`
     : (() => {
-        const trs = rows.map(r => `
-          <tr>
+        const pendingSum = rows.filter(r => !r.given).reduce((s, r) => s + r.curatorSum, 0);
+        const pendingCount = rows.filter(r => !r.given).length;
+        const trs = rows.map(r => {
+          const dim = r.given ? '' : 'opacity:.5;';
+          const statusCell = r.given
+            ? `<td style="text-align:center;color:#00e5b0;font-size:11px;white-space:nowrap">✓ отдано</td>`
+            : `<td style="text-align:center;color:var(--muted);font-size:11px;white-space:nowrap">⏳ в работе</td>`;
+          const sumCell = r.given
+            ? `<td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>`
+            : `<td style="text-align:right;font-family:var(--font-num);color:var(--muted)">${fmt(r.curatorSum)}</td>`;
+          return `
+          <tr style="${dim}">
             <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
             <td>${escapeHtml(r.pair)}</td>
             <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
             <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
-            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
+            ${statusCell}
+            ${sumCell}
           </tr>
-        `).join('');
+        `;
+        }).join('');
+        const pendingRow = pendingCount > 0
+          ? `<tr class="cm-paid-row">
+              <td colspan="5" style="text-align:right;color:var(--muted)">⏳ в работе (ещё не отдано, не в счёте): ${pendingCount} шт.</td>
+              <td style="text-align:right;font-family:var(--font-num);color:var(--muted)">${fmt(pendingSum)}</td>
+            </tr>`
+          : '';
         return `<table class="cm-table">
           <thead>
             <tr>
@@ -3974,21 +4009,23 @@ function openCuratorMineModal() {
               <th>Пара</th>
               <th style="text-align:right">Сумма прихода</th>
               <th style="text-align:right">%кур</th>
+              <th style="text-align:center">Статус</th>
               <th style="text-align:right">К куратору</th>
             </tr>
           </thead>
           <tbody>${trs}</tbody>
           <tfoot>
             <tr class="cm-total-row">
-              <td colspan="4" style="text-align:right;font-weight:700">ИТОГО начислено:</td>
+              <td colspan="5" style="text-align:right;font-weight:700">ИТОГО начислено (по отданным):</td>
               <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(accrued)}</td>
             </tr>
+            ${pendingRow}
             <tr class="cm-paid-row">
-              <td colspan="4" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
+              <td colspan="5" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
               <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
             </tr>
             <tr class="cm-grand-row">
-              <td colspan="4" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">К ОТДАЧЕ:</td>
+              <td colspan="5" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">К ОТДАЧЕ:</td>
               <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(remain)}</td>
             </tr>
           </tfoot>
@@ -4029,7 +4066,7 @@ function openCuratorMineModal() {
   box.innerHTML = `
     <div class="cm-head">
       <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
-      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.<br>В расчёт идут только отданные приходы — у пары которых проставлено «число отдачи» в блоке «Сумма к отдаче по парам». Приходы «в работе» не считаются, пока не отданы.</div>
     </div>
     ${table}
     ${payBlock}
