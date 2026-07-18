@@ -1254,6 +1254,9 @@
           <input type="text" id="out-amount" placeholder="Сумма" inputmode="decimal" oninput="numericInputFilter(event)">
           <button class="btn btn-danger" onclick="addRow('out')" title="Добавить" style="font-size:18px;font-weight:700">+</button>
         </div>
+        <div style="padding:0 16px 12px">
+          <input type="text" id="out-note" placeholder="Примечание (необязательно, на расчёт не влияет)" style="width:100%">
+        </div>
       </div>
     </div>
 
@@ -2859,9 +2862,12 @@ function renderOutBody(day) {
   } else {
     tbody.innerHTML = day.out.map((r, i) => {
       // Долг/«выдано»/«закрыто» в дневном виде не показываем — это для аналитики.
+      const noteHtml = (r.note && r.note.trim())
+        ? `<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:3px;font-style:italic">📝 ${escapeHtml(r.note)}</div>`
+        : '';
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}</td>
+        <td class="client-name">${escapeHtml(r.client)}${noteHtml}</td>
         <td class="amount neg">${fmt(r.amount)}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="editRow('out',${i})" title="Редактировать">✏️</button>
@@ -4436,9 +4442,11 @@ function addRow(type) {
     const client = document.getElementById('out-client').value;
     const amount = parseDecimal(document.getElementById('out-amount').value);
     if (!client || isNaN(amount) || amount <= 0) { showToast('Заполните поля', true); return; }
-    // Храним точное число (без округления)
-    day.out.push({ client, amount: amount, note: '' });
+    const outNote = document.getElementById('out-note').value.trim();
+    // Храним точное число (без округления). note — свободный текст, в расчётах не участвует.
+    day.out.push({ client, amount: amount, note: outNote });
     document.getElementById('out-amount').value = '';
+    document.getElementById('out-note').value = '';
   } else {
     const client = document.getElementById('in-client').value;
     const raw = document.getElementById('in-amount').value;
@@ -4513,6 +4521,10 @@ function editRow(type, i) {
     const v = parseFloat(String(newAmt).replace(',', '.'));
     if (isNaN(v) || v <= 0) { showToast('Неверная сумма', true); return; }
     r.amount = v;
+    const newNote = prompt('Примечание (пусто = убрать, на расчёт не влияет):', r.note || '');
+    if (newNote !== null) {
+      r.note = newNote.trim();
+    }
   } else {
     const cur = r.parts ? r.parts.join('+') : String(r.amount);
     const newAmt = prompt(`Сумма для ${r.client} (можно "5000+3000"):`, cur);
