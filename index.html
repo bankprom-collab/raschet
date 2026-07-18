@@ -2553,8 +2553,7 @@ function curatorWeeklyAccrued(dayStr) {
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach(r => {
-      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0
-          && curatorGivenFor(d, r.client)) {     // только отданные (есть число отдачи)
+      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
         sum += floor100((r.amount || 0) * r.pctCur / 100);
       }
     });
@@ -3872,14 +3871,16 @@ function curatorWeekMaps(dayStr) {
   return { thisWeek, allDays, accrByWeek, accrGivenByWeek, paidByWeek, isShownWeek };
 }
 
+// Накопительный итог по ВСЕМ неделям (сквозной): всё начисленное куратору по
+// отданным приходам минус все выплаты куратору. Прошлые непогашенные недели тоже
+// входят. Никакого недельного «обнуления».
 function curatorMineTotals(dayStr) {
   const M = curatorWeekMaps(dayStr);
   let accrued = 0, paid = 0;
-  const weeks = new Set([...Object.keys(M.accrByWeek), ...Object.keys(M.paidByWeek)]);
+  const weeks = new Set([...Object.keys(M.accrGivenByWeek), ...Object.keys(M.paidByWeek)]);
   weeks.forEach(wk => {
-    if (!M.isShownWeek(wk)) return;
     accrued += (M.accrGivenByWeek[wk] || 0);   // в итог — только отданные
-    paid += (M.paidByWeek[wk] || 0);
+    paid += (M.paidByWeek[wk] || 0);           // все выплаты куратору
   });
   return { accrued, paid, remain: accrued - paid };
 }
@@ -3890,8 +3891,6 @@ function collectCuratorMineRows(dayStr) {
   for (const d of M.allDays) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
-    const wk = weekMondayStr(d);
-    if (!M.isShownWeek(wk)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3918,7 +3917,7 @@ function renderCuratorTile() {
   const accrued = __ctot.accrued;
   const paid = __ctot.paid;
   const remain = accrued - paid;
-  if (accrued <= 0) { body.innerHTML = 'На этой неделе куратору ничего не начислено.'; return; }
+  if (accrued <= 0) { body.innerHTML = 'Куратору пока ничего не начислено (нет подтверждённых приходов).'; return; }
   const rows = collectCuratorMineRows(currentDate);
   const topByPair = {};
   rows.forEach(r => { if (r.given) topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
@@ -3954,8 +3953,6 @@ function collectCuratorPayments(dayStr) {
     if (d > dayStr) break;
     const dd = state.days[d];
     if (!dd || !(typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0)) continue;
-    const wk = weekMondayStr(d);
-    if (!M.isShownWeek(wk)) continue;
     rows.push({ date: d, amount: dd.curatorPaid });
   }
   return rows;
@@ -3976,7 +3973,7 @@ function openCuratorMineModal() {
 
   const table = !rows.length
     ? `<div style="color:var(--muted);padding:8px 0">
-        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора.
+        Нет приходов с процентом куратора.
       </div>`
     : (() => {
         const pendingSum = rows.filter(r => !r.given).reduce((s, r) => s + r.curatorSum, 0);
@@ -4031,7 +4028,7 @@ function openCuratorMineModal() {
             </tr>
             ${pendingRow}
             <tr class="cm-paid-row">
-              <td colspan="5" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
+              <td colspan="5" style="text-align:right;color:var(--muted)">− отдано куратору (всего):</td>
               <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
             </tr>
             <tr class="cm-grand-row">
@@ -4052,11 +4049,11 @@ function openCuratorMineModal() {
           <button class="cm-pay-del no-print" onclick="removeCuratorPayment('${p.date}')" title="Убрать отметку об отдаче за этот день">✕</button>
         </div>
       `).join('')
-    : `<div class="cm-pay-empty">Пока ничего не отдано в этой неделе.</div>`;
+    : `<div class="cm-pay-empty">Пока ничего не отдано куратору.</div>`;
 
   const payBlock = `
     <div class="cm-paid-block">
-      <div class="cm-paid-head">📤 Отдано куратору в этой неделе</div>
+      <div class="cm-paid-head">📤 Отдано куратору (все выплаты)</div>
       <div class="cm-pay-list">${paidList}</div>
       <div class="cm-paid-total">
         <span>Итого отдано:</span>
@@ -4075,7 +4072,7 @@ function openCuratorMineModal() {
 
   box.innerHTML = `
     <div class="cm-head">
-      <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
+      <div class="cm-period">Общий итог по всем неделям (нарастающим) · пн–пт</div>
       <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.<br>В расчёт идут только отданные приходы — у пары которых проставлено «число отдачи» в блоке «Сумма к отдаче по парам». Приходы «в работе» не считаются, пока не отданы.</div>
     </div>
     ${table}
@@ -4196,7 +4193,7 @@ function renderSummary(day) {
   document.getElementById('s-in').textContent = fmt(inT);
   document.getElementById('s-balance').textContent = fmt(balance);
   const curEl = document.getElementById('s-curator');
-  if (curEl) curEl.textContent = fmt(curatorRunningBalance(currentDate));
+  if (curEl) curEl.textContent = fmt(curatorMineTotals(currentDate).remain);
   const curPaidLine = document.getElementById('curator-paid-line');
   if (curPaidLine) {
     const paidToday = day.curatorPaid || 0;
