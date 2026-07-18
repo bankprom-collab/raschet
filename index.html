@@ -2533,6 +2533,10 @@ function editWeekDebtPair(pairName) {
 // парам» (state.debtOutDates, ключ «неделя::пара»). Это ТОЛЬКО фильтр учёта —
 // сами суммы/проценты не пересчитываются.
 function curatorGivenFor(dayStr, pair) {
+  // Приход считается отданным ТОЛЬКО если это подтверждено вручную —
+  // у пары за её неделю проставлено «число отдачи». Без подтверждения приход
+  // остаётся «в работе» (ещё должны) и в расчёт куратору не идёт. Это касается
+  // и текущей, и прошлых недель — ничего не считается отданным автоматически.
   if (!state.debtOutDates) return false;
   const key = weekMondayStr(dayStr) + '::' + (pair || '');
   const v = state.debtOutDates[key];
@@ -3978,10 +3982,16 @@ function openCuratorMineModal() {
         const pendingSum = rows.filter(r => !r.given).reduce((s, r) => s + r.curatorSum, 0);
         const pendingCount = rows.filter(r => !r.given).length;
         const trs = rows.map(r => {
-          const dim = r.given ? '' : 'opacity:.5;';
+          const dim = r.given ? '' : 'opacity:.55;';
+          const encPair = encodeURIComponent(r.pair);
           const statusCell = r.given
-            ? `<td style="text-align:center;color:#00e5b0;font-size:11px;white-space:nowrap">✓ отдано клиенту</td>`
-            : `<td style="text-align:center;color:var(--muted);font-size:11px;white-space:nowrap">⏳ ещё не отдано</td>`;
+            ? `<td style="text-align:center;white-space:nowrap">
+                 <span style="color:#00e5b0;font-size:11px">✓ отдано клиенту</span>
+                 <button class="no-print" onclick="unconfirmCuratorGiven('${r.date}','${encPair}')" title="Убрать подтверждение — приход вернётся в «в работе»" style="margin-left:6px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">✕</button>
+               </td>`
+            : `<td style="text-align:center;white-space:nowrap">
+                 <button class="no-print" onclick="confirmCuratorGiven('${r.date}','${encPair}')" title="Отметить, что основная сумма отдана клиенту — приход пойдёт в расчёт куратору" style="background:rgba(0,229,176,.12);border:1px solid rgba(0,229,176,.4);color:#00e5b0;cursor:pointer;font-size:11px;border-radius:6px;padding:3px 8px;white-space:nowrap">✓ подтвердить</button>
+               </td>`;
           const sumCell = r.given
             ? `<td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>`
             : `<td style="text-align:right;font-family:var(--font-num);color:var(--muted)">${fmt(r.curatorSum)}</td>`;
@@ -4131,6 +4141,28 @@ function setDebtOutDate(encodedPair, dateStr) {
   }
   saveState();
   openDebtOutModal();
+}
+
+// Подтвердить отдачу прямо из таблицы «Куратор ко мне»: помечает пару за её
+// неделю как отданную (тот же ключ «неделя::пара» в state.debtOutDates, что и
+// «число отдачи»). Ставит «число отдачи» = дата прихода. Расчёт сумм не трогает —
+// только меняет фильтр «отдано/в работе». Помечает ВСЮ пару за эту неделю.
+function confirmCuratorGiven(dateStr, encodedPair) {
+  const pair = decodeURIComponent(encodedPair);
+  const wk = weekMondayStr(dateStr);
+  if (!state.debtOutDates) state.debtOutDates = {};
+  state.debtOutDates[wk + '::' + pair] = dateStr;
+  saveState();
+  render();
+  openCuratorMineModal();
+}
+function unconfirmCuratorGiven(dateStr, encodedPair) {
+  const pair = decodeURIComponent(encodedPair);
+  const wk = weekMondayStr(dateStr);
+  if (state.debtOutDates) delete state.debtOutDates[wk + '::' + pair];
+  saveState();
+  render();
+  openCuratorMineModal();
 }
 
 function renderSummary(day) {
