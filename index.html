@@ -352,13 +352,13 @@
     border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
   }
   .wds-break-head {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr 1fr; gap: 8px;
     font-size: 10px; color: var(--muted); text-transform: uppercase;
     letter-spacing: .04em; padding-bottom: 4px;
     border-bottom: 1px dashed rgba(255,138,74,.2); margin-bottom: 4px;
   }
   .wds-break-row {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr 1fr; gap: 8px;
     padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,.03);
     align-items: center;
   }
@@ -367,9 +367,10 @@
   .wds-break-amt { color: var(--text); font-weight: 600; }
   .wds-break-pct { color: var(--muted); font-size: 11px; }
   .wds-break-after { color: #ff8a4a; font-weight: 600; }
+  .wds-break-after2 { color: #818cf8; font-weight: 600; }
   .wds-break-out .wds-break-amt { color: var(--expense); }
   .wds-break-total {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr 1fr; gap: 8px;
     padding: 6px 0 2px; margin-top: 4px;
     border-top: 1px solid rgba(255,138,74,.3);
     font-size: 12px; color: var(--muted-bright);
@@ -3752,6 +3753,7 @@ function renderPairBaseBreakdownHtml(pair) {
   const { inRows, outRows } = collectPairBaseBreakdown(pair);
   const totalBase = inRows.reduce((s, r) => s + r.amount, 0);
   const totalAfter1 = inRows.reduce((s, r) => s + r.after1, 0);
+  const totalAfter2 = inRows.reduce((s, r) => s + (r.after2 != null ? r.after2 : 0), 0);
   const totalReceived = outRows.reduce((s, r) => s + r.amount, 0);
   if (!inRows.length && !outRows.length) {
     return `<div class="wds-break-empty">Приходов и выдач этой пары за активный период нет.</div>`;
@@ -3763,17 +3765,19 @@ function renderPairBaseBreakdownHtml(pair) {
     ].filter(Boolean).join(' / ');
     const tagChip = r.tag ? `<span class="pair-tag" style="margin-left:6px" title="Метка — не участвует в расчёте">🏷 ${escapeHtml(r.tag)}</span>` : '';
     return `<div class="wds-break-row">
-      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}</span>
       <span class="wds-break-amt">${fmt(r.amount)}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
       <span class="wds-break-after">→ ${fmt(r.after1)}</span>
+      <span class="wds-break-after2">${r.after2 != null ? '→ ' + fmt(r.after2) : '—'}</span>
     </div>`;
   }).join('');
   const outHtml = outRows.map(r => `<div class="wds-break-row wds-break-out">
-      <span class="wds-break-date">${formatDateShort(r.date)}</span>
       <span class="wds-break-amt">− ${fmt(r.amount)}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}</span>
       <span class="wds-break-pct">выдано</span>
       <span class="wds-break-after"></span>
+      <span class="wds-break-after2"></span>
     </div>`).join('');
   return `<div class="wds-break">
     <div class="wds-break-baseline" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:6px 0 8px;margin-bottom:6px;border-bottom:1px dashed var(--border)">
@@ -3781,26 +3785,28 @@ function renderPairBaseBreakdownHtml(pair) {
       <b style="font-family:var(--font-num);color:var(--muted-bright);font-size:15px">${fmt(totalBase)}</b>
     </div>
     <div class="wds-break-head">
-      <span>Приходы:</span>
-      <span>база</span>
+      <span>база (сумма прихода)</span>
+      <span>дата</span>
       <span>%</span>
       <span>после 1-го %</span>
+      <span>после 2-го %</span>
     </div>
     ${inHtml || '<div class="wds-break-empty">— нет приходов —</div>'}
     <div class="wds-break-total">
-      <span>Итого база:</span>
       <span><b>${fmt(totalBase)}</b></span>
+      <span>← итого база</span>
       <span></span>
       <span><b>${fmt(totalAfter1)}</b></span>
+      <span><b style="color:#818cf8">${fmt(totalAfter2)}</b></span>
     </div>
     ${outRows.length ? `<div class="wds-break-head" style="margin-top:8px">
-      <span>Выдачи (получено на руки):</span><span></span><span></span><span></span>
+      <span>Выдачи (получено на руки):</span><span></span><span></span><span></span><span></span>
     </div>
     ${outHtml}
     <div class="wds-break-total">
-      <span>Итого выдано:</span>
       <span><b style="color:var(--expense)">${fmt(totalReceived)}</b></span>
-      <span></span><span></span>
+      <span>← итого выдано</span>
+      <span></span><span></span><span></span>
     </div>` : ''}
   </div>`;
 }
