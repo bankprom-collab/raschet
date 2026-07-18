@@ -3980,8 +3980,8 @@ function openCuratorMineModal() {
         const trs = rows.map(r => {
           const dim = r.given ? '' : 'opacity:.5;';
           const statusCell = r.given
-            ? `<td style="text-align:center;color:#00e5b0;font-size:11px;white-space:nowrap">✓ отдано</td>`
-            : `<td style="text-align:center;color:var(--muted);font-size:11px;white-space:nowrap">⏳ в работе</td>`;
+            ? `<td style="text-align:center;color:#00e5b0;font-size:11px;white-space:nowrap">✓ отдано клиенту</td>`
+            : `<td style="text-align:center;color:var(--muted);font-size:11px;white-space:nowrap">⏳ ещё не отдано</td>`;
           const sumCell = r.given
             ? `<td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>`
             : `<td style="text-align:right;font-family:var(--font-num);color:var(--muted)">${fmt(r.curatorSum)}</td>`;
@@ -4009,7 +4009,7 @@ function openCuratorMineModal() {
               <th>Пара</th>
               <th style="text-align:right">Сумма прихода</th>
               <th style="text-align:right">%кур</th>
-              <th style="text-align:center">Статус</th>
+              <th style="text-align:center">Отдано клиенту</th>
               <th style="text-align:right">К куратору</th>
             </tr>
           </thead>
