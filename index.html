@@ -3776,9 +3776,13 @@ function renderPairBaseBreakdownHtml(pair) {
       <span class="wds-break-after"></span>
     </div>`).join('');
   return `<div class="wds-break">
+    <div class="wds-break-baseline" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:6px 0 8px;margin-bottom:6px;border-bottom:1px dashed var(--border)">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Базовая сумма (до вычета %)</span>
+      <b style="font-family:var(--font-num);color:var(--muted-bright);font-size:15px">${fmt(totalBase)}</b>
+    </div>
     <div class="wds-break-head">
       <span>Приходы:</span>
-      <span>сумма</span>
+      <span>база</span>
       <span>%</span>
       <span>после 1-го %</span>
     </div>
