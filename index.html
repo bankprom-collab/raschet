@@ -1174,7 +1174,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v110</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v111</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2083,6 +2083,9 @@ function migrateState(s) {
   // Хранилище дат отдачи по парам, ключ 'YYYY-MM-DD_понедельник::пара' → 'YYYY-MM-DD'.
   // Только метаданные для планирования — на расчёт долгов/куратора не влияют.
   if (!s.debtOutDates || typeof s.debtOutDates !== 'object') s.debtOutDates = {};
+  // Отметки «приход реально выдан» для расчёта куратора. Ключ «дата::пара».
+  // Хранится ОТДЕЛЬНО от debtOutDates («число отдачи» — это план, а не факт).
+  if (!s.curatorGiven || typeof s.curatorGiven !== 'object') s.curatorGiven = {};
 
   // Переименование: «Пащенко» → «Пр.Мира» во всех именах пар (идемпотентно).
   // Затрагивает записи приходов/выдач, базу клиентов и ключи недельных коррекций.
@@ -2533,14 +2536,11 @@ function editWeekDebtPair(pairName) {
 // парам» (state.debtOutDates, ключ «неделя::пара»). Это ТОЛЬКО фильтр учёта —
 // сами суммы/проценты не пересчитываются.
 function curatorGivenFor(dayStr, pair) {
-  // Приход считается отданным ТОЛЬКО если это подтверждено вручную —
-  // у пары за её неделю проставлено «число отдачи». Без подтверждения приход
-  // остаётся «в работе» (ещё должны) и в расчёт куратору не идёт. Это касается
-  // и текущей, и прошлых недель — ничего не считается отданным автоматически.
-  if (!state.debtOutDates) return false;
-  const key = weekMondayStr(dayStr) + '::' + (pair || '');
-  const v = state.debtOutDates[key];
-  return !!(v && String(v).trim());
+  // Приход считается ВЫДАННЫМ только если это отмечено вручную (кнопка
+  // «✓ подтвердить»). Никакой связи с «числом отдачи» — то план, а не факт.
+  // Пока не отмечен, приход просто фиксируется и в расчёт куратору не идёт.
+  if (!state.curatorGiven) return false;
+  return state.curatorGiven[(dayStr || '') + '::' + (pair || '')] === true;
 }
 function curatorWeeklyAccrued(dayStr) {
   let sum = 0;
@@ -3325,7 +3325,7 @@ function openDebtOutModal() {
             <span class="wds-date-lbl">📅 Число отдачи:</span>
             <input type="date" class="wds-date-inp" value="${savedDate}"
               onchange="setDebtOutDate('${nameAttr}', this.value)"
-              title="Дата выдачи. На суммы к отдаче по парам НЕ влияет, но помечает приходы этой пары как отданные — и тогда они идут в расчёт куратору.">
+              title="Планируемая дата выдачи. На расчёт не влияет.">
             ${savedDate ? `<button class="wds-date-clear" onclick="setDebtOutDate('${nameAttr}', '')" title="Убрать дату">✕</button>` : ''}
           </div>
         </div>`;
@@ -3337,7 +3337,7 @@ function openDebtOutModal() {
             <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата выдачи: на суммы к отдаче по парам не влияет, но помечает приходы пары как отданные — и тогда они попадают в расчёт куратору.</div>
+          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — планируемая дата выдачи, только для заметки, на суммы не влияет.</div>
         </div>`;
     }
   }
@@ -3929,7 +3929,7 @@ function collectCuratorMineRows(dayStr) {
           pctCur: r.pctCur,
           curatorSum: floor100((r.amount || 0) * r.pctCur / 100),
           idx: idx,
-          given: curatorGivenFor(d, r.client),   // отдано (есть число отдачи) — идёт в расчёт
+          given: curatorGivenFor(d, r.client),   // выдан вручную отмечен — идёт в расчёт
         });
       }
     });
@@ -4106,7 +4106,7 @@ function openCuratorMineModal() {
   box.innerHTML = `
     <div class="cm-head">
       <div class="cm-period">Общий итог по всем неделям (нарастающим) · пн–пт</div>
-      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.<br>В расчёт идут только отданные приходы — у пары которых проставлено «число отдачи» (или подтверждено кнопкой «✓ подтвердить»). Приходы «в работе» не считаются, пока не отданы.</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.<br>В расчёт идут только ВЫДАННЫЕ приходы — отмеченные кнопкой «✓ подтвердить». Остальные просто фиксируются и не участвуют в расчёте, пока не будут выданы. «Число отдачи» здесь ни при чём — это план.</div>
     </div>
     ${bulkBtn}
     ${table}
@@ -4180,17 +4180,15 @@ function setDebtOutDate(encodedPair, dateStr) {
 // только меняет фильтр «отдано/в работе». Помечает ВСЮ пару за эту неделю.
 function confirmCuratorGiven(dateStr, encodedPair) {
   const pair = decodeURIComponent(encodedPair);
-  const wk = weekMondayStr(dateStr);
-  if (!state.debtOutDates) state.debtOutDates = {};
-  state.debtOutDates[wk + '::' + pair] = dateStr;
+  if (!state.curatorGiven) state.curatorGiven = {};
+  state.curatorGiven[dateStr + '::' + pair] = true;
   saveState();
   render();
   openCuratorMineModal();
 }
 function unconfirmCuratorGiven(dateStr, encodedPair) {
   const pair = decodeURIComponent(encodedPair);
-  const wk = weekMondayStr(dateStr);
-  if (state.debtOutDates) delete state.debtOutDates[wk + '::' + pair];
+  if (state.curatorGiven) delete state.curatorGiven[dateStr + '::' + pair];
   saveState();
   render();
   openCuratorMineModal();
@@ -4200,9 +4198,9 @@ function unconfirmCuratorGiven(dateStr, encodedPair) {
 function confirmAllCuratorGiven() {
   const rows = collectCuratorMineRows(currentDate).filter(r => !r.given);
   if (!rows.length) return;
-  if (!confirm('Пометить отданными все приходы «в работе» (' + rows.length + ' шт.)?\n\nОни войдут в расчёт куратору. Любой можно снять по кнопке ✕.')) return;
-  if (!state.debtOutDates) state.debtOutDates = {};
-  rows.forEach(r => { state.debtOutDates[weekMondayStr(r.date) + '::' + r.pair] = r.date; });
+  if (!confirm('Пометить выданными все приходы «в работе» (' + rows.length + ' шт.)?\n\nОни войдут в расчёт куратору. Любой можно снять по кнопке ✕.')) return;
+  if (!state.curatorGiven) state.curatorGiven = {};
+  rows.forEach(r => { state.curatorGiven[r.date + '::' + r.pair] = true; });
   saveState();
   render();
   openCuratorMineModal();
