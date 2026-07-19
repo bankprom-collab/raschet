@@ -3251,7 +3251,7 @@ function renderDebtOutTile() {
       ? `<div style="font-size:10.5px;color:var(--muted-bright);font-family:var(--font-num);text-align:right">база ${fmt(r.base)}</div>`
       : '';
     // Разбивка по дням: какой приход и от какой базовой суммы (только отображение)
-    const inRows = collectPairBaseBreakdown(r.name).inRows;
+    const inRows = pairBaseOpenRows(r.name).inRows;
     const dayHtml = inRows.length
       ? `<div style="font-size:9.5px;color:var(--muted);font-family:var(--font-num);line-height:1.5;margin:1px 0 5px 6px">`
         + inRows.map(x => `<div style="display:flex;justify-content:space-between;gap:6px">
@@ -3774,10 +3774,35 @@ function collectPairBaseBreakdown(pair) {
   return { inRows, outRows };
 }
 
+// Гасим приходы выдачами: выданная сумма закрывает приход и он ПОЛНОСТЬЮ уходит
+// из базы и из показа (его больше нет). Правила совпадения — те же, что в
+// расчёте пары: точное совпадение выдачи с суммой конкретного прихода после
+// 1-го % ЛИБО с итогом всех оставшихся открытых приходов (тогда закрываются все).
+// Возвращает только ОТКРЫТЫЕ приходы и непогашенные остатки выдач.
+// computeWeekPairDebt НЕ трогаем — итоги считает он, здесь только отбор.
+function pairBaseOpenRows(pair) {
+  const { inRows, outRows } = collectPairBaseBreakdown(pair);
+  const EPS = 0.5;
+  const open = inRows.slice();
+  const leftovers = [];
+  (outRows || []).forEach(o => {
+    const amt = o.amount || 0;
+    // 1) выдача равна итогу всех оставшихся открытых приходов → закрываем все
+    const sumOpen = open.reduce((s, r) => s + r.after1, 0);
+    if (open.length && Math.abs(sumOpen - amt) < EPS) { open.length = 0; return; }
+    // 2) выдача точно совпадает с конкретным приходом → закрываем его
+    const idx = open.findIndex(r => Math.abs(r.after1 - amt) < EPS);
+    if (idx >= 0) { open.splice(idx, 1); return; }
+    // 3) не совпало ни с чем — оставляем как отдельную выдачу
+    leftovers.push(o);
+  });
+  return { inRows: open, outRows: leftovers };
+}
+
 // HTML разбивки базы: список приходов + выдач + итог. Вставляется под парой
 // в модалке долгов и в блоке «Задолженность за неделю».
 function renderPairBaseBreakdownHtml(pair, netBase) {
-  const { inRows, outRows } = collectPairBaseBreakdown(pair);
+  const { inRows, outRows } = pairBaseOpenRows(pair);
   const totalBase = inRows.reduce((s, r) => s + r.amount, 0);
   const totalAfter1 = inRows.reduce((s, r) => s + r.after1, 0);
   const totalAfter2 = inRows.reduce((s, r) => s + (r.after2 != null ? r.after2 : 0), 0);
@@ -3808,7 +3833,7 @@ function renderPairBaseBreakdownHtml(pair, netBase) {
     </div>`).join('');
   return `<div class="wds-break">
     <div class="wds-break-baseline" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:6px 0 8px;margin-bottom:6px;border-bottom:1px dashed var(--border)">
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">${(netBase !== undefined && netBase !== null) ? 'База пары (уже за вычетом выданного)' : 'Базовая сумма (до вычета %)'}</span>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">База пары (выданное уже вышло)</span>
       <b style="font-family:var(--font-num);color:var(--muted-bright);font-size:15px">${fmt((netBase !== undefined && netBase !== null) ? netBase : totalBase)}</b>
     </div>
     <div class="wds-break-head">
@@ -3821,7 +3846,7 @@ function renderPairBaseBreakdownHtml(pair, netBase) {
     ${inHtml || '<div class="wds-break-empty">— нет приходов —</div>'}
     <div class="wds-break-total">
       <span><b>${fmt(totalBase)}</b></span>
-      <span>← итого приходы (до вычета выданного)</span>
+      <span>← итого база (без выданных)</span>
       <span></span>
       <span><b>${fmt(totalAfter1)}</b></span>
       <span><b style="color:#818cf8">${fmt(totalAfter2)}</b></span>
