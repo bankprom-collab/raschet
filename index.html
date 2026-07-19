@@ -3218,7 +3218,7 @@ function renderWeekDebtSummary() {
       </div>
       <details class="wds-break-details">
         <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
-        ${renderPairBaseBreakdownHtml(r.name)}
+        ${renderPairBaseBreakdownHtml(r.name, r.base)}
       </details>
     </div>`;
   }).join('');
@@ -3317,7 +3317,7 @@ function openDebtOutModal() {
           </div>
           <details class="wds-break-details">
             <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
-            ${renderPairBaseBreakdownHtml(r.name)}
+            ${renderPairBaseBreakdownHtml(r.name, r.base)}
           </details>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
@@ -3776,7 +3776,7 @@ function collectPairBaseBreakdown(pair) {
 
 // HTML разбивки базы: список приходов + выдач + итог. Вставляется под парой
 // в модалке долгов и в блоке «Задолженность за неделю».
-function renderPairBaseBreakdownHtml(pair) {
+function renderPairBaseBreakdownHtml(pair, netBase) {
   const { inRows, outRows } = collectPairBaseBreakdown(pair);
   const totalBase = inRows.reduce((s, r) => s + r.amount, 0);
   const totalAfter1 = inRows.reduce((s, r) => s + r.after1, 0);
@@ -3808,8 +3808,8 @@ function renderPairBaseBreakdownHtml(pair) {
     </div>`).join('');
   return `<div class="wds-break">
     <div class="wds-break-baseline" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:6px 0 8px;margin-bottom:6px;border-bottom:1px dashed var(--border)">
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Базовая сумма (до вычета %)</span>
-      <b style="font-family:var(--font-num);color:var(--muted-bright);font-size:15px">${fmt(totalBase)}</b>
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">${(netBase !== undefined && netBase !== null) ? 'База пары (уже за вычетом выданного)' : 'Базовая сумма (до вычета %)'}</span>
+      <b style="font-family:var(--font-num);color:var(--muted-bright);font-size:15px">${fmt((netBase !== undefined && netBase !== null) ? netBase : totalBase)}</b>
     </div>
     <div class="wds-break-head">
       <span>база (сумма прихода)</span>
@@ -3821,7 +3821,7 @@ function renderPairBaseBreakdownHtml(pair) {
     ${inHtml || '<div class="wds-break-empty">— нет приходов —</div>'}
     <div class="wds-break-total">
       <span><b>${fmt(totalBase)}</b></span>
-      <span>← итого база</span>
+      <span>← итого приходы (до вычета выданного)</span>
       <span></span>
       <span><b>${fmt(totalAfter1)}</b></span>
       <span><b style="color:#818cf8">${fmt(totalAfter2)}</b></span>
@@ -4212,7 +4212,7 @@ function renderSummary(day) {
   document.getElementById('s-in').textContent = fmt(inT);
   document.getElementById('s-balance').textContent = fmt(balance);
   const curEl = document.getElementById('s-curator');
-  if (curEl) curEl.textContent = fmt(curatorMineTotals(currentDate).remain);
+  if (curEl) curEl.textContent = fmt(curatorRunningBalance(currentDate));
   const curPaidLine = document.getElementById('curator-paid-line');
   if (curPaidLine) {
     const paidToday = day.curatorPaid || 0;
