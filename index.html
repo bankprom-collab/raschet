@@ -375,6 +375,14 @@
     font-size: 12px; color: var(--muted-bright);
   }
   .wds-break-total b { color: #ff8a4a; }
+  /* Строка «Невыдано» — невыданный остаток (за вычетом всех выдач) */
+  .wds-break-net {
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    padding: 6px 0 2px; margin-top: 4px;
+    border-top: 1px dashed rgba(74,222,128,.35);
+    font-size: 12px; color: var(--accent);
+  }
+  .wds-break-net b { color: var(--accent); }
   .wds-break-empty { color: var(--muted); font-style: italic; padding: 4px 0; }
   /* Метка (r.tag) — не участвует в расчётах, только для отображения */
   .pair-tag {
@@ -3221,8 +3229,8 @@ function renderWeekDebtSummary() {
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
       <details class="wds-break-details">
-        <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
-        ${renderPairBaseBreakdownHtml(r.name)}
+        <summary>📋 Раскрыть базу: показать приходы и невыданный остаток</summary>
+        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 })}
       </details>
     </div>`;
   }).join('');
@@ -3307,8 +3315,8 @@ function openDebtOutModal() {
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
           </div>
           <details class="wds-break-details">
-            <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
-            ${renderPairBaseBreakdownHtml(r.name)}
+            <summary>📋 Раскрыть базу: показать приходы и невыданный остаток</summary>
+            ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 })}
           </details>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
@@ -3779,13 +3787,31 @@ function collectPairBaseBreakdown(pair) {
 
 // HTML разбивки базы: список приходов + выдач + итог. Вставляется под парой
 // в модалке долгов и в блоке «Задолженность за неделю».
-function renderPairBaseBreakdownHtml(pair) {
+// remain (необязательно) — невыданный остаток пары из расчёта: { base, v1 }.
+// Передаётся из блока/модалки, чтобы строка «Невыдано» ТОЧНО совпадала с
+// задолженностью. Если не передан — берём остаток напрямую из pairWeekDebt
+// (тот же движок, что и в блоке), а не простой разницей — чтобы совпадало
+// даже при закрытых неделях. Расчётную логику это не меняет: только показ.
+function renderPairBaseBreakdownHtml(pair, remain) {
   const { inRows, outRows } = collectPairBaseBreakdown(pair);
   const totalBase = inRows.reduce((s, r) => s + r.amount, 0);
   const totalAfter1 = inRows.reduce((s, r) => s + r.after1, 0);
-  const totalReceived = outRows.reduce((s, r) => s + r.amount, 0);
   if (!inRows.length && !outRows.length) {
     return `<div class="wds-break-empty">Приходов и выдач этой пары за активный период нет.</div>`;
+  }
+  // Невыданный остаток (после 1-го %) и остаток базы — из движка расчёта.
+  let netAfter1, netBase;
+  if (remain && (remain.v1 !== null && remain.v1 !== undefined)) {
+    netAfter1 = remain.v1;
+    netBase = (remain.base !== null && remain.base !== undefined) ? remain.base : 0;
+  } else {
+    const p = (pair || '').trim();
+    const isRynok = p === 'Вейс(рук)-Рынок';
+    const carryAllPairs = weekMondayStr(currentDate) >= PAIR_CARRY_START_DATE;
+    const startWeek = isRynok ? undefined : (carryAllPairs ? PAIR_CARRY_START_DATE : weekMondayStr(currentDate));
+    const dbt = pairWeekDebt(currentDate, p, startWeek);
+    netAfter1 = Math.max(0, dbt.remaining || 0);
+    netBase = Math.max(0, dbt.remainingBase || 0);
   }
   const inHtml = inRows.map(r => {
     const pcts = [
@@ -3800,12 +3826,6 @@ function renderPairBaseBreakdownHtml(pair) {
       <span class="wds-break-after">→ ${fmt(r.after1)}</span>
     </div>`;
   }).join('');
-  const outHtml = outRows.map(r => `<div class="wds-break-row wds-break-out">
-      <span class="wds-break-date">${formatDateShort(r.date)}</span>
-      <span class="wds-break-amt">− ${fmt(r.amount)}</span>
-      <span class="wds-break-pct">выдано</span>
-      <span class="wds-break-after"></span>
-    </div>`).join('');
   return `<div class="wds-break">
     <div class="wds-break-head">
       <span>Приходы:</span>
@@ -3820,15 +3840,12 @@ function renderPairBaseBreakdownHtml(pair) {
       <span></span>
       <span><b>${fmt(totalAfter1)}</b></span>
     </div>
-    ${outRows.length ? `<div class="wds-break-head" style="margin-top:8px">
-      <span>Выдачи (получено на руки):</span><span></span><span></span><span></span>
+    <div class="wds-break-net">
+      <span>Невыдано (за вычетом выдач):</span>
+      <span><b>${fmt(netBase)}</b></span>
+      <span></span>
+      <span><b>${fmt(netAfter1)}</b></span>
     </div>
-    ${outHtml}
-    <div class="wds-break-total">
-      <span>Итого выдано:</span>
-      <span><b style="color:var(--expense)">${fmt(totalReceived)}</b></span>
-      <span></span><span></span>
-    </div>` : ''}
   </div>`;
 }
 
@@ -3838,6 +3855,21 @@ function renderPairBaseBreakdownHtml(pair) {
 function curatorWeekMaps(dayStr) {
   const thisWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
+  // Пары, по которым была хотя бы одна РЕАЛЬНАЯ выдача (получено на руки) до
+  // текущего дня. Куратор «ко мне» считается ТОЛЬКО по таким парам — приходы
+  // пар без единой выдачи в этот блок не попадают (правило подтверждено
+  // пользователем). Формула начисления куратора не меняется, меняется только
+  // набор приходов, которые в неё входят.
+  const paidPairs = new Set();
+  for (const d of allDays) {
+    if (d > dayStr) break;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach(o => {
+      const c = (o.client || '').trim();
+      if (c && (o.amount || 0) > 0) paidPairs.add(c);
+    });
+  }
   const accrByWeek = {};
   const paidByWeek = {};
   for (const d of allDays) {
@@ -3850,14 +3882,15 @@ function curatorWeekMaps(dayStr) {
     }
     if (isWeekday(d) && Array.isArray(dd.in)) {
       dd.in.forEach(r => {
-        if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+        if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0
+            && paidPairs.has((r.client || '').trim())) {
           accrByWeek[wk] = (accrByWeek[wk] || 0) + floor100((r.amount || 0) * r.pctCur / 100);
         }
       });
     }
   }
   const isShownWeek = (wk) => wk === thisWeek || (paidByWeek[wk] || 0) < (accrByWeek[wk] || 0);
-  return { thisWeek, allDays, accrByWeek, paidByWeek, isShownWeek };
+  return { thisWeek, allDays, accrByWeek, paidByWeek, isShownWeek, paidPairs };
 }
 
 function curatorMineTotals(dayStr) {
@@ -3883,7 +3916,8 @@ function collectCuratorMineRows(dayStr) {
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
-      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0
+          && M.paidPairs.has((r.client || '').trim())) {
         rows.push({
           date: d,
           pair: r.client || '—',
@@ -3905,7 +3939,7 @@ function renderCuratorTile() {
   const accrued = __ctot.accrued;
   const paid = __ctot.paid;
   const remain = accrued - paid;
-  if (accrued <= 0) { body.innerHTML = 'На этой неделе куратору ничего не начислено.'; return; }
+  if (accrued <= 0) { body.innerHTML = 'Куратору к отдаче ничего нет (учитываются только пары, по которым уже была выдача).'; return; }
   const rows = collectCuratorMineRows(currentDate);
   const topByPair = {};
   rows.forEach(r => { topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
@@ -3963,7 +3997,7 @@ function openCuratorMineModal() {
 
   const table = !rows.length
     ? `<div style="color:var(--muted);padding:8px 0">
-        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора.
+        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора по парам, где уже была выдача.
       </div>`
     : (() => {
         const trs = rows.map(r => `
@@ -4037,7 +4071,7 @@ function openCuratorMineModal() {
   box.innerHTML = `
     <div class="cm-head">
       <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
-      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Учитываются только приходы пар, по которым уже была выдача на руки.</div>
     </div>
     ${table}
     ${payBlock}
