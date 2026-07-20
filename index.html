@@ -3818,43 +3818,51 @@ function renderPairBaseBreakdownHtml(pair, remain) {
   }
 
   // Доля выданности каждого прихода — выдачи гасят приходы, старые сначала.
+  // Полностью выданные приходы НЕ показываем совсем. Приходы, которых выдача
+  // не коснулась (доля выдачи = 0), показываем целиком. Частично выданный
+  // приход отдельной строкой с датой НЕ показываем — его невыданный «хвост»
+  // сворачивается в общий невыданный остаток, чтобы нигде не мелькала выданная
+  // сумма или слово «выдан».
   const cover = pairPaidCoverage(currentDate);
-  const unpaid = [];
+  const wholeUnpaid = [];
   inRows.forEach(r => {
-    const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // выдано
-    const uf = 1 - frac;                                         // не выдано
-    if (uf <= 0.0005) return;                                    // выдан полностью — не показываем
-    unpaid.push({
+    const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля, что выдана
+    if (frac > 0.0005) return;                                  // хоть что-то выдано — не как целый приход
+    wholeUnpaid.push({
       date: r.date, pct: r.pct, pct2: r.pct2, tag: r.tag,
-      uAmount: r100((r.amount || 0) * uf),
-      uAfter1: r100((r.after1 || 0) * uf),
-      partial: frac > 0.0005,
+      amount: r.amount || 0, after1: r.after1 || 0,
     });
   });
-  // Подгоняем последний (самый новый) невыданный приход, чтобы суммы строк точно
-  // совпали с итогом из движка (устраняем расхождение округлений).
-  if (unpaid.length) {
-    const sumA = unpaid.reduce((s, x) => s + x.uAfter1, 0);
-    const sumB = unpaid.reduce((s, x) => s + x.uAmount, 0);
-    const last = unpaid[unpaid.length - 1];
-    last.uAfter1 += (netAfter1 - sumA);
-    last.uAmount += (netBase - sumB);
-  }
+  const shownA = wholeUnpaid.reduce((s, x) => s + x.after1, 0);
+  const shownB = wholeUnpaid.reduce((s, x) => s + x.amount, 0);
+  // «Хвост» — невыданная часть частично выданного прихода (до полного остатка).
+  const tailA = Math.max(0, netAfter1 - shownA);
+  const tailB = Math.max(0, netBase - shownB);
 
-  const inHtml = unpaid.map(r => {
+  const rowHtml = (r) => {
     const pcts = [
       (r.pct !== null && r.pct !== undefined && r.pct > 0) ? `${String(r.pct).replace('.', ',')}%` : '',
       (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0) ? `${String(r.pct2).replace('.', ',')}%` : '',
     ].filter(Boolean).join(' / ');
     const tagChip = r.tag ? `<span class="pair-tag" style="margin-left:6px" title="Метка — не участвует в расчёте">🏷 ${escapeHtml(r.tag)}</span>` : '';
-    const partChip = r.partial ? ` <span style="color:var(--muted);font-size:10px">· частично выдан, показан остаток</span>` : '';
     return `<div class="wds-break-row">
-      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${partChip}</span>
-      <span class="wds-break-amt">${fmt(r.uAmount)}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}</span>
+      <span class="wds-break-amt">${fmt(r.amount)}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
-      <span class="wds-break-after">→ ${fmt(r.uAfter1)}</span>
+      <span class="wds-break-after">→ ${fmt(r.after1)}</span>
     </div>`;
-  }).join('');
+  };
+  let inHtml = wholeUnpaid.map(rowHtml).join('');
+  // Хвост показываем отдельной строкой ТОЛЬКО если есть и целые невыданные
+  // приходы; иначе он и так равен «Итого невыдано» ниже (без дублирования).
+  if (wholeUnpaid.length && tailA > 50) {
+    inHtml += `<div class="wds-break-row">
+      <span class="wds-break-date" style="color:var(--muted)">невыданный остаток по приходу</span>
+      <span class="wds-break-amt">${fmt(tailB)}</span>
+      <span class="wds-break-pct">—</span>
+      <span class="wds-break-after">→ ${fmt(tailA)}</span>
+    </div>`;
+  }
   return `<div class="wds-break">
     <div class="wds-break-head">
       <span>Невыданные приходы:</span>
@@ -3862,7 +3870,7 @@ function renderPairBaseBreakdownHtml(pair, remain) {
       <span>%</span>
       <span>после 1-го %</span>
     </div>
-    ${inHtml || '<div class="wds-break-empty">— всё выдано —</div>'}
+    ${inHtml || ''}
     <div class="wds-break-net">
       <span>Итого невыдано:</span>
       <span><b>${fmt(netBase)}</b></span>
