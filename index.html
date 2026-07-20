@@ -3235,7 +3235,7 @@ function renderWeekDebtSummary() {
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
       <details class="wds-break-details">
-        <summary>📋 Раскрыть базу: показать приходы и невыданный остаток</summary>
+        <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
         ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 })}
       </details>
     </div>`;
@@ -3321,7 +3321,7 @@ function openDebtOutModal() {
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
           </div>
           <details class="wds-break-details">
-            <summary>📋 Раскрыть базу: показать приходы и невыданный остаток</summary>
+            <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
             ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 })}
           </details>
           <div class="wds-date">
@@ -3769,11 +3769,11 @@ function collectPairBaseBreakdown(pair) {
     if (startWeek && wk < startWeek) return;
     const dd = state.days[d];
     if (!dd) return;
-    (dd.in || []).forEach(r => {
+    (dd.in || []).forEach((r, idx) => {
       if ((r.client || '').trim() !== p) return;
       if (!isWeekday(d)) return;   // приход участвует в базе только по будням — как в pairWeekDebt
       inRows.push({
-        date: d, week: wk,
+        date: d, week: wk, idx: idx,
         amount: r.amount || 0,
         pct: r.pct, pct2: r.pct2,
         tag: r.tag || null,
@@ -3791,19 +3791,17 @@ function collectPairBaseBreakdown(pair) {
   return { inRows, outRows };
 }
 
-// HTML разбивки базы: список приходов + выдач + итог. Вставляется под парой
-// в модалке долгов и в блоке «Задолженность за неделю».
-// remain (необязательно) — невыданный остаток пары из расчёта: { base, v1 }.
-// Передаётся из блока/модалки, чтобы строка «Невыдано» ТОЧНО совпадала с
-// задолженностью. Если не передан — берём остаток напрямую из pairWeekDebt
-// (тот же движок, что и в блоке), а не простой разницей — чтобы совпадало
-// даже при закрытых неделях. Расчётную логику это не меняет: только показ.
+// HTML разбивки базы: показываем ТОЛЬКО невыданные приходы (невыданный остаток).
+// Выдачи на руки гасят приходы по порядку (старые сначала) — полностью выданный
+// приход в список НЕ попадает вообще; частично выданный показывается на свою
+// невыданную часть. Итог = невыданный остаток пары, совпадает с задолженностью.
+// remain (необязательно) — { base, v1 } из расчёта; используется для точного
+// совпадения итога с задолженностью. Расчётную логику это не меняет — только показ.
 function renderPairBaseBreakdownHtml(pair, remain) {
+  const p = (pair || '').trim();
   const { inRows, outRows } = collectPairBaseBreakdown(pair);
-  const totalBase = inRows.reduce((s, r) => s + r.amount, 0);
-  const totalAfter1 = inRows.reduce((s, r) => s + r.after1, 0);
   if (!inRows.length && !outRows.length) {
-    return `<div class="wds-break-empty">Приходов и выдач этой пары за активный период нет.</div>`;
+    return `<div class="wds-break-empty">Приходов этой пары за активный период нет.</div>`;
   }
   // Невыданный остаток (после 1-го %) и остаток базы — из движка расчёта.
   let netAfter1, netBase;
@@ -3811,7 +3809,6 @@ function renderPairBaseBreakdownHtml(pair, remain) {
     netAfter1 = remain.v1;
     netBase = (remain.base !== null && remain.base !== undefined) ? remain.base : 0;
   } else {
-    const p = (pair || '').trim();
     const isRynok = p === 'Вейс(рук)-Рынок';
     const carryAllPairs = weekMondayStr(currentDate) >= PAIR_CARRY_START_DATE;
     const startWeek = isRynok ? undefined : (carryAllPairs ? PAIR_CARRY_START_DATE : weekMondayStr(currentDate));
@@ -3819,35 +3816,55 @@ function renderPairBaseBreakdownHtml(pair, remain) {
     netAfter1 = Math.max(0, dbt.remaining || 0);
     netBase = Math.max(0, dbt.remainingBase || 0);
   }
-  const inHtml = inRows.map(r => {
+
+  // Доля выданности каждого прихода — выдачи гасят приходы, старые сначала.
+  const cover = pairPaidCoverage(currentDate);
+  const unpaid = [];
+  inRows.forEach(r => {
+    const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // выдано
+    const uf = 1 - frac;                                         // не выдано
+    if (uf <= 0.0005) return;                                    // выдан полностью — не показываем
+    unpaid.push({
+      date: r.date, pct: r.pct, pct2: r.pct2, tag: r.tag,
+      uAmount: r100((r.amount || 0) * uf),
+      uAfter1: r100((r.after1 || 0) * uf),
+      partial: frac > 0.0005,
+    });
+  });
+  // Подгоняем последний (самый новый) невыданный приход, чтобы суммы строк точно
+  // совпали с итогом из движка (устраняем расхождение округлений).
+  if (unpaid.length) {
+    const sumA = unpaid.reduce((s, x) => s + x.uAfter1, 0);
+    const sumB = unpaid.reduce((s, x) => s + x.uAmount, 0);
+    const last = unpaid[unpaid.length - 1];
+    last.uAfter1 += (netAfter1 - sumA);
+    last.uAmount += (netBase - sumB);
+  }
+
+  const inHtml = unpaid.map(r => {
     const pcts = [
       (r.pct !== null && r.pct !== undefined && r.pct > 0) ? `${String(r.pct).replace('.', ',')}%` : '',
       (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0) ? `${String(r.pct2).replace('.', ',')}%` : '',
     ].filter(Boolean).join(' / ');
     const tagChip = r.tag ? `<span class="pair-tag" style="margin-left:6px" title="Метка — не участвует в расчёте">🏷 ${escapeHtml(r.tag)}</span>` : '';
+    const partChip = r.partial ? ` <span style="color:var(--muted);font-size:10px">· частично выдан, показан остаток</span>` : '';
     return `<div class="wds-break-row">
-      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}</span>
-      <span class="wds-break-amt">${fmt(r.amount)}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${partChip}</span>
+      <span class="wds-break-amt">${fmt(r.uAmount)}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
-      <span class="wds-break-after">→ ${fmt(r.after1)}</span>
+      <span class="wds-break-after">→ ${fmt(r.uAfter1)}</span>
     </div>`;
   }).join('');
   return `<div class="wds-break">
     <div class="wds-break-head">
-      <span>Приходы:</span>
+      <span>Невыданные приходы:</span>
       <span>сумма</span>
       <span>%</span>
       <span>после 1-го %</span>
     </div>
-    ${inHtml || '<div class="wds-break-empty">— нет приходов —</div>'}
-    <div class="wds-break-total">
-      <span>Итого база:</span>
-      <span><b>${fmt(totalBase)}</b></span>
-      <span></span>
-      <span><b>${fmt(totalAfter1)}</b></span>
-    </div>
+    ${inHtml || '<div class="wds-break-empty">— всё выдано —</div>'}
     <div class="wds-break-net">
-      <span>Невыдано (за вычетом выдач):</span>
+      <span>Итого невыдано:</span>
       <span><b>${fmt(netBase)}</b></span>
       <span></span>
       <span><b>${fmt(netAfter1)}</b></span>
