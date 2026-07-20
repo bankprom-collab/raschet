@@ -334,16 +334,6 @@
     font-size: 12px; padding: 2px 6px; border-radius: 4px;
   }
   .wds-date-clear:hover { color: var(--expense); background: rgba(255,107,74,.1); }
-  /* Пары с проставленным «числом отдачи» — отданы, исключены из итогов */
-  .wds-given-head {
-    font-size: 10.5px; color: var(--accent); text-transform: uppercase;
-    letter-spacing: .04em; font-weight: 700; margin-top: 10px;
-    padding-top: 8px; border-top: 1px dashed rgba(255,255,255,.12);
-  }
-  .wds-row-given { opacity: .55; }
-  .wds-row-given .wds-pair { text-decoration: line-through; text-decoration-color: rgba(255,255,255,.35); }
-  .wds-given-line { font-size: 10.5px; color: var(--muted); margin-top: 8px;
-    padding-top: 6px; border-top: 1px dashed rgba(255,255,255,.1); }
   /* Раскрытие базы пары — из чего складывается сумма */
   .wds-break-details { margin-top: 6px; }
   .wds-break-details > summary {
@@ -3176,11 +3166,12 @@ function computeWeekPairDebt() {
     if (r.base === null || r.base === undefined) r.base = 0;
   });
 
-  // ── «Число отдачи» проставлено → пара считается ОТДАННОЙ ──────────────────
-  // Такая пара исключается из блока «Задолженность по парам за неделю», из
-  // плитки/модалки «Сумма к отдаче» и из всех итогов. Это только ФИЛЬТР поверх
-  // готовых сумм — сама расчётная логика выше не меняется. Убрать дату (✕) в
-  // «Сумма к отдаче» — пара вернётся в списки и итоги.
+  // ── «Число отдачи» проставлено → пара ОТДАНА ──────────────────────────────
+  // Такая пара ПОЛНОСТЬЮ не показывается: ни в блоке «Задолженность по парам
+  // за неделю», ни в плитке/модалке «Сумма к отдаче», ни в итогах. Это только
+  // ФИЛЬТР поверх готовых сумм — сама расчётная логика выше не меняется.
+  // Вернуть пару (убрать дату) — кнопка «🔍 Проверить пару» в «Сумма к отдаче».
+  // givenRows возвращается для партнёрской выгрузки и диагностики.
   const givenRows = [];
   {
     const dOut = state.debtOutDates || {};
@@ -3207,8 +3198,8 @@ function renderWeekDebtSummary() {
   // Подпись процента: 13 → «13», 15.5 → «15,5»
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
 
-  const { rows, givenRows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
-  if (!rows.length && !givenRows.length) { box.innerHTML = ''; return; }
+  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
+  if (!rows.length) { box.innerHTML = ''; return; }
 
   const body = rows.map(r => {
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
@@ -3238,20 +3229,13 @@ function renderWeekDebtSummary() {
 
   const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>`;
 
-  // Пары с проставленным «числом отдачи» — отданы, показываем справочной строкой
-  const givenLine = givenRows.length
-    ? `<div class="wds-given-line">✅ Отдано (проставлено число отдачи, исключено из итогов): ${givenRows.map(r =>
-        `${escapeHtml(r.name)} — <b style="color:var(--muted-bright)">${fmt(r.v1)}</b> (${formatDateShort(r.givenDate)})`).join(' · ')}</div>`
-    : '';
-
   box.innerHTML = `<div class="week-debt-block${isFri ? ' fri' : ''}">
     <div class="wds-head">
       <span>📋 Задолженность по парам за неделю${isFri ? ' · ПЯТНИЦА' : ''}</span>
       <span class="wds-total">${totalLine}</span>
     </div>
-    ${body || '<div style="color:var(--muted);font-size:11px;padding:4px 0">Все пары отданы — задолженности нет.</div>'}
-    ${givenLine}
-    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной и исключена из блока и итогов (убрать дату — в «💸 Сумма к отдаче»). Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    ${body}
+    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» — отдана: она не показывается вообще (вернуть — «🔍 Проверить пару» в «💸 Сумма к отдаче»). Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
 }
 
@@ -3264,11 +3248,8 @@ function computeDebtOut() { return computeWeekPairDebt(); }
 function renderDebtOutTile() {
   const body = document.getElementById('tileDebtOutBody');
   if (!body) return;
-  const { rows, givenRows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
-  const givenNote = givenRows.length
-    ? `<div style="color:var(--muted);font-size:10.5px;margin-top:4px">✅ отдано (число отдачи): ${givenRows.length} — исключено из сумм</div>`
-    : '';
-  if (!rows.length) { body.innerHTML = 'Сумм к отдаче сегодня нет.' + givenNote; return; }
+  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
+  if (!rows.length) { body.innerHTML = 'Сумм к отдаче сегодня нет.'; return; }
   const top = rows.slice(0, 3).map(r => {
     const baseLine = (r.base > 0)
       ? `<div style="font-size:10.5px;color:var(--muted-bright);font-family:var(--font-num);text-align:right">база ${fmt(r.base)}</div>`
@@ -3294,36 +3275,16 @@ function renderDebtOutTile() {
        <span style="font-size:13px;font-weight:700;color:#ff8a4a" title="Нам должны (после 1-го %)">${fmt(total)}</span>
        <span style="font-size:13px;font-weight:700;color:#818cf8" title="Мы должны отдать (после 2-го %)">${fmt(total2)}</span>
        <span style="font-size:13px;font-weight:700;color:var(--accent)" title="Разница">${fmt(totalDiff)}</span>
-     </div>${top}${more}${givenNote}`;
+     </div>${top}${more}`;
 }
 
 function openDebtOutModal() {
   const box = document.getElementById('debt-out-body');
   if (box) {
-    const { rows, givenRows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
+    const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
     const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
     const wk = weekMondayStr(currentDate);
-    // Отданные пары (с числом отдачи) — отдельной приглушённой секцией, чтобы
-    // можно было увидеть/изменить дату или убрать её (✕) и вернуть пару в расчёт.
-    const givenSection = givenRows.length
-      ? `<div class="wds-given-head">✅ Отдано — исключено из итогов</div>` + givenRows.map(r => {
-          const nameAttr = encodeURIComponent(r.name);
-          return `<div class="wds-row wds-row-debt wds-row-given">
-            <div class="wds-row-main">
-              <span class="wds-pair">${escapeHtml(r.name)}</span>
-              <span class="wds-val">${(r.base > 0) ? `база: <b>${fmt(r.base)}</b> · ` : ''}−%1: <b>${fmt(r.v1)}</b> · −%2: <b>${fmt(r.v2)}</b></span>
-            </div>
-            <div class="wds-date">
-              <span class="wds-date-lbl">📅 Число отдачи:</span>
-              <input type="date" class="wds-date-inp" value="${r.givenDate}"
-                onchange="setDebtOutDate('${nameAttr}', this.value)"
-                title="Дата отдачи. Пара исключена из итогов.">
-              <button class="wds-date-clear" onclick="setDebtOutDate('${nameAttr}', '')" title="Убрать дату — вернуть пару в расчёт">✕</button>
-            </div>
-          </div>`;
-        }).join('')
-      : '';
-    if (!rows.length && !givenRows.length) {
+    if (!rows.length) {
       box.innerHTML = '<div style="color:var(--muted);padding:8px 0">Сумм к отдаче сегодня нет.</div>';
     } else {
       const bodyRows = rows.map(r => {
@@ -3364,9 +3325,8 @@ function openDebtOutModal() {
             <span>💸 Сумма к отдаче · ${formatDateShort(currentDate)}</span>
             <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
-          ${bodyRows || '<div style="color:var(--muted);font-size:11px;padding:4px 0">Все пары отданы — сумм к отдаче нет.</div>'}
-          ${givenSection}
-          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата отдачи: как только она проставлена, пара считается отданной и автоматически исключается из этого блока, из «Задолженности по парам за неделю» и из всех итогов. Убрать дату (✕) — пара вернётся в расчёт.</div>
+          ${bodyRows}
+          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата отдачи: как только она проставлена, пара считается отданной и полностью пропадает из этого блока, из «Задолженности по парам за неделю» и из всех итогов. Вернуть пару по ошибке — кнопка «🔍 Проверить пару».</div>
         </div>`;
     }
   }
@@ -3424,7 +3384,7 @@ function diagnosePair() {
       'Проверь state.weekDebtOverrides["' + overrideKey + '"] = ' + JSON.stringify(override);
     if (rem <= 0) return '⚠ Выдано (out) за неделю (' + fmt(received) + ') ≥ начислено (' + fmt(a.v1) + ') → остаток ≤ 0, пара не показывается.';
     const gdDate = (state.debtOutDates || {})[overrideKey];
-    if (gdDate) return '⚠ У пары проставлено «число отдачи» (' + gdDate + ') — она считается ОТДАННОЙ и исключена из блоков и итогов. Убери дату (✕) в «💸 Сумма к отдаче», чтобы вернуть её в расчёт.';
+    if (gdDate) return '⚠ У пары проставлено «число отдачи» (' + gdDate + ') — она ОТДАНА и не показывается в блоках и итогах. После закрытия этого окна будет предложено убрать дату и вернуть пару.';
     if (!inList) return '⚠ Пара НЕ в итоговых rows, хотя rem=' + fmt(rem) + '. Странно — проверь ручные коррекции или отладь computeWeekPairDebt.';
     return '✅ Пара В списке. Отражена как v1=' + fmt(inList.v1) + ', v2=' + fmt(inList.v2) + '. Если ты её не видишь — проверь модалку и блок под таблицей.';
   })();
@@ -3441,6 +3401,15 @@ function diagnosePair() {
     `${conclusion}`;
   alert(report);
   console.log(report);
+  // Пара скрыта из-за проставленного «числа отдачи» — предложить вернуть её
+  const gdVal = (state.debtOutDates || {})[overrideKey];
+  if (gdVal && confirm('У пары «' + p + '» проставлено число отдачи (' + gdVal + ') — она скрыта как отданная.\n\nУбрать дату и вернуть пару в блоки и итоги?')) {
+    delete state.debtOutDates[overrideKey];
+    saveState();
+    try { renderWeekDebtSummary(); } catch (e) {}
+    try { renderDebtOutTile(); } catch (e) {}
+    openDebtOutModal();
+  }
 }
 
 // ── ПАРТНЁРСКАЯ ССЫЛКА (шифрование AES-GCM + PBKDF2) ────────────────────────
