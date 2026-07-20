@@ -3817,52 +3817,47 @@ function renderPairBaseBreakdownHtml(pair, remain) {
     netBase = Math.max(0, dbt.remainingBase || 0);
   }
 
-  // Доля выданности каждого прихода — выдачи гасят приходы, старые сначала.
-  // Полностью выданные приходы НЕ показываем совсем. Приходы, которых выдача
-  // не коснулась (доля выдачи = 0), показываем целиком. Частично выданный
-  // приход отдельной строкой с датой НЕ показываем — его невыданный «хвост»
-  // сворачивается в общий невыданный остаток, чтобы нигде не мелькала выданная
-  // сумма или слово «выдан».
-  const cover = pairPaidCoverage(currentDate);
-  const wholeUnpaid = [];
+  // КАЖДЫЙ невыданный приход — отдельной строкой. Выдачи гасят НОВЫЕ приходы
+  // первыми ('lifo'), поэтому невыданными остаются старые приходы, как правило
+  // целиком — и остаток раскладывается на реальные приходы (напр. два прихода
+  // от 8 июл), а не одной общей суммой. Полностью выданные приходы не
+  // показываем. Частично выданный приход показываем на свою невыданную часть.
+  const cover = pairPaidCoverage(currentDate, 'lifo');
+  const unpaidRows = [];
   inRows.forEach(r => {
-    const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля, что выдана
-    if (frac > 0.0005) return;                                  // хоть что-то выдано — не как целый приход
-    wholeUnpaid.push({
+    const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля выдано
+    const uf = 1 - frac;                                        // доля не выдано
+    if (uf <= 0.0005) return;                                   // полностью выдан — не показываем
+    const whole = frac <= 0.0005;                              // приход выдача не тронула
+    unpaidRows.push({
       date: r.date, pct: r.pct, pct2: r.pct2, tag: r.tag,
-      amount: r.amount || 0, after1: r.after1 || 0,
+      // целый невыданный приход — показываем точную сумму; частичный — его невыданную долю
+      uAmount: whole ? (r.amount || 0) : r100((r.amount || 0) * uf),
+      uAfter1: whole ? (r.after1 || 0) : r100((r.after1 || 0) * uf),
+      partial: !whole,
     });
   });
-  const shownA = wholeUnpaid.reduce((s, x) => s + x.after1, 0);
-  const shownB = wholeUnpaid.reduce((s, x) => s + x.amount, 0);
-  // «Хвост» — невыданная часть частично выданного прихода (до полного остатка).
-  const tailA = Math.max(0, netAfter1 - shownA);
-  const tailB = Math.max(0, netBase - shownB);
+  // Подгоняем «после 1-го %» последней строки, чтобы сумма строк точно совпала
+  // с итогом движка (главная колонка = «нам должны»).
+  if (unpaidRows.length) {
+    const sA = unpaidRows.reduce((s, x) => s + x.uAfter1, 0);
+    unpaidRows[unpaidRows.length - 1].uAfter1 += (netAfter1 - sA);
+  }
 
-  const rowHtml = (r) => {
+  const inHtml = unpaidRows.map(r => {
     const pcts = [
       (r.pct !== null && r.pct !== undefined && r.pct > 0) ? `${String(r.pct).replace('.', ',')}%` : '',
       (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0) ? `${String(r.pct2).replace('.', ',')}%` : '',
     ].filter(Boolean).join(' / ');
     const tagChip = r.tag ? `<span class="pair-tag" style="margin-left:6px" title="Метка — не участвует в расчёте">🏷 ${escapeHtml(r.tag)}</span>` : '';
+    const partChip = r.partial ? ` <span style="color:var(--muted);font-size:10px">(часть прихода)</span>` : '';
     return `<div class="wds-break-row">
-      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}</span>
-      <span class="wds-break-amt">${fmt(r.amount)}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${partChip}</span>
+      <span class="wds-break-amt">${fmt(r.uAmount)}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
-      <span class="wds-break-after">→ ${fmt(r.after1)}</span>
+      <span class="wds-break-after">→ ${fmt(r.uAfter1)}</span>
     </div>`;
-  };
-  let inHtml = wholeUnpaid.map(rowHtml).join('');
-  // Хвост показываем отдельной строкой ТОЛЬКО если есть и целые невыданные
-  // приходы; иначе он и так равен «Итого невыдано» ниже (без дублирования).
-  if (wholeUnpaid.length && tailA > 50) {
-    inHtml += `<div class="wds-break-row">
-      <span class="wds-break-date" style="color:var(--muted)">невыданный остаток по приходу</span>
-      <span class="wds-break-amt">${fmt(tailB)}</span>
-      <span class="wds-break-pct">—</span>
-      <span class="wds-break-after">→ ${fmt(tailA)}</span>
-    </div>`;
-  }
+  }).join('');
   return `<div class="wds-break">
     <div class="wds-break-head">
       <span>Невыданные приходы:</span>
@@ -3870,7 +3865,7 @@ function renderPairBaseBreakdownHtml(pair, remain) {
       <span>%</span>
       <span>после 1-го %</span>
     </div>
-    ${inHtml || ''}
+    ${inHtml || '<div class="wds-break-empty">— всё выдано —</div>'}
     <div class="wds-break-net">
       <span>Итого невыдано:</span>
       <span><b>${fmt(netBase)}</b></span>
@@ -3883,14 +3878,17 @@ function renderPairBaseBreakdownHtml(pair, remain) {
 // Собрать список всех приходов текущей недели (пн–пт), в которых задан
 // процент куратора. НИЧЕГО НЕ ПЕРЕСЧИТЫВАЕТ — читает те же поля, что и
 // curatorWeeklyAccrued, и в той же формуле (r.amount * pctCur/100, floor100).
-// Доля ВЫДАННОСТИ каждого прихода: выдачи на руки (dd.out) гасят приходы пары
-// по порядку — старые сначала (тот же принцип, что и в движке долга: выдачи
-// вычитаются из накопления после 1-го %). Возвращает карту
-// `пара#дата#idx → доля 0..1`. Куратор начисляется только с ВЫДАННОЙ части
-// прихода: полностью невыданный приход (доля 0) в расчёт не входит вообще.
-// Формула куратора не меняется — меняется лишь то, какая часть суммы прихода
-// в неё попадает.
-function pairPaidCoverage(dayStr) {
+// Доля ВЫДАННОСТИ каждого прихода: выдачи на руки (dd.out) гасят приходы пары.
+// order:
+//   'fifo' (по умолчанию) — гасятся СТАРЫЕ приходы сначала. Невыданными
+//     остаются НОВЫЕ приходы. Используется для куратора (свежий, ещё не
+//     выданный приход в куратора не входит).
+//   'lifo' — гасятся НОВЫЕ приходы сначала. Невыданными остаются СТАРЫЕ приходы
+//     целиком. Используется в «Раскрыть базу», чтобы невыданный остаток
+//     раскладывался на реальные целые приходы (напр. два прихода от 8 июл).
+// Возвращает карту `пара#дата#idx → доля выдано 0..1`. Итоговый остаток пары
+// от порядка не зависит — меняется лишь то, какие приходы считаются невыданными.
+function pairPaidCoverage(dayStr, order) {
   const allDays = Object.keys(state.days).sort();
   const byPair = {};
   for (const d of allDays) {
@@ -3915,7 +3913,9 @@ function pairPaidCoverage(dayStr) {
   const cover = {};
   for (const p in byPair) {
     let pool = byPair[p].out;             // сколько всего выдано этой паре
-    byPair[p].ins.forEach(inr => {        // ins уже хронологически (дни отсортированы)
+    // порядок гашения приходов выдачами
+    const list = (order === 'lifo') ? byPair[p].ins.slice().reverse() : byPair[p].ins;
+    list.forEach(inr => {
       const a = inr.after1 || 0;
       let frac = 0;
       if (a > 0 && pool > 0) {
