@@ -334,6 +334,16 @@
     font-size: 12px; padding: 2px 6px; border-radius: 4px;
   }
   .wds-date-clear:hover { color: var(--expense); background: rgba(255,107,74,.1); }
+  /* Пары с проставленным «числом отдачи» — отданы, исключены из итогов */
+  .wds-given-head {
+    font-size: 10.5px; color: var(--accent); text-transform: uppercase;
+    letter-spacing: .04em; font-weight: 700; margin-top: 10px;
+    padding-top: 8px; border-top: 1px dashed rgba(255,255,255,.12);
+  }
+  .wds-row-given { opacity: .55; }
+  .wds-row-given .wds-pair { text-decoration: line-through; text-decoration-color: rgba(255,255,255,.35); }
+  .wds-given-line { font-size: 10.5px; color: var(--muted); margin-top: 8px;
+    padding-top: 6px; border-top: 1px dashed rgba(255,255,255,.1); }
   /* Раскрытие базы пары — из чего складывается сумма */
   .wds-break-details { margin-top: 6px; }
   .wds-break-details > summary {
@@ -352,13 +362,13 @@
     border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
   }
   .wds-break-head {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
     font-size: 10px; color: var(--muted); text-transform: uppercase;
     letter-spacing: .04em; padding-bottom: 4px;
     border-bottom: 1px dashed rgba(255,138,74,.2); margin-bottom: 4px;
   }
   .wds-break-row {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
     padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,.03);
     align-items: center;
   }
@@ -367,10 +377,9 @@
   .wds-break-amt { color: var(--text); font-weight: 600; }
   .wds-break-pct { color: var(--muted); font-size: 11px; }
   .wds-break-after { color: #ff8a4a; font-weight: 600; }
-  .wds-break-after2 { color: #818cf8; font-weight: 600; }
   .wds-break-out .wds-break-amt { color: var(--expense); }
   .wds-break-total {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
     padding: 6px 0 2px; margin-top: 4px;
     border-top: 1px solid rgba(255,138,74,.3);
     font-size: 12px; color: var(--muted-bright);
@@ -1174,7 +1183,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v111</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v108</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2083,9 +2092,6 @@ function migrateState(s) {
   // Хранилище дат отдачи по парам, ключ 'YYYY-MM-DD_понедельник::пара' → 'YYYY-MM-DD'.
   // Только метаданные для планирования — на расчёт долгов/куратора не влияют.
   if (!s.debtOutDates || typeof s.debtOutDates !== 'object') s.debtOutDates = {};
-  // Отметки «приход реально выдан» для расчёта куратора. Ключ «дата::пара».
-  // Хранится ОТДЕЛЬНО от debtOutDates («число отдачи» — это план, а не факт).
-  if (!s.curatorGiven || typeof s.curatorGiven !== 'object') s.curatorGiven = {};
 
   // Переименование: «Пащенко» → «Пр.Мира» во всех именах пар (идемпотентно).
   // Затрагивает записи приходов/выдач, базу клиентов и ключи недельных коррекций.
@@ -2531,17 +2537,6 @@ function editWeekDebtPair(pairName) {
 
 // ── КУРАТОР: НЕДЕЛЬНЫЙ НАРАСТАЮЩИЙ ИТОГ + ОТМЕТКА «ОТДАНО» ───────────────────
 // Приход куратора за пн–пт ТЕКУЩЕЙ недели (день dayStr). На след. неделю не переходит.
-// Приход считается «отданным» (и идёт в расчёт куратору), только если у его
-// пары за ту же неделю проставлено «число отдачи» в блоке «Сумма к отдаче по
-// парам» (state.debtOutDates, ключ «неделя::пара»). Это ТОЛЬКО фильтр учёта —
-// сами суммы/проценты не пересчитываются.
-function curatorGivenFor(dayStr, pair) {
-  // Приход считается ВЫДАННЫМ только если это отмечено вручную (кнопка
-  // «✓ подтвердить»). Никакой связи с «числом отдачи» — то план, а не факт.
-  // Пока не отмечен, приход просто фиксируется и в расчёт куратору не идёт.
-  if (!state.curatorGiven) return false;
-  return state.curatorGiven[(dayStr || '') + '::' + (pair || '')] === true;
-}
 function curatorWeeklyAccrued(dayStr) {
   let sum = 0;
   const thisWeek = weekMondayStr(dayStr);
@@ -2605,9 +2600,7 @@ function dealsWeeklyAccrued(dayStr) {
 // Кнопка «Отдана»: записывает, что часть или вся накопленная сумма куратора
 // отдана. Отданное вычитается из нарастающего итога «КУРАТОР КО МНЕ».
 function markCuratorPaid() {
-  // Берём тот же остаток, что показан в «Куратор ко мне»: только по выданным
-  // (подтверждённым) приходам, сквозным итогом, минус уже отданное куратору.
-  const balance = curatorMineTotals(currentDate).remain;
+  const balance = curatorRunningBalance(currentDate);
   if (balance <= 0) {
     alert('Накопленная сумма куратора уже нулевая — отдавать нечего.');
     return;
@@ -2884,8 +2877,8 @@ function renderOutBody(day) {
         : '';
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}</td>
-        <td class="amount neg">${fmt(r.amount)}${noteHtml}</td>
+        <td class="client-name">${escapeHtml(r.client)}${noteHtml}</td>
+        <td class="amount neg">${fmt(r.amount)}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="editRow('out',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="deleteRow('out',${i})" title="Удалить">🗑</button>
@@ -3081,6 +3074,8 @@ function pairWeekReceived(dayStr, pairName) {
 // Возвращает { rows, total (=Σv1, «нам должны»), total2 (=Σv2, «мы должны
 // отдать»), totalDiff (=Σdiff) }. Один источник и для блока внизу, и для
 // плитки «Сумма к отдаче» на доске — поэтому их суммы ВСЕГДА совпадают.
+// Пары с проставленным «числом отдачи» (state.debtOutDates) считаются
+// отданными: они возвращаются отдельно в givenRows и НЕ входят в rows и итоги.
 // С понедельника этой недели ВСЕ пары переносят непогашенный остаток через
 // недели (правило подтверждено пользователем 10.07.2026). Раньше (до этой
 // даты) — только «Вейс(рук)-Рынок» переносил, остальные считались с нуля.
@@ -3180,12 +3175,28 @@ function computeWeekPairDebt() {
     r.diff = r100(r.v1 - r.v2);
     if (r.base === null || r.base === undefined) r.base = 0;
   });
+
+  // ── «Число отдачи» проставлено → пара считается ОТДАННОЙ ──────────────────
+  // Такая пара исключается из блока «Задолженность по парам за неделю», из
+  // плитки/модалки «Сумма к отдаче» и из всех итогов. Это только ФИЛЬТР поверх
+  // готовых сумм — сама расчётная логика выше не меняется. Убрать дату (✕) в
+  // «Сумма к отдаче» — пара вернётся в списки и итоги.
+  const givenRows = [];
+  {
+    const dOut = state.debtOutDates || {};
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const gd = dOut[thisWeek + '::' + rows[i].name];
+      if (gd) { rows[i].givenDate = gd; givenRows.unshift(rows.splice(i, 1)[0]); }
+    }
+    givenRows.sort((x, y) => y.v1 - x.v1);
+  }
+
   rows.sort((x, y) => y.v1 - x.v1);
   const totalBase = rows.reduce((s, r) => s + (r.base || 0), 0); // сумма ДО процентов (для отображения)
   const total = rows.reduce((s, r) => s + r.v1, 0);       // сумма, которую нам должны (после 1-го %)
   const total2 = rows.reduce((s, r) => s + r.v2, 0);      // сумма, которую мы должны отдать (после 2-го %)
   const totalDiff = rows.reduce((s, r) => s + r.diff, 0); // общая разница
-  return { rows, totalBase, total, total2, totalDiff };
+  return { rows, givenRows, totalBase, total, total2, totalDiff };
 }
 
 function renderWeekDebtSummary() {
@@ -3196,8 +3207,8 @@ function renderWeekDebtSummary() {
   // Подпись процента: 13 → «13», 15.5 → «15,5»
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
 
-  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
-  if (!rows.length) { box.innerHTML = ''; return; }
+  const { rows, givenRows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
+  if (!rows.length && !givenRows.length) { box.innerHTML = ''; return; }
 
   const body = rows.map(r => {
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
@@ -3220,20 +3231,27 @@ function renderWeekDebtSummary() {
       </div>
       <details class="wds-break-details">
         <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
-        ${renderPairBaseBreakdownHtml(r.name, r.base)}
+        ${renderPairBaseBreakdownHtml(r.name)}
       </details>
     </div>`;
   }).join('');
 
   const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>`;
 
+  // Пары с проставленным «числом отдачи» — отданы, показываем справочной строкой
+  const givenLine = givenRows.length
+    ? `<div class="wds-given-line">✅ Отдано (проставлено число отдачи, исключено из итогов): ${givenRows.map(r =>
+        `${escapeHtml(r.name)} — <b style="color:var(--muted-bright)">${fmt(r.v1)}</b> (${formatDateShort(r.givenDate)})`).join(' · ')}</div>`
+    : '';
+
   box.innerHTML = `<div class="week-debt-block${isFri ? ' fri' : ''}">
     <div class="wds-head">
       <span>📋 Задолженность по парам за неделю${isFri ? ' · ПЯТНИЦА' : ''}</span>
       <span class="wds-total">${totalLine}</span>
     </div>
-    ${body}
-    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    ${body || '<div style="color:var(--muted);font-size:11px;padding:4px 0">Все пары отданы — задолженности нет.</div>'}
+    ${givenLine}
+    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной и исключена из блока и итогов (убрать дату — в «💸 Сумма к отдаче»). Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
 }
 
@@ -3246,33 +3264,23 @@ function computeDebtOut() { return computeWeekPairDebt(); }
 function renderDebtOutTile() {
   const body = document.getElementById('tileDebtOutBody');
   if (!body) return;
-  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
-  if (!rows.length) { body.innerHTML = 'Сумм к отдаче сегодня нет.'; return; }
+  const { rows, givenRows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
+  const givenNote = givenRows.length
+    ? `<div style="color:var(--muted);font-size:10.5px;margin-top:4px">✅ отдано (число отдачи): ${givenRows.length} — исключено из сумм</div>`
+    : '';
+  if (!rows.length) { body.innerHTML = 'Сумм к отдаче сегодня нет.' + givenNote; return; }
   const top = rows.slice(0, 3).map(r => {
     const baseLine = (r.base > 0)
       ? `<div style="font-size:10.5px;color:var(--muted-bright);font-family:var(--font-num);text-align:right">база ${fmt(r.base)}</div>`
       : '';
-    // Разбивка по дням: какой приход и от какой базовой суммы (только отображение)
-    const inRows = pairBaseOpenRows(r.name).inRows;
-    const dayHtml = inRows.length
-      ? `<div style="font-size:9.5px;color:var(--muted);font-family:var(--font-num);line-height:1.5;margin:1px 0 5px 6px">`
-        + inRows.map(x => `<div style="display:flex;justify-content:space-between;gap:6px">
-             <span style="color:var(--muted-bright)">${formatDateShort(x.date)}</span>
-             <span><b style="color:var(--text)">${fmt(x.amount)}</b> <span style="color:var(--muted)">−${(x.pct != null ? String(x.pct).replace('.', ',') : '') }%</span> → <b style="color:#ff8a4a">${fmt(x.after1)}</b></span>
-           </div>`).join('')
-        + `</div>`
-      : '';
-    return `<div style="margin-bottom:6px">
-       <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.35;margin-bottom:2px">
-         <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
-         <span style="text-align:right;white-space:nowrap">
-           ${baseLine}
-           <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
-           <span style="color:var(--muted);font-size:10px"> / </span>
-           <b style="color:#818cf8;font-family:var(--font-num)">${fmt(r.v2)}</b>
-         </span>
-       </div>
-       ${dayHtml}
+    return `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.35;margin-bottom:3px">
+       <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
+       <span style="text-align:right;white-space:nowrap">
+         ${baseLine}
+         <b style="color:#ff8a4a;font-family:var(--font-num)">${fmt(r.v1)}</b>
+         <span style="color:var(--muted);font-size:10px"> / </span>
+         <b style="color:#818cf8;font-family:var(--font-num)">${fmt(r.v2)}</b>
+       </span>
      </div>`;
   }).join('');
   const more = rows.length > 3
@@ -3286,16 +3294,36 @@ function renderDebtOutTile() {
        <span style="font-size:13px;font-weight:700;color:#ff8a4a" title="Нам должны (после 1-го %)">${fmt(total)}</span>
        <span style="font-size:13px;font-weight:700;color:#818cf8" title="Мы должны отдать (после 2-го %)">${fmt(total2)}</span>
        <span style="font-size:13px;font-weight:700;color:var(--accent)" title="Разница">${fmt(totalDiff)}</span>
-     </div>${top}${more}`;
+     </div>${top}${more}${givenNote}`;
 }
 
 function openDebtOutModal() {
   const box = document.getElementById('debt-out-body');
   if (box) {
-    const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
+    const { rows, givenRows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
     const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
     const wk = weekMondayStr(currentDate);
-    if (!rows.length) {
+    // Отданные пары (с числом отдачи) — отдельной приглушённой секцией, чтобы
+    // можно было увидеть/изменить дату или убрать её (✕) и вернуть пару в расчёт.
+    const givenSection = givenRows.length
+      ? `<div class="wds-given-head">✅ Отдано — исключено из итогов</div>` + givenRows.map(r => {
+          const nameAttr = encodeURIComponent(r.name);
+          return `<div class="wds-row wds-row-debt wds-row-given">
+            <div class="wds-row-main">
+              <span class="wds-pair">${escapeHtml(r.name)}</span>
+              <span class="wds-val">${(r.base > 0) ? `база: <b>${fmt(r.base)}</b> · ` : ''}−%1: <b>${fmt(r.v1)}</b> · −%2: <b>${fmt(r.v2)}</b></span>
+            </div>
+            <div class="wds-date">
+              <span class="wds-date-lbl">📅 Число отдачи:</span>
+              <input type="date" class="wds-date-inp" value="${r.givenDate}"
+                onchange="setDebtOutDate('${nameAttr}', this.value)"
+                title="Дата отдачи. Пара исключена из итогов.">
+              <button class="wds-date-clear" onclick="setDebtOutDate('${nameAttr}', '')" title="Убрать дату — вернуть пару в расчёт">✕</button>
+            </div>
+          </div>`;
+        }).join('')
+      : '';
+    if (!rows.length && !givenRows.length) {
       box.innerHTML = '<div style="color:var(--muted);padding:8px 0">Сумм к отдаче сегодня нет.</div>';
     } else {
       const bodyRows = rows.map(r => {
@@ -3319,13 +3347,13 @@ function openDebtOutModal() {
           </div>
           <details class="wds-break-details">
             <summary>📋 Раскрыть базу: показать все приходы и выдачи</summary>
-            ${renderPairBaseBreakdownHtml(r.name, r.base)}
+            ${renderPairBaseBreakdownHtml(r.name)}
           </details>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
             <input type="date" class="wds-date-inp" value="${savedDate}"
               onchange="setDebtOutDate('${nameAttr}', this.value)"
-              title="Планируемая дата выдачи. На расчёт не влияет.">
+              title="Дата отдачи: как только проставлена — пара считается отданной и исключается из блоков и итогов.">
             ${savedDate ? `<button class="wds-date-clear" onclick="setDebtOutDate('${nameAttr}', '')" title="Убрать дату">✕</button>` : ''}
           </div>
         </div>`;
@@ -3336,8 +3364,9 @@ function openDebtOutModal() {
             <span>💸 Сумма к отдаче · ${formatDateShort(currentDate)}</span>
             <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
-          ${bodyRows}
-          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — планируемая дата выдачи, только для заметки, на суммы не влияет.</div>
+          ${bodyRows || '<div style="color:var(--muted);font-size:11px;padding:4px 0">Все пары отданы — сумм к отдаче нет.</div>'}
+          ${givenSection}
+          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата отдачи: как только она проставлена, пара считается отданной и автоматически исключается из этого блока, из «Задолженности по парам за неделю» и из всех итогов. Убрать дату (✕) — пара вернётся в расчёт.</div>
         </div>`;
     }
   }
@@ -3394,6 +3423,8 @@ function diagnosePair() {
       '⚠ Ручная коррекция ✏️ на эту пару стоит 0 или null — она УДАЛЯЕТ пару из списка.\n' +
       'Проверь state.weekDebtOverrides["' + overrideKey + '"] = ' + JSON.stringify(override);
     if (rem <= 0) return '⚠ Выдано (out) за неделю (' + fmt(received) + ') ≥ начислено (' + fmt(a.v1) + ') → остаток ≤ 0, пара не показывается.';
+    const gdDate = (state.debtOutDates || {})[overrideKey];
+    if (gdDate) return '⚠ У пары проставлено «число отдачи» (' + gdDate + ') — она считается ОТДАННОЙ и исключена из блоков и итогов. Убери дату (✕) в «💸 Сумма к отдаче», чтобы вернуть её в расчёт.';
     if (!inList) return '⚠ Пара НЕ в итоговых rows, хотя rem=' + fmt(rem) + '. Странно — проверь ручные коррекции или отладь computeWeekPairDebt.';
     return '✅ Пара В списке. Отражена как v1=' + fmt(inList.v1) + ', v2=' + fmt(inList.v2) + '. Если ты её не видишь — проверь модалку и блок под таблицей.';
   })();
@@ -3458,9 +3489,10 @@ function pairsForPartner(partner) {
 // v1 берётся из существующего computeWeekPairDebt() — расчётной логики не меняем.
 function buildPartnerPayload(partner) {
   const partnerPairs = new Set(pairsForPartner(partner));
-  const { rows } = computeWeekPairDebt();
+  // Партнёру показываем и отданные пары (с числом отдачи) — как и раньше
+  const { rows, givenRows } = computeWeekPairDebt();
   const wk = weekMondayStr(currentDate);
-  const items = rows
+  const items = rows.concat(givenRows || [])
     .filter(r => partnerPairs.has(r.name))
     .map(r => ({
       pair: r.name,
@@ -3776,38 +3808,12 @@ function collectPairBaseBreakdown(pair) {
   return { inRows, outRows };
 }
 
-// Гасим приходы выдачами: выданная сумма закрывает приход и он ПОЛНОСТЬЮ уходит
-// из базы и из показа (его больше нет). Правила совпадения — те же, что в
-// расчёте пары: точное совпадение выдачи с суммой конкретного прихода после
-// 1-го % ЛИБО с итогом всех оставшихся открытых приходов (тогда закрываются все).
-// Возвращает только ОТКРЫТЫЕ приходы и непогашенные остатки выдач.
-// computeWeekPairDebt НЕ трогаем — итоги считает он, здесь только отбор.
-function pairBaseOpenRows(pair) {
-  const { inRows, outRows } = collectPairBaseBreakdown(pair);
-  const EPS = 0.5;
-  const open = inRows.slice();
-  const leftovers = [];
-  (outRows || []).forEach(o => {
-    const amt = o.amount || 0;
-    // 1) выдача равна итогу всех оставшихся открытых приходов → закрываем все
-    const sumOpen = open.reduce((s, r) => s + r.after1, 0);
-    if (open.length && Math.abs(sumOpen - amt) < EPS) { open.length = 0; return; }
-    // 2) выдача точно совпадает с конкретным приходом → закрываем его
-    const idx = open.findIndex(r => Math.abs(r.after1 - amt) < EPS);
-    if (idx >= 0) { open.splice(idx, 1); return; }
-    // 3) не совпало ни с чем — оставляем как отдельную выдачу
-    leftovers.push(o);
-  });
-  return { inRows: open, outRows: leftovers };
-}
-
 // HTML разбивки базы: список приходов + выдач + итог. Вставляется под парой
 // в модалке долгов и в блоке «Задолженность за неделю».
-function renderPairBaseBreakdownHtml(pair, netBase) {
-  const { inRows, outRows } = pairBaseOpenRows(pair);
+function renderPairBaseBreakdownHtml(pair) {
+  const { inRows, outRows } = collectPairBaseBreakdown(pair);
   const totalBase = inRows.reduce((s, r) => s + r.amount, 0);
   const totalAfter1 = inRows.reduce((s, r) => s + r.after1, 0);
-  const totalAfter2 = inRows.reduce((s, r) => s + (r.after2 != null ? r.after2 : 0), 0);
   const totalReceived = outRows.reduce((s, r) => s + r.amount, 0);
   if (!inRows.length && !outRows.length) {
     return `<div class="wds-break-empty">Приходов и выдач этой пары за активный период нет.</div>`;
@@ -3819,48 +3825,40 @@ function renderPairBaseBreakdownHtml(pair, netBase) {
     ].filter(Boolean).join(' / ');
     const tagChip = r.tag ? `<span class="pair-tag" style="margin-left:6px" title="Метка — не участвует в расчёте">🏷 ${escapeHtml(r.tag)}</span>` : '';
     return `<div class="wds-break-row">
-      <span class="wds-break-amt">${fmt(r.amount)}</span>
       <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}</span>
+      <span class="wds-break-amt">${fmt(r.amount)}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
       <span class="wds-break-after">→ ${fmt(r.after1)}</span>
-      <span class="wds-break-after2">${r.after2 != null ? '→ ' + fmt(r.after2) : '—'}</span>
     </div>`;
   }).join('');
   const outHtml = outRows.map(r => `<div class="wds-break-row wds-break-out">
-      <span class="wds-break-amt">− ${fmt(r.amount)}</span>
       <span class="wds-break-date">${formatDateShort(r.date)}</span>
+      <span class="wds-break-amt">− ${fmt(r.amount)}</span>
       <span class="wds-break-pct">выдано</span>
       <span class="wds-break-after"></span>
-      <span class="wds-break-after2"></span>
     </div>`).join('');
   return `<div class="wds-break">
-    <div class="wds-break-baseline" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:6px 0 8px;margin-bottom:6px;border-bottom:1px dashed var(--border)">
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">База пары (выданное уже вышло)</span>
-      <b style="font-family:var(--font-num);color:var(--muted-bright);font-size:15px">${fmt((netBase !== undefined && netBase !== null) ? netBase : totalBase)}</b>
-    </div>
     <div class="wds-break-head">
-      <span>база (сумма прихода)</span>
-      <span>дата</span>
+      <span>Приходы:</span>
+      <span>сумма</span>
       <span>%</span>
       <span>после 1-го %</span>
-      <span>после 2-го %</span>
     </div>
     ${inHtml || '<div class="wds-break-empty">— нет приходов —</div>'}
     <div class="wds-break-total">
+      <span>Итого база:</span>
       <span><b>${fmt(totalBase)}</b></span>
-      <span>← итого база (без выданных)</span>
       <span></span>
       <span><b>${fmt(totalAfter1)}</b></span>
-      <span><b style="color:#818cf8">${fmt(totalAfter2)}</b></span>
     </div>
     ${outRows.length ? `<div class="wds-break-head" style="margin-top:8px">
-      <span>Выдачи (получено на руки):</span><span></span><span></span><span></span><span></span>
+      <span>Выдачи (получено на руки):</span><span></span><span></span><span></span>
     </div>
     ${outHtml}
     <div class="wds-break-total">
+      <span>Итого выдано:</span>
       <span><b style="color:var(--expense)">${fmt(totalReceived)}</b></span>
-      <span>← итого выдано</span>
-      <span></span><span></span><span></span>
+      <span></span><span></span>
     </div>` : ''}
   </div>`;
 }
@@ -3871,8 +3869,7 @@ function renderPairBaseBreakdownHtml(pair, netBase) {
 function curatorWeekMaps(dayStr) {
   const thisWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
-  const accrByWeek = {};        // все приходы с %кур — для видимости недель
-  const accrGivenByWeek = {};   // только отданные (есть число отдачи) — для итогов
+  const accrByWeek = {};
   const paidByWeek = {};
   for (const d of allDays) {
     if (d > dayStr) break;
@@ -3885,29 +3882,23 @@ function curatorWeekMaps(dayStr) {
     if (isWeekday(d) && Array.isArray(dd.in)) {
       dd.in.forEach(r => {
         if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
-          const cur = floor100((r.amount || 0) * r.pctCur / 100);
-          accrByWeek[wk] = (accrByWeek[wk] || 0) + cur;
-          if (curatorGivenFor(d, r.client)) {
-            accrGivenByWeek[wk] = (accrGivenByWeek[wk] || 0) + cur;
-          }
+          accrByWeek[wk] = (accrByWeek[wk] || 0) + floor100((r.amount || 0) * r.pctCur / 100);
         }
       });
     }
   }
   const isShownWeek = (wk) => wk === thisWeek || (paidByWeek[wk] || 0) < (accrByWeek[wk] || 0);
-  return { thisWeek, allDays, accrByWeek, accrGivenByWeek, paidByWeek, isShownWeek };
+  return { thisWeek, allDays, accrByWeek, paidByWeek, isShownWeek };
 }
 
-// Накопительный итог по ВСЕМ неделям (сквозной): всё начисленное куратору по
-// отданным приходам минус все выплаты куратору. Прошлые непогашенные недели тоже
-// входят. Никакого недельного «обнуления».
 function curatorMineTotals(dayStr) {
   const M = curatorWeekMaps(dayStr);
   let accrued = 0, paid = 0;
-  const weeks = new Set([...Object.keys(M.accrGivenByWeek), ...Object.keys(M.paidByWeek)]);
+  const weeks = new Set([...Object.keys(M.accrByWeek), ...Object.keys(M.paidByWeek)]);
   weeks.forEach(wk => {
-    accrued += (M.accrGivenByWeek[wk] || 0);   // в итог — только отданные
-    paid += (M.paidByWeek[wk] || 0);           // все выплаты куратору
+    if (!M.isShownWeek(wk)) return;
+    accrued += (M.accrByWeek[wk] || 0);
+    paid += (M.paidByWeek[wk] || 0);
   });
   return { accrued, paid, remain: accrued - paid };
 }
@@ -3918,6 +3909,8 @@ function collectCuratorMineRows(dayStr) {
   for (const d of M.allDays) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
+    const wk = weekMondayStr(d);
+    if (!M.isShownWeek(wk)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3929,7 +3922,6 @@ function collectCuratorMineRows(dayStr) {
           pctCur: r.pctCur,
           curatorSum: floor100((r.amount || 0) * r.pctCur / 100),
           idx: idx,
-          given: curatorGivenFor(d, r.client),   // выдан вручную отмечен — идёт в расчёт
         });
       }
     });
@@ -3944,10 +3936,10 @@ function renderCuratorTile() {
   const accrued = __ctot.accrued;
   const paid = __ctot.paid;
   const remain = accrued - paid;
-  if (accrued <= 0) { body.innerHTML = 'Куратору пока ничего не начислено (нет подтверждённых приходов).'; return; }
+  if (accrued <= 0) { body.innerHTML = 'На этой неделе куратору ничего не начислено.'; return; }
   const rows = collectCuratorMineRows(currentDate);
   const topByPair = {};
-  rows.forEach(r => { if (r.given) topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
+  rows.forEach(r => { topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
   const topList = Object.entries(topByPair).sort((a,b) => b[1] - a[1]).slice(0, 3);
   const topHtml = topList.map(([p, v]) =>
     `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
@@ -3980,6 +3972,8 @@ function collectCuratorPayments(dayStr) {
     if (d > dayStr) break;
     const dd = state.days[d];
     if (!dd || !(typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0)) continue;
+    const wk = weekMondayStr(d);
+    if (!M.isShownWeek(wk)) continue;
     rows.push({ date: d, amount: dd.curatorPaid });
   }
   return rows;
@@ -4000,42 +3994,18 @@ function openCuratorMineModal() {
 
   const table = !rows.length
     ? `<div style="color:var(--muted);padding:8px 0">
-        Нет приходов с процентом куратора.
+        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора.
       </div>`
     : (() => {
-        const pendingSum = rows.filter(r => !r.given).reduce((s, r) => s + r.curatorSum, 0);
-        const pendingCount = rows.filter(r => !r.given).length;
-        const trs = rows.map(r => {
-          const dim = r.given ? '' : 'opacity:.55;';
-          const encPair = encodeURIComponent(r.pair);
-          const statusCell = r.given
-            ? `<td style="text-align:center;white-space:nowrap">
-                 <span style="color:#00e5b0;font-size:11px">✓ отдано клиенту</span>
-                 <button class="no-print" onclick="unconfirmCuratorGiven('${r.date}','${encPair}')" title="Убрать подтверждение — приход вернётся в «в работе»" style="margin-left:6px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px">✕</button>
-               </td>`
-            : `<td style="text-align:center;white-space:nowrap">
-                 <button class="no-print" onclick="confirmCuratorGiven('${r.date}','${encPair}')" title="Отметить, что основная сумма отдана клиенту — приход пойдёт в расчёт куратору" style="background:rgba(0,229,176,.12);border:1px solid rgba(0,229,176,.4);color:#00e5b0;cursor:pointer;font-size:11px;border-radius:6px;padding:3px 8px;white-space:nowrap">✓ подтвердить</button>
-               </td>`;
-          const sumCell = r.given
-            ? `<td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>`
-            : `<td style="text-align:right;font-family:var(--font-num);color:var(--muted)">${fmt(r.curatorSum)}</td>`;
-          return `
-          <tr style="${dim}">
+        const trs = rows.map(r => `
+          <tr>
             <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
             <td>${escapeHtml(r.pair)}</td>
             <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
             <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
-            ${statusCell}
-            ${sumCell}
+            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
           </tr>
-        `;
-        }).join('');
-        const pendingRow = pendingCount > 0
-          ? `<tr class="cm-paid-row">
-              <td colspan="5" style="text-align:right;color:var(--muted)">⏳ в работе (ещё не отдано, не в счёте): ${pendingCount} шт.</td>
-              <td style="text-align:right;font-family:var(--font-num);color:var(--muted)">${fmt(pendingSum)}</td>
-            </tr>`
-          : '';
+        `).join('');
         return `<table class="cm-table">
           <thead>
             <tr>
@@ -4043,23 +4013,21 @@ function openCuratorMineModal() {
               <th>Пара</th>
               <th style="text-align:right">Сумма прихода</th>
               <th style="text-align:right">%кур</th>
-              <th style="text-align:center">Отдано клиенту</th>
               <th style="text-align:right">К куратору</th>
             </tr>
           </thead>
           <tbody>${trs}</tbody>
           <tfoot>
             <tr class="cm-total-row">
-              <td colspan="5" style="text-align:right;font-weight:700">ИТОГО начислено (по отданным):</td>
+              <td colspan="4" style="text-align:right;font-weight:700">ИТОГО начислено:</td>
               <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(accrued)}</td>
             </tr>
-            ${pendingRow}
             <tr class="cm-paid-row">
-              <td colspan="5" style="text-align:right;color:var(--muted)">− отдано куратору (всего):</td>
+              <td colspan="4" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
               <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
             </tr>
             <tr class="cm-grand-row">
-              <td colspan="5" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">К ОТДАЧЕ:</td>
+              <td colspan="4" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">К ОТДАЧЕ:</td>
               <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(remain)}</td>
             </tr>
           </tfoot>
@@ -4076,11 +4044,11 @@ function openCuratorMineModal() {
           <button class="cm-pay-del no-print" onclick="removeCuratorPayment('${p.date}')" title="Убрать отметку об отдаче за этот день">✕</button>
         </div>
       `).join('')
-    : `<div class="cm-pay-empty">Пока ничего не отдано куратору.</div>`;
+    : `<div class="cm-pay-empty">Пока ничего не отдано в этой неделе.</div>`;
 
   const payBlock = `
     <div class="cm-paid-block">
-      <div class="cm-paid-head">📤 Отдано куратору (все выплаты)</div>
+      <div class="cm-paid-head">📤 Отдано куратору в этой неделе</div>
       <div class="cm-pay-list">${paidList}</div>
       <div class="cm-paid-total">
         <span>Итого отдано:</span>
@@ -4097,18 +4065,11 @@ function openCuratorMineModal() {
     </div>
   `;
 
-  const pendingAll = rows.filter(r => !r.given).length;
-  const bulkBtn = pendingAll > 0
-    ? `<div class="no-print" style="margin:10px 0 4px;text-align:right">
-         <button onclick="confirmAllCuratorGiven()" style="background:rgba(0,229,176,.14);border:1px solid rgba(0,229,176,.45);color:#00e5b0;cursor:pointer;font-size:12px;border-radius:8px;padding:6px 12px;font-weight:600">✓ Подтвердить все в работе (${pendingAll})</button>
-       </div>`
-    : '';
   box.innerHTML = `
     <div class="cm-head">
-      <div class="cm-period">Общий итог по всем неделям (нарастающим) · пн–пт</div>
-      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.<br>В расчёт идут только ВЫДАННЫЕ приходы — отмеченные кнопкой «✓ подтвердить». Остальные просто фиксируются и не участвуют в расчёте, пока не будут выданы. «Число отдачи» здесь ни при чём — это план.</div>
+      <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен.</div>
     </div>
-    ${bulkBtn}
     ${table}
     ${payBlock}
   `;
@@ -4158,8 +4119,10 @@ function printCuratorMine() {
   window.print();
 }
 
-// Сохраняет планируемую дату отдачи по паре в рамках текущей недели.
-// Не влияет ни на один расчёт — только метаданные для UI.
+// Сохраняет дату отдачи по паре в рамках текущей недели.
+// Проставленная дата помечает пару ОТДАННОЙ: она исключается из блоков
+// «Задолженность по парам за неделю» и «Сумма к отдаче» и из их итогов
+// (фильтр в computeWeekPairDebt; сами формулы расчёта не меняются).
 function setDebtOutDate(encodedPair, dateStr) {
   const pair = decodeURIComponent(encodedPair);
   const wk = weekMondayStr(currentDate);
@@ -4171,39 +4134,10 @@ function setDebtOutDate(encodedPair, dateStr) {
     delete state.debtOutDates[key];
   }
   saveState();
+  // Обновляем всё, что показывает эти суммы: блок недели, плитку доски, модалку
+  try { renderWeekDebtSummary(); } catch (e) {}
+  try { renderDebtOutTile(); } catch (e) {}
   openDebtOutModal();
-}
-
-// Подтвердить отдачу прямо из таблицы «Куратор ко мне»: помечает пару за её
-// неделю как отданную (тот же ключ «неделя::пара» в state.debtOutDates, что и
-// «число отдачи»). Ставит «число отдачи» = дата прихода. Расчёт сумм не трогает —
-// только меняет фильтр «отдано/в работе». Помечает ВСЮ пару за эту неделю.
-function confirmCuratorGiven(dateStr, encodedPair) {
-  const pair = decodeURIComponent(encodedPair);
-  if (!state.curatorGiven) state.curatorGiven = {};
-  state.curatorGiven[dateStr + '::' + pair] = true;
-  saveState();
-  render();
-  openCuratorMineModal();
-}
-function unconfirmCuratorGiven(dateStr, encodedPair) {
-  const pair = decodeURIComponent(encodedPair);
-  if (state.curatorGiven) delete state.curatorGiven[dateStr + '::' + pair];
-  saveState();
-  render();
-  openCuratorMineModal();
-}
-// Подтвердить все приходы «в работе» разом (для хвоста с начала месяца и т.п.).
-// Ставит «число отдачи» = дате прихода для каждой пары-недели. Обратимо (✕ у строки).
-function confirmAllCuratorGiven() {
-  const rows = collectCuratorMineRows(currentDate).filter(r => !r.given);
-  if (!rows.length) return;
-  if (!confirm('Пометить выданными все приходы «в работе» (' + rows.length + ' шт.)?\n\nОни войдут в расчёт куратору. Любой можно снять по кнопке ✕.')) return;
-  if (!state.curatorGiven) state.curatorGiven = {};
-  rows.forEach(r => { state.curatorGiven[r.date + '::' + r.pair] = true; });
-  saveState();
-  render();
-  openCuratorMineModal();
 }
 
 function renderSummary(day) {
@@ -4237,9 +4171,7 @@ function renderSummary(day) {
   document.getElementById('s-in').textContent = fmt(inT);
   document.getElementById('s-balance').textContent = fmt(balance);
   const curEl = document.getElementById('s-curator');
-  // Куратору к отдаче — только по ВЫДАННЫМ (подтверждённым) приходам,
-  // сквозным итогом по всем неделям. Неподтверждённые в сумму не входят.
-  if (curEl) curEl.textContent = fmt(curatorMineTotals(currentDate).remain);
+  if (curEl) curEl.textContent = fmt(curatorRunningBalance(currentDate));
   const curPaidLine = document.getElementById('curator-paid-line');
   if (curPaidLine) {
     const paidToday = day.curatorPaid || 0;
@@ -4704,6 +4636,16 @@ function editRow(type, i) {
     if (newClient !== null) {
       const nc = newClient.trim();
       if (nc) r.client = nc;
+    }
+    // Метка/примечание к приходу — НЕ участвует в расчёте, только для отображения.
+    const newTag = prompt(
+      'Метка (примечание к приходу, НЕ участвует в расчёте, пусто = убрать):\n\n' +
+      'Пример: «Авангард» — покажется рядом с парой, но в расчёте пары не участвует.',
+      r.tag || ''
+    );
+    if (newTag !== null) {
+      const t = newTag.trim();
+      r.tag = t || null;
     }
     const newNote = prompt('Дополнительное примечание к сумме (пусто = убрать):', r.note || '');
     if (newNote !== null) {
