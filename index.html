@@ -2539,15 +2539,18 @@ function curatorWeeklyAccrued(dayStr) {
   let sum = 0;
   const thisWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
+  const cover = pairPaidCoverage(dayStr);   // доля выданности каждого прихода
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
     if (!isWeekday(d)) continue;                 // сб/вс не учитываются
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
-    dd.in.forEach(r => {
+    dd.in.forEach((r, idx) => {
       if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
-        sum += floor100((r.amount || 0) * r.pctCur / 100);
+        // Куратор — только с ВЫДАННОЙ на руки части прихода.
+        const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+        if (frac > 0) sum += floor100((r.amount || 0) * r.pctCur / 100 * frac);
       }
     });
   }
@@ -2577,18 +2580,21 @@ function dealsWeeklyAccrued(dayStr) {
   let sum = 0;
   const thisWeek = weekMondayStr(dayStr);
   const allDays = Object.keys(state.days).sort();
+  const cover = pairPaidCoverage(dayStr);   // доля выданности каждого прихода
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
     if (!isWeekday(d)) continue;                 // сб/вс не учитываются
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
-    dd.in.forEach(r => {
+    dd.in.forEach((r, idx) => {
       const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
       const hasP2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
                      && r.total2 !== null && r.total2 !== undefined);
       if (hasP1 && hasP2) {
-        sum += (r100(r.total) - r100(r.total2));
+        // Итог сделок — только по ВЫДАННОЙ на руки части прихода.
+        const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+        if (frac > 0) sum += r100((r100(r.total) - r100(r.total2)) * frac);
       }
     });
   }
@@ -3852,24 +3858,57 @@ function renderPairBaseBreakdownHtml(pair, remain) {
 // Собрать список всех приходов текущей недели (пн–пт), в которых задан
 // процент куратора. НИЧЕГО НЕ ПЕРЕСЧИТЫВАЕТ — читает те же поля, что и
 // curatorWeeklyAccrued, и в той же формуле (r.amount * pctCur/100, floor100).
-function curatorWeekMaps(dayStr) {
-  const thisWeek = weekMondayStr(dayStr);
+// Доля ВЫДАННОСТИ каждого прихода: выдачи на руки (dd.out) гасят приходы пары
+// по порядку — старые сначала (тот же принцип, что и в движке долга: выдачи
+// вычитаются из накопления после 1-го %). Возвращает карту
+// `пара#дата#idx → доля 0..1`. Куратор начисляется только с ВЫДАННОЙ части
+// прихода: полностью невыданный приход (доля 0) в расчёт не входит вообще.
+// Формула куратора не меняется — меняется лишь то, какая часть суммы прихода
+// в неё попадает.
+function pairPaidCoverage(dayStr) {
   const allDays = Object.keys(state.days).sort();
-  // Пары, по которым была хотя бы одна РЕАЛЬНАЯ выдача (получено на руки) до
-  // текущего дня. Куратор «ко мне» считается ТОЛЬКО по таким парам — приходы
-  // пар без единой выдачи в этот блок не попадают (правило подтверждено
-  // пользователем). Формула начисления куратора не меняется, меняется только
-  // набор приходов, которые в неё входят.
-  const paidPairs = new Set();
+  const byPair = {};
   for (const d of allDays) {
     if (d > dayStr) break;
     const dd = state.days[d];
-    if (!dd || !Array.isArray(dd.out)) continue;
-    dd.out.forEach(o => {
-      const c = (o.client || '').trim();
-      if (c && (o.amount || 0) > 0) paidPairs.add(c);
+    if (!dd) continue;
+    if (isWeekday(d) && Array.isArray(dd.in)) {
+      dd.in.forEach((r, idx) => {
+        const p = (r.client || '').trim();
+        if (!p) return;
+        (byPair[p] || (byPair[p] = { ins: [], out: 0 })).ins.push({ date: d, idx, after1: calcInRowFinal(r) });
+      });
+    }
+    if (Array.isArray(dd.out)) {
+      dd.out.forEach(o => {
+        const p = (o.client || '').trim();
+        if (!p) return;
+        (byPair[p] || (byPair[p] = { ins: [], out: 0 })).out += (o.amount || 0);
+      });
+    }
+  }
+  const cover = {};
+  for (const p in byPair) {
+    let pool = byPair[p].out;             // сколько всего выдано этой паре
+    byPair[p].ins.forEach(inr => {        // ins уже хронологически (дни отсортированы)
+      const a = inr.after1 || 0;
+      let frac = 0;
+      if (a > 0 && pool > 0) {
+        const covered = Math.min(pool, a);
+        frac = covered / a;
+        pool -= covered;
+      }
+      cover[p + '#' + inr.date + '#' + inr.idx] = frac;
     });
   }
+  return cover;
+}
+
+function curatorWeekMaps(dayStr) {
+  const thisWeek = weekMondayStr(dayStr);
+  const allDays = Object.keys(state.days).sort();
+  // Доля выданности каждого прихода — куратор считается только с выданной части.
+  const cover = pairPaidCoverage(dayStr);
   const accrByWeek = {};
   const paidByWeek = {};
   for (const d of allDays) {
@@ -3881,16 +3920,18 @@ function curatorWeekMaps(dayStr) {
       paidByWeek[wk] = (paidByWeek[wk] || 0) + dd.curatorPaid;
     }
     if (isWeekday(d) && Array.isArray(dd.in)) {
-      dd.in.forEach(r => {
-        if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0
-            && paidPairs.has((r.client || '').trim())) {
-          accrByWeek[wk] = (accrByWeek[wk] || 0) + floor100((r.amount || 0) * r.pctCur / 100);
+      dd.in.forEach((r, idx) => {
+        if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+          const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+          if (frac > 0) {
+            accrByWeek[wk] = (accrByWeek[wk] || 0) + floor100((r.amount || 0) * r.pctCur / 100 * frac);
+          }
         }
       });
     }
   }
   const isShownWeek = (wk) => wk === thisWeek || (paidByWeek[wk] || 0) < (accrByWeek[wk] || 0);
-  return { thisWeek, allDays, accrByWeek, paidByWeek, isShownWeek, paidPairs };
+  return { thisWeek, allDays, accrByWeek, paidByWeek, isShownWeek, cover };
 }
 
 function curatorMineTotals(dayStr) {
@@ -3916,16 +3957,19 @@ function collectCuratorMineRows(dayStr) {
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
-      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0
-          && M.paidPairs.has((r.client || '').trim())) {
-        rows.push({
-          date: d,
-          pair: r.client || '—',
-          amount: r.amount || 0,
-          pctCur: r.pctCur,
-          curatorSum: floor100((r.amount || 0) * r.pctCur / 100),
-          idx: idx,
-        });
+      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+        const frac = M.cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+        if (frac > 0) {
+          rows.push({
+            date: d,
+            pair: r.client || '—',
+            amount: r.amount || 0,
+            pctCur: r.pctCur,
+            frac: frac,                                 // доля выданности (для пометки)
+            curatorSum: floor100((r.amount || 0) * r.pctCur / 100 * frac),
+            idx: idx,
+          });
+        }
       }
     });
   }
@@ -3939,7 +3983,7 @@ function renderCuratorTile() {
   const accrued = __ctot.accrued;
   const paid = __ctot.paid;
   const remain = accrued - paid;
-  if (accrued <= 0) { body.innerHTML = 'Куратору к отдаче ничего нет (учитываются только пары, по которым уже была выдача).'; return; }
+  if (accrued <= 0) { body.innerHTML = 'Куратору к отдаче ничего нет (учитывается только выданная на руки часть приходов).'; return; }
   const rows = collectCuratorMineRows(currentDate);
   const topByPair = {};
   rows.forEach(r => { topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
@@ -3997,18 +4041,22 @@ function openCuratorMineModal() {
 
   const table = !rows.length
     ? `<div style="color:var(--muted);padding:8px 0">
-        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет приходов с процентом куратора по парам, где уже была выдача.
+        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет выданных на руки приходов с процентом куратора.
       </div>`
     : (() => {
-        const trs = rows.map(r => `
+        const trs = rows.map(r => {
+          const partial = (r.frac !== undefined && r.frac < 0.999)
+            ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.round(r.frac * 100)}%</span>` : '';
+          return `
           <tr>
             <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
-            <td>${escapeHtml(r.pair)}</td>
+            <td>${escapeHtml(r.pair)}${partial}</td>
             <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
             <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
             <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
           </tr>
-        `).join('');
+        `;
+        }).join('');
         return `<table class="cm-table">
           <thead>
             <tr>
@@ -4071,7 +4119,7 @@ function openCuratorMineModal() {
   box.innerHTML = `
     <div class="cm-head">
       <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
-      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Учитываются только приходы пар, по которым уже была выдача на руки.</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
     </div>
     ${table}
     ${payBlock}
