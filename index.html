@@ -3070,6 +3070,54 @@ function pairWeekReceived(dayStr, pairName) {
   return rec;
 }
 
+// Остаток по паре за приходы, добавленные СТРОГО ПОЗЖЕ даты отдачи (afterDate),
+// в рамках текущей недели. Приходы/выдачи по afterDate включительно считаются
+// закрытыми «числом отдачи». Учитываются только приходы строго позже afterDate
+// (по будням, как и везде) за вычетом выдач строго позже afterDate. Формулы —
+// те же, что в pairWeekAccruals/pairWeekReceived, расчётная логика не меняется.
+// Возвращает объект-строку (как в rows) либо null, если после отдачи остатка нет.
+function pairRemainingAfterGivenDate(dayStr, pairName, afterDate) {
+  const pair = (pairName || '').trim();
+  if (!pair || !afterDate) return null;
+  const thisWeek = weekMondayStr(dayStr);
+  let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
+  let has2 = false, pct1 = null, pct2 = null;
+  const allDays = Object.keys(state.days).sort();
+  for (const d of allDays) {
+    if (d > dayStr || weekMondayStr(d) !== thisWeek) continue;
+    if (d <= afterDate) continue;           // по дату отдачи включительно — закрыто
+    const dd = state.days[d];
+    if (!dd) continue;
+    if (isWeekday(d) && Array.isArray(dd.in)) {   // приход копим только по будням
+      dd.in.forEach(r => {
+        if ((r.client || '').trim() !== pair) return;
+        accBase += (r.amount || 0);
+        acc1 += calcInRowFinal(r);
+        if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
+        if (hasSecondPct(r)) { acc2 += r100(r.total2); has2 = true; pct2 = r.pct2; }
+      });
+    }
+    if (Array.isArray(dd.out)) {                  // выдача — в любой день
+      dd.out.forEach(o => { if ((o.client || '').trim() === pair) rec += (o.amount || 0); });
+    }
+  }
+  const net = acc1 - rec;
+  const remaining = r100(net);
+  if (remaining <= 0) return null;
+  const frac = acc1 > 0 ? Math.max(0, net / acc1) : 0;
+  const v2 = (has2 && net > 0) ? r100(acc2 * frac) : null;
+  return {
+    name: pair,
+    base: r100(accBase * frac),
+    v1: remaining,
+    v2: v2,
+    has2: has2 && v2 !== null && v2 > 0,
+    pct1: pct1, pct2: pct2,
+    carry: false,
+    reopenedAfterGiven: true
+  };
+}
+
 // ЕДИНЫЙ расчёт «Задолженность по парам за неделю»: для каждой пары — начислено
 // за текущую неделю (пн–пт, после %) минус реально выдано ей на руки за эту же
 // неделю (по currentDate включительно). Пара с остатком ≤ 0 в список не входит.
@@ -3189,9 +3237,34 @@ function computeWeekPairDebt() {
   const givenRows = [];
   {
     const dOut = state.debtOutDates || {};
+    const ovAll = state.weekDebtOverrides || {};
     for (let i = rows.length - 1; i >= 0; i--) {
       const gd = dOut[thisWeek + '::' + rows[i].name];
-      if (gd) { rows[i].givenDate = gd; givenRows.unshift(rows.splice(i, 1)[0]); }
+      if (!gd) continue;
+      // Ручная коррекция ✏️ имеет приоритет — при ней оставляем прежнее поведение
+      // (пара с числом отдачи полностью скрыта), чтобы не спорить с ручной суммой.
+      const ov = ovAll[thisWeek + '::' + rows[i].name];
+      const hasOverride = ov && ov.v1 !== null && ov.v1 !== undefined;
+      // «Число отдачи» закрывает приходы ПО эту дату включительно. Приходы,
+      // добавленные ПОЗЖЕ даты отдачи, — это новый, ещё не отданный долг: пара
+      // снова показывается на эту (меньшую) сумму. Если после даты отдачи ничего
+      // нового не пришло (или всё уже выдано) — пара полностью отдана, уходит в givenRows.
+      const after = hasOverride ? null : pairRemainingAfterGivenDate(currentDate, rows[i].name, gd);
+      if (after) {
+        rows[i].base = after.base;
+        rows[i].v1 = after.v1;
+        rows[i].v2 = (after.v2 === null || after.v2 === undefined) ? after.v1 : after.v2;
+        rows[i].has2 = after.has2;
+        rows[i].pct1 = (after.pct1 !== null) ? after.pct1 : rows[i].pct1;
+        rows[i].pct2 = (after.pct2 !== null) ? after.pct2 : rows[i].pct2;
+        rows[i].carry = false;
+        rows[i].reopenedAfterGiven = true;
+        rows[i].givenDate = gd;   // помним дату прошлой отдачи (для UI/диагностики)
+        rows[i].diff = r100(rows[i].v1 - rows[i].v2);
+      } else {
+        rows[i].givenDate = gd;
+        givenRows.unshift(rows.splice(i, 1)[0]);
+      }
     }
     givenRows.sort((x, y) => y.v1 - x.v1);
   }
@@ -3220,6 +3293,7 @@ function renderWeekDebtSummary() {
     const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
     const tag = r.carry ? ` <span style="font-size:10px;color:#a78bfa">↪ перенос</span>` : '';
     const man = r.manual ? ` <span style="font-size:10px;color:#ff8a4a">✋ ручная</span>` : '';
+    const reop = r.reopenedAfterGiven ? ` <span style="font-size:10px;color:#4ade80" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
     const editBtn = (state.manualMode === true)
       ? ` <span style="cursor:pointer" title="Изменить сумму пары вручную" onclick="editWeekDebtPair('${escapeHtml(r.name).replace(/'/g, "\\'")}')">✏️</span>`
       : '';
@@ -3229,7 +3303,7 @@ function renderWeekDebtSummary() {
     const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
     return `<div class="wds-row wds-row-debt">
       <div class="wds-row-main">
-        <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${editBtn}
+        <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${reop}${editBtn}
           <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button>
         </span>
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
@@ -3249,7 +3323,7 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» — отдана: она не показывается вообще (вернуть — «🔍 Проверить пару» в «💸 Сумма к отдаче»). Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
   </div>`;
 }
 
@@ -3306,6 +3380,7 @@ function openDebtOutModal() {
         const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
         const tag = r.carry ? ` <span style="font-size:10px;color:#a78bfa">↪ перенос</span>` : '';
         const man = r.manual ? ` <span style="font-size:10px;color:#ff8a4a">✋ ручная</span>` : '';
+        const reop = r.reopenedAfterGiven ? ` <span style="font-size:10px;color:#4ade80" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
         const dateKey = wk + '::' + r.name;
         const savedDate = (state.debtOutDates && state.debtOutDates[dateKey]) || '';
         const nameAttr = encodeURIComponent(r.name);
@@ -3315,7 +3390,7 @@ function openDebtOutModal() {
         const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
         return `<div class="wds-row wds-row-debt">
           <div class="wds-row-main">
-            <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}
+            <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${reop}
               <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс, напр. «-Авангард»)">🏷️</button>
             </span>
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
@@ -3340,7 +3415,7 @@ function openDebtOutModal() {
             <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата отдачи: как только она проставлена, пара считается отданной и полностью пропадает из этого блока, из «Задолженности по парам за неделю» и из всех итогов. Вернуть пару по ошибке — кнопка «🔍 Проверить пару».</div>
+          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата отдачи: приходы ПО эту дату считаются отданными и пропадают из блоков и итогов. Но приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Вернуть пару целиком (убрать дату) — кнопка ✕ рядом с датой или «🔍 Проверить пару».</div>
         </div>`;
     }
   }
@@ -3387,8 +3462,15 @@ function diagnosePair() {
   const inLines = inRows.map(r =>
     `  ${r.date} (${dowRu[r.weekday]}, будни:${r.weekday>=1&&r.weekday<=5?'да':'НЕТ'}): сумма ${fmt(r.amount)}, %1=${r.pct ?? '—'}, %2=${r.pct2 ?? '—'}, total(после 1-го %)=${fmt(r.total)}`).join('\n') || '  — нет записей прихода —';
   const outLines = outRows.map(r => `  ${r.date}: выдано ${fmt(r.amount)}`).join('\n') || '  — нет выдач —';
+  const gdDate = (state.debtOutDates || {})[overrideKey];
   const inList = computeWeekPairDebt().rows.find(r => r.name === p);
   const conclusion = (() => {
+    if (inList) {
+      const reopNote = inList.reopenedAfterGiven
+        ? ' (переоткрыта: приходы ПОЗЖЕ даты отдачи ' + gdDate + ' — новый неотданный остаток)'
+        : '';
+      return '✅ Пара В списке. Отражена как v1=' + fmt(inList.v1) + ', v2=' + fmt(inList.v2) + reopNote + '. Если ты её не видишь — проверь модалку и блок под таблицей.';
+    }
     if (!a) return '❌ Пара НЕ найдена в накоплениях (pairWeekAccruals). Причины:\n' +
       '   • нет ни одного прихода с этим именем на текущей неделе (пн–пт), ИЛИ\n' +
       '   • дата прихода не в текущей неделе (currentDate=' + currentDate + '), ИЛИ\n' +
@@ -3396,11 +3478,9 @@ function diagnosePair() {
     if (override && (override.v1 === 0 || override.v1 === null)) return
       '⚠ Ручная коррекция ✏️ на эту пару стоит 0 или null — она УДАЛЯЕТ пару из списка.\n' +
       'Проверь state.weekDebtOverrides["' + overrideKey + '"] = ' + JSON.stringify(override);
+    if (gdDate) return '⚠ У пары проставлено «число отдачи» (' + gdDate + '), и приходов ПОЗЖЕ этой даты нет — она полностью ОТДАНА и не показывается в блоках и итогах. После закрытия этого окна будет предложено убрать дату и вернуть пару.';
     if (rem <= 0) return '⚠ Выдано (out) за неделю (' + fmt(received) + ') ≥ начислено (' + fmt(a.v1) + ') → остаток ≤ 0, пара не показывается.';
-    const gdDate = (state.debtOutDates || {})[overrideKey];
-    if (gdDate) return '⚠ У пары проставлено «число отдачи» (' + gdDate + ') — она ОТДАНА и не показывается в блоках и итогах. После закрытия этого окна будет предложено убрать дату и вернуть пару.';
-    if (!inList) return '⚠ Пара НЕ в итоговых rows, хотя rem=' + fmt(rem) + '. Странно — проверь ручные коррекции или отладь computeWeekPairDebt.';
-    return '✅ Пара В списке. Отражена как v1=' + fmt(inList.v1) + ', v2=' + fmt(inList.v2) + '. Если ты её не видишь — проверь модалку и блок под таблицей.';
+    return '⚠ Пара НЕ в итоговых rows, хотя rem=' + fmt(rem) + '. Странно — проверь ручные коррекции или отладь computeWeekPairDebt.';
   })();
   const report =
     `🔍 ДИАГНОСТИКА: «${p}»\n` +
@@ -3417,7 +3497,7 @@ function diagnosePair() {
   console.log(report);
   // Пара скрыта из-за проставленного «числа отдачи» — предложить вернуть её
   const gdVal = (state.debtOutDates || {})[overrideKey];
-  if (gdVal && confirm('У пары «' + p + '» проставлено число отдачи (' + gdVal + ') — она скрыта как отданная.\n\nУбрать дату и вернуть пару в блоки и итоги?')) {
+  if (gdVal && !inList && confirm('У пары «' + p + '» проставлено число отдачи (' + gdVal + ') — она скрыта как отданная.\n\nУбрать дату и вернуть пару в блоки и итоги?')) {
     delete state.debtOutDates[overrideKey];
     saveState();
     try { renderWeekDebtSummary(); } catch (e) {}
