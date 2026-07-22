@@ -2999,6 +2999,11 @@ function renderInBody(day) {
   const total = day.in.reduce((s,r) => s + calcInRowFinal(r), 0);
   document.getElementById('in-total').textContent = fmt(total);
   renderWeekDebtSummary();
+  // Плитки на доске держим в синхроне с любым изменением дня (приход/выдача/дата),
+  // чтобы «Сумма к отдаче» на доске не оставалась устаревшей до её переоткрытия.
+  // Это только обновление отображения — расчётные функции те же.
+  try { renderDebtOutTile(); } catch (e) {}
+  try { renderCuratorTile(); } catch (e) {}
 }
 
 // Сводный блок: задолженность по ВСЕМ парам за текущую неделю.
