@@ -2427,9 +2427,16 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
   let cGross1 = 0, cGross2 = 0, cGrossBase = 0, cNet1 = 0;
   let pct1 = null, pct2 = null, has2 = false;
   for (const wk of weeks) {
+    // «Число отдачи» этой недели. Для ПРОШЛЫХ недель оно закрывает перенос:
+    // всё ПО эту дату включительно (в т.ч. перенос с более ранних недель)
+    // считается отданным и вперёд не тянется. Для текущей недели «число отдачи»
+    // обрабатывается отдельно (в computeWeekPairDebt) — здесь его не применяем.
+    const gd = (state.debtOutDates || {})[wk + '::' + pair];
+    const applyGd = !!gd && wk !== targetWeek;
     let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
     for (const d of allDays) {
       if (weekMondayStr(d) !== wk) continue;
+      if (applyGd && d <= gd) continue;   // приходы/выдачи ПО дату отдачи включительно — отданы
       const dd = state.days[d];
       if (!dd) continue;
       if (isWeekday(d) && Array.isArray(dd.in)) {
@@ -2447,10 +2454,16 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
         });
       }
     }
-    const gross1 = cGross1 + acc1;
-    const gross2 = cGross2 + acc2;
-    const grossBase = cGrossBase + accBase;
-    const net1   = cNet1 + acc1 - rec;
+    // При «числе отдачи» прошлой недели входящий перенос обнуляется (всё до даты
+    // отдачи отдано) — дальше копим только приходы, поступившие ПОЗЖЕ этой даты.
+    const inG1 = applyGd ? 0 : cGross1;
+    const inG2 = applyGd ? 0 : cGross2;
+    const inGB = applyGd ? 0 : cGrossBase;
+    const inN1 = applyGd ? 0 : cNet1;
+    const gross1 = inG1 + acc1;
+    const gross2 = inG2 + acc2;
+    const grossBase = inGB + accBase;
+    const net1   = inN1 + acc1 - rec;
     // Ручная коррекция этой недели (✏️ в ручном режиме) — заменяет расчёт
     const ov = (state.weekDebtOverrides || {})[wk + '::' + pair];
     if (wk === targetWeek) {
@@ -3954,14 +3967,12 @@ function renderPairBaseBreakdownHtml(pair, remain) {
     netBase = Math.max(0, dbt.remainingBase || 0);
   }
 
-  // КАЖДЫЙ невыданный приход — отдельной строкой. Выдачи гасят СТАРЫЕ приходы
-  // первыми ('fifo'): деньги, отданные со временем, закрывают самые ранние
-  // долги — как в жизни. Поэтому давно отданные старые приходы уходят из списка,
-  // а невыданным показывается свежий остаток на реальных последних приходах.
-  // Полностью выданные приходы не показываем; частично выданный — на свою
-  // невыданную часть. ИТОГ остатка пары от порядка НЕ зависит (это чистое
-  // приход−выдача) — меняется только то, на какие приходы он разложен.
-  const cover = pairPaidCoverage(currentDate, 'fifo');
+  // КАЖДЫЙ невыданный приход — отдельной строкой. Выдачи гасят НОВЫЕ приходы
+  // первыми ('lifo'), поэтому невыданными остаются старые приходы, как правило
+  // целиком — и остаток раскладывается на реальные приходы (напр. два прихода
+  // от 8 июл), а не одной общей суммой. Полностью выданные приходы не
+  // показываем. Частично выданный приход показываем на свою невыданную часть.
+  const cover = pairPaidCoverage(currentDate, 'lifo');
   const unpaidRows = [];
   inRows.forEach(r => {
     const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля выдано
@@ -4050,11 +4061,22 @@ function pairPaidCoverage(dayStr, order) {
     }
   }
   const cover = {};
+  const dOut = state.debtOutDates || {};
   for (const p in byPair) {
     let pool = byPair[p].out;             // сколько всего выдано этой паре
     // порядок гашения приходов выдачами
     const list = (order === 'lifo') ? byPair[p].ins.slice().reverse() : byPair[p].ins;
     list.forEach(inr => {
+      // «Число отдачи» недели этого прихода: приход ПО дату отдачи включительно
+      // считается ОТДАННЫМ (frac = 1), даже если реальной выдачи по нему нет.
+      // Пул выдач на него НЕ тратим — реальные выдачи идут на остальные приходы.
+      // Благодаря этому куратор и «Итог сделок» учитывают приходы, закрытые
+      // «числом отдачи», так же как закрытые настоящей выдачей.
+      const gd = dOut[weekMondayStr(inr.date) + '::' + p];
+      if (gd && inr.date <= gd) {
+        cover[p + '#' + inr.date + '#' + inr.idx] = 1;
+        return;
+      }
       const a = inr.after1 || 0;
       let frac = 0;
       if (a > 0 && pool > 0) {
