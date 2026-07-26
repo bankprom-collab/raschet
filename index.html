@@ -2508,6 +2508,115 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
            remaining: cNet1, remaining2: (has2 && cNet1 > 0) ? r100(cGross2 * fracC) : 0,
            remainingBase: cNet1 > 0 ? r100(cGrossBase * fracC) : 0 };
 }
+// Тот же расчёт, что pairWeekDebt, но раскладывает итог на две части ровно в
+// момент входа в текущую (просматриваемую) неделю:
+//   overdue — то, что накопилось и НЕ погашено за недели ДО текущей (просрочка);
+//   current — начисление и остаток по приходам САМОЙ текущей недели.
+// Правило дележа: выдачи текущей недели сначала гасят просрочку (самый
+// старый долг), остаток идёт в счёт начисления этой недели. По построению
+// overdue.v1 + current.v1 === pairWeekDebt(...).remaining ВСЕГДА — сама сумма
+// долга не меняется, меняется только то, как она показывается. Накопление по
+// прошлым неделям (до входа в текущую) — то же самое, что в pairWeekDebt,
+// один в один, ничего в нём не тронуто.
+function pairWeekDebtSplit(dayStr, pairName, startWeek) {
+  const pair = (pairName || '').trim();
+  const empty = () => ({ base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null });
+  if (!pair) return { overdue: empty(), current: empty() };
+  const targetWeek = weekMondayStr(dayStr);
+  const allDays = Object.keys(state.days).sort();
+  const weeks = [...new Set(allDays.map(weekMondayStr))]
+    .filter(w => w <= targetWeek && (!startWeek || w >= startWeek))
+    .sort();
+  let cGross1 = 0, cGross2 = 0, cGrossBase = 0, cNet1 = 0;
+  let pct1 = null, pct2 = null, has2 = false;
+  for (const wk of weeks) {
+    const gd = (state.debtOutDates || {})[wk + '::' + pair];
+    const applyGd = !!gd && wk !== targetWeek;
+    let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
+    for (const d of allDays) {
+      if (weekMondayStr(d) !== wk) continue;
+      if (applyGd && d <= gd) continue;
+      const dd = state.days[d];
+      if (!dd) continue;
+      if (isWeekday(d) && Array.isArray(dd.in)) {
+        dd.in.forEach(r => {
+          if ((r.client || '').trim() !== pair) return;
+          accBase += (r.amount || 0);
+          acc1 += calcInRowFinal(r);
+          if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
+          if (hasSecondPct(r)) { acc2 += r100(r.total2); has2 = true; pct2 = r.pct2; }
+        });
+      }
+      if (Array.isArray(dd.out)) {
+        dd.out.forEach(o => { if ((o.client || '').trim() === pair) rec += (o.amount || 0); });
+      }
+    }
+    const inG1 = applyGd ? 0 : cGross1;
+    const inG2 = applyGd ? 0 : cGross2;
+    const inGB = applyGd ? 0 : cGrossBase;
+    const inN1 = applyGd ? 0 : cNet1;
+    const gross1 = inG1 + acc1;
+    const gross2 = inG2 + acc2;
+    const grossBase = inGB + accBase;
+    const net1   = inN1 + acc1 - rec;
+    const ov = (state.weekDebtOverrides || {})[wk + '::' + pair];
+    if (wk === targetWeek) {
+      // Ручная коррекция этой недели — как раньше, единой суммой; просрочку
+      // ручной ввод не трогает (чтобы не спорить с ручным числом).
+      if (ov && ov.v1 !== null && ov.v1 !== undefined) {
+        return {
+          overdue: { base: 0, v1: 0, v2: 0, has2: false, pct1, pct2 },
+          current: {
+            base: grossBase, v1: ov.v1,
+            v2: (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0,
+            has2: has2 || (ov.v2 !== null && ov.v2 !== undefined), pct1, pct2
+          }
+        };
+      }
+      // Выдача этой недели (rec) сначала гасит просрочку (inN1), остаток —
+      // в счёт начисления этой недели (acc1).
+      const recForOverdue = Math.min(rec, Math.max(0, inN1));
+      const recForCurrent = rec - recForOverdue;
+      const overdueNet1 = Math.max(0, inN1 - recForOverdue);
+      const overdueFrac = inG1 > 0 ? overdueNet1 / inG1 : 0;
+      const overdueBaseV = overdueNet1 > 0 ? r100(inGB * overdueFrac) : 0;
+      const overdueV2 = (has2 && overdueNet1 > 0) ? r100(inG2 * overdueFrac) : 0;
+
+      const currentNet1 = Math.max(0, acc1 - recForCurrent);
+      const currentFrac = acc1 > 0 ? currentNet1 / acc1 : 0;
+      const currentBaseV = currentNet1 > 0 ? r100(accBase * currentFrac) : 0;
+      const currentV2 = (has2 && currentNet1 > 0) ? r100(acc2 * currentFrac) : 0;
+
+      return {
+        overdue: { base: overdueBaseV, v1: overdueNet1, v2: overdueV2, has2: has2 && overdueV2 > 0, pct1, pct2 },
+        current: { base: currentBaseV, v1: currentNet1, v2: currentV2, has2: has2 && currentV2 > 0, pct1, pct2 }
+      };
+    }
+    // Прошлая неделя — копим ТОЧНО как в pairWeekDebt (не менять!).
+    if (ov && ov.v1 !== null && ov.v1 !== undefined) {
+      if (ov.v1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
+      else {
+        cGross1 = ov.v1; cNet1 = ov.v1;
+        cGross2 = (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0;
+        cGrossBase = grossBase;
+        if (cGross2 > 0) has2 = true;
+      }
+      continue;
+    }
+    if (net1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
+    else { cGross1 = gross1; cGross2 = gross2; cGrossBase = grossBase; cNet1 = net1; }
+  }
+  // В неделе текущего дня данных не было вовсе — всё накопленное просрочено.
+  const fracC = cGross1 > 0 ? Math.max(0, cNet1 / cGross1) : 0;
+  return {
+    overdue: {
+      base: cNet1 > 0 ? r100(cGrossBase * fracC) : 0, v1: cNet1,
+      v2: (has2 && cNet1 > 0) ? r100(cGross2 * fracC) : 0, has2, pct1, pct2
+    },
+    current: { base: 0, v1: 0, v2: 0, has2: false, pct1, pct2 }
+  };
+}
+
 // Коррекция привязана к неделе текущего дня. Пусто = убрать коррекцию.
 function correctTagWeek(rowIdx) {
   const day = state.days[currentDate];
@@ -3219,22 +3328,35 @@ function computeWeekPairDebt() {
   const carryAllPairs = thisWeek >= PAIR_CARRY_START_DATE;
 
   const rows = [];
+  // Просроченные — долг, накопленный за недели ДО текущей и всё ещё не
+  // погашенный к моменту входа в неё (см. pairWeekDebtSplit). Отдельный
+  // список: не входит в rows/итоги ниже, показывается отдельным блоком —
+  // «расхождение, которое надо разобрать» — пока не будет погашен или
+  // подтверждён (число отдачи / реальная выдача).
+  const overdueRows = [];
   pairsSet.forEach(p => {
     if ((p || '').trim() === 'Вейс(рук)-Рынок') return; // Рынок — всегда отдельно ниже
     if (carryAllPairs) {
-      // Новая логика: та же формула, что у Рынка, но с ограничением по стартовой
-      // неделе — старую историю до 29.06.2026 не трогаем.
-      const dbt = pairWeekDebt(currentDate, p, PAIR_CARRY_START_DATE);
-      if (dbt.remaining <= 0) return;
-      const a = accr[p];
-      const wasCarried = dbt.accrued > (a ? a.v1 : 0);
-      rows.push({
-        name: p, base: dbt.remainingBase || 0,
-        v1: dbt.remaining,
-        v2: (dbt.has2 && dbt.remaining2 > 0) ? dbt.remaining2 : null,
-        has2: dbt.has2 && dbt.remaining2 > 0,
-        pct1: dbt.pct1, pct2: dbt.pct2, carry: wasCarried
-      });
+      // Та же формула, что у Рынка (с ограничением по стартовой неделе —
+      // старую историю до 29.06.2026 не трогаем), но разложенная на
+      // «просрочено» и «эта неделя» через pairWeekDebtSplit.
+      const split = pairWeekDebtSplit(currentDate, p, PAIR_CARRY_START_DATE);
+      if (split.current.v1 > 0) {
+        rows.push({
+          name: p, base: split.current.base || 0, v1: split.current.v1,
+          v2: (split.current.has2 && split.current.v2 > 0) ? split.current.v2 : null,
+          has2: split.current.has2 && split.current.v2 > 0,
+          pct1: split.current.pct1, pct2: split.current.pct2, carry: false
+        });
+      }
+      if (split.overdue.v1 > 0) {
+        overdueRows.push({
+          name: p, base: split.overdue.base || 0, v1: split.overdue.v1,
+          v2: (split.overdue.has2 && split.overdue.v2 > 0) ? split.overdue.v2 : null,
+          has2: split.overdue.has2 && split.overdue.v2 > 0,
+          pct1: split.overdue.pct1, pct2: split.overdue.pct2, carry: true
+        });
+      }
       return;
     }
     // Старое поведение до 29.06.2026: пара считается только за эту неделю.
@@ -3250,16 +3372,23 @@ function computeWeekPairDebt() {
                 pct1: a.pct1, pct2: a.pct2, carry: false });
   });
 
-  // Вейс(рук)-Рынок — перенос непогашенного остатка.
+  // Вейс(рук)-Рынок — тот же перенос, тоже разложенный на просрочку и эту неделю.
   {
-    const dbt = pairWeekDebt(currentDate, 'Вейс(рук)-Рынок');
-    if (dbt.remaining > 0) {
+    const split = pairWeekDebtSplit(currentDate, 'Вейс(рук)-Рынок');
+    if (split.current.v1 > 0) {
       rows.push({
-        name: 'Вейс(рук)-Рынок', base: dbt.remainingBase || 0,
-        v1: dbt.remaining,
-        v2: (dbt.has2 && dbt.remaining2 > 0) ? dbt.remaining2 : null,
-        has2: dbt.has2 && dbt.remaining2 > 0,
-        pct1: dbt.pct1, pct2: dbt.pct2, carry: true
+        name: 'Вейс(рук)-Рынок', base: split.current.base || 0, v1: split.current.v1,
+        v2: (split.current.has2 && split.current.v2 > 0) ? split.current.v2 : null,
+        has2: split.current.has2 && split.current.v2 > 0,
+        pct1: split.current.pct1, pct2: split.current.pct2, carry: false
+      });
+    }
+    if (split.overdue.v1 > 0) {
+      overdueRows.push({
+        name: 'Вейс(рук)-Рынок', base: split.overdue.base || 0, v1: split.overdue.v1,
+        v2: (split.overdue.has2 && split.overdue.v2 > 0) ? split.overdue.v2 : null,
+        has2: split.overdue.has2 && split.overdue.v2 > 0,
+        pct1: split.overdue.pct1, pct2: split.overdue.pct2, carry: true
       });
     }
   }
@@ -3293,6 +3422,11 @@ function computeWeekPairDebt() {
   // после 2-го % («мы должны отдать»). Если второй % не задан — считаем, что
   // второго вычета нет (v2 = v1), разница = 0 (но сама строка разницы есть всегда).
   rows.forEach(r => {
+    if (r.v2 === null || r.v2 === undefined) r.v2 = r.v1;
+    r.diff = r100(r.v1 - r.v2);
+    if (r.base === null || r.base === undefined) r.base = 0;
+  });
+  overdueRows.forEach(r => {
     if (r.v2 === null || r.v2 === undefined) r.v2 = r.v1;
     r.diff = r100(r.v1 - r.v2);
     if (r.base === null || r.base === undefined) r.base = 0;
@@ -3340,11 +3474,53 @@ function computeWeekPairDebt() {
   }
 
   rows.sort((x, y) => y.v1 - x.v1);
+  overdueRows.sort((x, y) => y.v1 - x.v1);
   const totalBase = rows.reduce((s, r) => s + (r.base || 0), 0); // сумма ДО процентов (для отображения)
   const total = rows.reduce((s, r) => s + r.v1, 0);       // сумма, которую нам должны (после 1-го %)
   const total2 = rows.reduce((s, r) => s + r.v2, 0);      // сумма, которую мы должны отдать (после 2-го %)
   const totalDiff = rows.reduce((s, r) => s + r.diff, 0); // общая разница
-  return { rows, givenRows, totalBase, total, total2, totalDiff };
+  // Просроченные — суммы для отдельного блока-напоминания, НЕ входят в total*.
+  const overdueTotalBase = overdueRows.reduce((s, r) => s + (r.base || 0), 0);
+  const overdueTotal = overdueRows.reduce((s, r) => s + r.v1, 0);
+  const overdueTotal2 = overdueRows.reduce((s, r) => s + r.v2, 0);
+  const overdueTotalDiff = overdueRows.reduce((s, r) => s + r.diff, 0);
+  return { rows, givenRows, overdueRows, totalBase, total, total2, totalDiff,
+           overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff };
+}
+
+// Отдельный блок «Просрочено»: долг с недель ДО текущей, всё ещё не
+// погашенный. НЕ входит в общий итог «к отдаче» — это расхождение, которое
+// нужно проверить/разобрать (оплачено фактически или нет), а не то, что
+// автоматически копится в текущей сумме.
+function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff) {
+  if (!overdueRows || !overdueRows.length) return '';
+  const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
+  const body = overdueRows.map(r => {
+    const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
+    const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
+    const baseHtml = (r.base > 0)
+      ? `база: <b style="color:var(--muted-bright)">${fmt(r.base)}</b> · `
+      : '';
+    return `<div class="wds-row wds-row-debt">
+      <div class="wds-row-main">
+        <span class="wds-pair">⏰ ${escapeHtml(r.name)}</span>
+        <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+      </div>
+      <details class="wds-break-details">
+        <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
+        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'overdue')}
+      </details>
+    </div>`;
+  }).join('');
+  const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(overdueTotalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(overdueTotal)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(overdueTotal2)}</b> · разница: <b style="color:var(--accent)">${fmt(overdueTotalDiff)}</b>`;
+  return `<div class="week-debt-block" style="border:1px solid rgba(245,158,11,.4);margin-top:10px;background:rgba(245,158,11,.05)">
+    <div class="wds-head">
+      <span style="color:#f59e0b">⏰ Просрочено — не отдано за прошлые недели</span>
+      <span class="wds-total">${totalLine}</span>
+    </div>
+    ${body}
+    <div class="wds-foot">Долг с недель ДО текущей, который так и не погашен. В общий итог «к отдаче» выше НЕ входит — это расхождение: проверь, отдано фактически или нет (реальная выдача уменьшит его сама; «Раскрыть базу» ниже показывает, каким именно приходам он соответствует).</div>
+  </div>`;
 }
 
 function renderWeekDebtSummary() {
@@ -3355,8 +3531,9 @@ function renderWeekDebtSummary() {
   // Подпись процента: 13 → «13», 15.5 → «15,5»
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
 
-  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
-  if (!rows.length) { box.innerHTML = ''; return; }
+  const { rows, overdueRows, totalBase, total, total2, totalDiff,
+           overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff } = computeWeekPairDebt();
+  if (!rows.length && !overdueRows.length) { box.innerHTML = ''; return; }
 
   const body = rows.map(r => {
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
@@ -3380,21 +3557,25 @@ function renderWeekDebtSummary() {
       </div>
       <details class="wds-break-details">
         <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
-        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 })}
+        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current')}
       </details>
     </div>`;
   }).join('');
 
   const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>`;
 
-  box.innerHTML = `<div class="week-debt-block${isFri ? ' fri' : ''}">
+  const mainBlock = rows.length ? `<div class="week-debt-block${isFri ? ' fri' : ''}">
     <div class="wds-head">
       <span>📋 Задолженность по парам за неделю${isFri ? ' · ПЯТНИЦА' : ''}</span>
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом за неделю (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Вейс(рук)-Рынок (↪ перенос) — непогашенный остаток с переносом.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
-  </div>`;
+    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом ЗА ЭТУ НЕДЕЛЮ (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Долг с прошлых недель сюда не подмешивается — смотри блок «⏰ Просрочено» ниже.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+  </div>` : '';
+
+  const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff);
+
+  box.innerHTML = mainBlock + overdueBlock;
 }
 
 // ── ПЛИТКА «СУММА К ОТДАЧЕ» ──────────────────────────────────────────────────
@@ -3406,8 +3587,14 @@ function computeDebtOut() { return computeWeekPairDebt(); }
 function renderDebtOutTile() {
   const body = document.getElementById('tileDebtOutBody');
   if (!body) return;
-  const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
-  if (!rows.length) { body.innerHTML = 'Сумм к отдаче сегодня нет.'; return; }
+  const { rows, overdueRows, totalBase, total, total2, totalDiff, overdueTotal } = computeWeekPairDebt();
+  const overdueHint = overdueRows.length
+    ? `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(245,158,11,.35);color:#f59e0b;font-size:11px">⏰ Просрочено (${overdueRows.length}): <b style="font-family:var(--font-num)">${fmt(overdueTotal)}</b></div>`
+    : '';
+  if (!rows.length) {
+    body.innerHTML = (overdueRows.length ? 'За эту неделю сумм к отдаче нет.' : 'Сумм к отдаче сегодня нет.') + overdueHint;
+    return;
+  }
   const top = rows.slice(0, 3).map(r => {
     const baseLine = (r.base > 0)
       ? `<div style="font-size:10.5px;color:var(--muted-bright);font-family:var(--font-num);text-align:right">база ${fmt(r.base)}</div>`
@@ -3433,17 +3620,21 @@ function renderDebtOutTile() {
        <span style="font-size:13px;font-weight:700;color:#ff8a4a" title="Нам должны (после 1-го %)">${fmt(total)}</span>
        <span style="font-size:13px;font-weight:700;color:#818cf8" title="Мы должны отдать (после 2-го %)">${fmt(total2)}</span>
        <span style="font-size:13px;font-weight:700;color:var(--accent)" title="Разница">${fmt(totalDiff)}</span>
-     </div>${top}${more}`;
+     </div>${top}${more}${overdueHint}`;
 }
 
 function openDebtOutModal() {
   const box = document.getElementById('debt-out-body');
   if (box) {
-    const { rows, totalBase, total, total2, totalDiff } = computeWeekPairDebt();
+    const { rows, overdueRows, totalBase, total, total2, totalDiff,
+             overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff } = computeWeekPairDebt();
     const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
     const wk = weekMondayStr(currentDate);
+    const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff);
     if (!rows.length) {
-      box.innerHTML = '<div style="color:var(--muted);padding:8px 0">Сумм к отдаче сегодня нет.</div>';
+      box.innerHTML = (overdueRows.length
+        ? '<div style="color:var(--muted);padding:8px 0">За эту неделю сумм к отдаче нет.</div>'
+        : '<div style="color:var(--muted);padding:8px 0">Сумм к отдаче сегодня нет.</div>') + overdueBlock;
     } else {
       const bodyRows = rows.map(r => {
         const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
@@ -3467,7 +3658,7 @@ function openDebtOutModal() {
           </div>
           <details class="wds-break-details">
             <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
-            ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 })}
+            ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current')}
           </details>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
@@ -3485,8 +3676,8 @@ function openDebtOutModal() {
             <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
           </div>
           ${bodyRows}
-          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница. «Число отдачи» — дата отдачи: приходы ПО эту дату считаются отданными и пропадают из блоков и итогов. Но приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Вернуть пару целиком (убрать дату) — кнопка ✕ рядом с датой или «🔍 Проверить пару».</div>
-        </div>`;
+          <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница — ЗА ЭТУ НЕДЕЛЮ. «Число отдачи» — дата отдачи: приходы ПО эту дату считаются отданными и пропадают из блоков и итогов. Но приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Вернуть пару целиком (убрать дату) — кнопка ✕ рядом с датой или «🔍 Проверить пару». Долг с прошлых недель — отдельным блоком «⏰ Просрочено» ниже.</div>
+        </div>` + overdueBlock;
     }
   }
   const m = document.getElementById('debt-out-modal');
@@ -3533,13 +3724,19 @@ function diagnosePair() {
     `  ${r.date} (${dowRu[r.weekday]}, будни:${r.weekday>=1&&r.weekday<=5?'да':'НЕТ'}): сумма ${fmt(r.amount)}, %1=${r.pct ?? '—'}, %2=${r.pct2 ?? '—'}, total(после 1-го %)=${fmt(r.total)}`).join('\n') || '  — нет записей прихода —';
   const outLines = outRows.map(r => `  ${r.date}: выдано ${fmt(r.amount)}`).join('\n') || '  — нет выдач —';
   const gdDate = (state.debtOutDates || {})[overrideKey];
-  const inList = computeWeekPairDebt().rows.find(r => r.name === p);
+  const debtCalc = computeWeekPairDebt();
+  const inList = debtCalc.rows.find(r => r.name === p);
+  const inOverdue = debtCalc.overdueRows.find(r => r.name === p);
   const conclusion = (() => {
     if (inList) {
       const reopNote = inList.reopenedAfterGiven
         ? ' (переоткрыта: приходы ПОЗЖЕ даты отдачи ' + gdDate + ' — новый неотданный остаток)'
         : '';
-      return '✅ Пара В списке. Отражена как v1=' + fmt(inList.v1) + ', v2=' + fmt(inList.v2) + reopNote + '. Если ты её не видишь — проверь модалку и блок под таблицей.';
+      const overdueNote = inOverdue ? ' + ЕЩЁ есть просрочка с прошлых недель: ' + fmt(inOverdue.v1) + ' (блок «⏰ Просрочено»).' : '';
+      return '✅ Пара В списке (эта неделя). Отражена как v1=' + fmt(inList.v1) + ', v2=' + fmt(inList.v2) + reopNote + '.' + overdueNote + ' Если ты её не видишь — проверь модалку и блок под таблицей.';
+    }
+    if (inOverdue) {
+      return '⏰ За ЭТУ неделю у пары начислений нет, но есть непогашенная ПРОСРОЧКА с прошлых недель: v1=' + fmt(inOverdue.v1) + ', v2=' + fmt(inOverdue.v2) + '. Смотри отдельный блок «⏰ Просрочено» — в общий итог «к отдаче» она не входит.';
     }
     if (!a) return '❌ Пара НЕ найдена в накоплениях (pairWeekAccruals). Причины:\n' +
       '   • нет ни одного прихода с этим именем на текущей неделе (пн–пт), ИЛИ\n' +
@@ -3622,8 +3819,9 @@ function pairsForPartner(partner) {
 // v1 берётся из существующего computeWeekPairDebt() — расчётной логики не меняем.
 function buildPartnerPayload(partner) {
   const partnerPairs = new Set(pairsForPartner(partner));
-  // Партнёру показываем и отданные пары (с числом отдачи) — как и раньше
-  const { rows, givenRows } = computeWeekPairDebt();
+  // Партнёру показываем и отданные пары (с числом отдачи), и просроченные
+  // с прошлых недель (partner должен знать, что за ним ещё старый долг) — как и раньше.
+  const { rows, givenRows, overdueRows } = computeWeekPairDebt();
   const wk = weekMondayStr(currentDate);
   const items = rows.concat(givenRows || [])
     .filter(r => partnerPairs.has(r.name))
@@ -3631,7 +3829,11 @@ function buildPartnerPayload(partner) {
       pair: r.name,
       amount: r.v1,  // сумма после 1-го % (то, что видит партнёр)
       date: (state.debtOutDates || {})[wk + '::' + r.name] || null,
-    }));
+      overdue: false,
+    }))
+    .concat((overdueRows || [])
+      .filter(r => partnerPairs.has(r.name))
+      .map(r => ({ pair: r.name, amount: r.v1, date: null, overdue: true })));
   return {
     partner,
     rows: items,
@@ -3691,7 +3893,7 @@ function updatePartnerPreview() {
   }
   const rows = payload.rows.map(r => `
     <div class="ps-pair-row">
-      <span>${escapeHtml(r.pair)}</span>
+      <span>${escapeHtml(r.pair)}${r.overdue ? ' <span style="color:#f59e0b;font-size:11px">⏰ просрочено</span>' : ''}</span>
       <span style="display:flex;gap:12px;align-items:center">
         <span class="amt">${fmt(r.amount)}</span>
         <span class="${r.date ? 'dt' : 'no-dt'}">${r.date ? formatDateShort(r.date) : 'дата не задана'}</span>
@@ -3901,7 +4103,11 @@ function editPairName(oldName) {
 // (для «Вейс(рук)-Рынок» — от начала истории; для остальных с учётом переноса —
 // от PAIR_CARRY_START_DATE до currentDate). НИЧЕГО НЕ ПЕРЕСЧИТЫВАЕТ:
 // читает поля state.days[d].in[i] и возвращает как есть.
-function collectPairBaseBreakdown(pair) {
+// scope (необязательно) — сузить период под блок «Раскрыть базу» конкретной
+// строки: 'current' — только сама текущая неделя (строка «эта неделя»);
+// 'overdue' — только недели ДО текущей (строка «просрочено»). Без scope —
+// весь активный период целиком (как раньше, для обратной совместимости).
+function collectPairBaseBreakdown(pair, scope) {
   const p = (pair || '').trim();
   if (!p) return { inRows: [], outRows: [] };
   const targetWeek = weekMondayStr(currentDate);
@@ -3917,6 +4123,8 @@ function collectPairBaseBreakdown(pair) {
     const wk = weekMondayStr(d);
     if (wk > targetWeek) return;
     if (startWeek && wk < startWeek) return;
+    if (scope === 'current' && wk !== targetWeek) return;
+    if (scope === 'overdue' && wk >= targetWeek) return;
     const dd = state.days[d];
     if (!dd) return;
     (dd.in || []).forEach((r, idx) => {
@@ -3946,12 +4154,15 @@ function collectPairBaseBreakdown(pair) {
 // приход в список НЕ попадает вообще; частично выданный показывается на свою
 // невыданную часть. Итог = невыданный остаток пары, совпадает с задолженностью.
 // remain (необязательно) — { base, v1 } из расчёта; используется для точного
-// совпадения итога с задолженностью. Расчётную логику это не меняет — только показ.
-function renderPairBaseBreakdownHtml(pair, remain) {
+// совпадения итога с задолженностью. scope — 'current' | 'overdue' | не задан
+// (см. collectPairBaseBreakdown) — какую часть периода показывать; должен
+// совпадать с тем, откуда взят remain (строка «эта неделя» / «просрочено»).
+// Расчётную логику это не меняет — только показ.
+function renderPairBaseBreakdownHtml(pair, remain, scope) {
   const p = (pair || '').trim();
-  const { inRows, outRows } = collectPairBaseBreakdown(pair);
+  const { inRows, outRows } = collectPairBaseBreakdown(pair, scope);
   if (!inRows.length && !outRows.length) {
-    return `<div class="wds-break-empty">Приходов этой пары за активный период нет.</div>`;
+    return `<div class="wds-break-empty">Приходов этой пары за ${scope === 'current' ? 'эту неделю' : scope === 'overdue' ? 'просроченные недели' : 'активный период'} нет.</div>`;
   }
   // Невыданный остаток (после 1-го %) и остаток базы — из движка расчёта.
   let netAfter1, netBase;
@@ -3962,17 +4173,25 @@ function renderPairBaseBreakdownHtml(pair, remain) {
     const isRynok = p === 'Вейс(рук)-Рынок';
     const carryAllPairs = weekMondayStr(currentDate) >= PAIR_CARRY_START_DATE;
     const startWeek = isRynok ? undefined : (carryAllPairs ? PAIR_CARRY_START_DATE : weekMondayStr(currentDate));
-    const dbt = pairWeekDebt(currentDate, p, startWeek);
-    netAfter1 = Math.max(0, dbt.remaining || 0);
-    netBase = Math.max(0, dbt.remainingBase || 0);
+    const split = pairWeekDebtSplit(currentDate, p, startWeek);
+    const bucket = scope === 'overdue' ? split.overdue : scope === 'current' ? split.current : null;
+    if (bucket) {
+      netAfter1 = Math.max(0, bucket.v1 || 0);
+      netBase = Math.max(0, bucket.base || 0);
+    } else {
+      const dbt = pairWeekDebt(currentDate, p, startWeek);
+      netAfter1 = Math.max(0, dbt.remaining || 0);
+      netBase = Math.max(0, dbt.remainingBase || 0);
+    }
   }
 
-  // КАЖДЫЙ невыданный приход — отдельной строкой. Выдачи гасят НОВЫЕ приходы
-  // первыми ('lifo'), поэтому невыданными остаются старые приходы, как правило
-  // целиком — и остаток раскладывается на реальные приходы (напр. два прихода
-  // от 8 июл), а не одной общей суммой. Полностью выданные приходы не
-  // показываем. Частично выданный приход показываем на свою невыданную часть.
-  const cover = pairPaidCoverage(currentDate, 'lifo');
+  // КАЖДЫЙ невыданный приход — отдельной строкой. Выдачи гасят СТАРЫЕ приходы
+  // первыми ('fifo') — так же, как считается сама задолженность (просрочка
+  // гасится раньше текущей недели): остаётся непогашенным самый СВЕЖИЙ приход
+  // в рамках своего блока (эта неделя / просрочено), а не размазывается по
+  // всем сразу. Полностью выданные приходы не показываем. Частично выданный
+  // приход показываем на свою невыданную часть.
+  const cover = pairPaidCoverage(currentDate, 'fifo');
   const unpaidRows = [];
   inRows.forEach(r => {
     const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля выдано
