@@ -3506,7 +3506,7 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
         <span class="wds-pair">⏰ ${escapeHtml(r.name)}</span>
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
-      <details class="wds-break-details">
+      <details class="wds-break-details" open>
         <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
         ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'overdue')}
       </details>
