@@ -352,13 +352,13 @@
     border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
   }
   .wds-break-head {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1.1fr 1fr 62px 1fr 1fr 1fr; gap: 8px;
     font-size: 10px; color: var(--muted); text-transform: uppercase;
     letter-spacing: .04em; padding-bottom: 4px;
     border-bottom: 1px dashed rgba(255,138,74,.2); margin-bottom: 4px;
   }
   .wds-break-row {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1.1fr 1fr 62px 1fr 1fr 1fr; gap: 8px;
     padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,.03);
     align-items: center;
   }
@@ -367,9 +367,24 @@
   .wds-break-amt { color: var(--text); font-weight: 600; }
   .wds-break-pct { color: var(--muted); font-size: 11px; }
   .wds-break-after { color: #ff8a4a; font-weight: 600; }
+  .wds-break-after2 { color: #818cf8; font-weight: 600; }
+  .wds-break-diff { color: var(--accent); font-weight: 600; }
+  /* Выданный приход виден, но приглушён: он в остаток не входит */
+  .wds-break-row.is-paid { opacity: .5; }
+  .wds-break-chip { font-size: 9.5px; padding: 1px 5px; border-radius: 5px;
+    margin-left: 5px; white-space: nowrap; }
+  .wds-break-chip.paid { background: rgba(255,255,255,.07); color: var(--muted); }
+  .wds-break-chip.part { background: rgba(255,138,74,.15); color: #ff8a4a; }
+  /* Строка «Всего приходов» — полные суммы, до вычета выдач */
+  .wds-break-all {
+    display: grid; grid-template-columns: 1.1fr 1fr 62px 1fr 1fr 1fr; gap: 8px;
+    padding: 6px 0 2px; margin-top: 4px;
+    border-top: 1px solid rgba(255,255,255,.12);
+    font-size: 12px; color: var(--muted-bright);
+  }
   .wds-break-out .wds-break-amt { color: var(--expense); }
   .wds-break-total {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1.1fr 1fr 62px 1fr 1fr 1fr; gap: 8px;
     padding: 6px 0 2px; margin-top: 4px;
     border-top: 1px solid rgba(255,138,74,.3);
     font-size: 12px; color: var(--muted-bright);
@@ -377,7 +392,7 @@
   .wds-break-total b { color: #ff8a4a; }
   /* Строка «Невыдано» — невыданный остаток (за вычетом всех выдач) */
   .wds-break-net {
-    display: grid; grid-template-columns: 1fr 1fr 60px 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1.1fr 1fr 62px 1fr 1fr 1fr; gap: 8px;
     padding: 6px 0 2px; margin-top: 4px;
     border-top: 1px dashed rgba(74,222,128,.35);
     font-size: 12px; color: var(--accent);
@@ -3507,7 +3522,7 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
       <details class="wds-break-details" open>
-        <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
+        <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
         ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'overdue')}
       </details>
     </div>`;
@@ -3556,7 +3571,7 @@ function renderWeekDebtSummary() {
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
       <details class="wds-break-details">
-        <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
+        <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
         ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current')}
       </details>
     </div>`;
@@ -3657,7 +3672,7 @@ function openDebtOutModal() {
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
           </div>
           <details class="wds-break-details">
-            <summary>📋 Раскрыть базу: показать только невыданные приходы</summary>
+            <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
             ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current')}
           </details>
           <div class="wds-date">
@@ -4191,55 +4206,86 @@ function renderPairBaseBreakdownHtml(pair, remain, scope) {
   // в рамках своего блока (эта неделя / просрочено), а не размазывается по
   // всем сразу. Полностью выданные приходы не показываем. Частично выданный
   // приход показываем на свою невыданную часть.
+  // Показываем ВСЕ приходы пары, а не только невыданные: владельцу нужно
+  // видеть, из чего сложилась сумма целиком. Выданные приглушены и помечены —
+  // в остаток они не входят, но и не исчезают из глаз.
   const cover = pairPaidCoverage(currentDate, 'fifo');
-  const unpaidRows = [];
+  const allRows = [];
   inRows.forEach(r => {
     const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля выдано
     const uf = 1 - frac;                                        // доля не выдано
-    if (uf <= 0.0005) return;                                   // полностью выдан — не показываем
+    const paidFull = uf <= 0.0005;
     const whole = frac <= 0.0005;                              // приход выдача не тронула
-    unpaidRows.push({
+    const a1 = r.after1 || 0;
+    const a2 = (r.after2 === null || r.after2 === undefined) ? null : r.after2;
+    allRows.push({
       date: r.date, pct: r.pct, pct2: r.pct2, tag: r.tag,
-      // целый невыданный приход — показываем точную сумму; частичный — его невыданную долю
-      uAmount: whole ? (r.amount || 0) : r100((r.amount || 0) * uf),
-      uAfter1: whole ? (r.after1 || 0) : r100((r.after1 || 0) * uf),
-      partial: !whole,
+      amount: r.amount || 0, after1: a1, after2: a2,
+      // невыданная часть — она и складывается в «Итого невыдано»
+      uAfter1: paidFull ? 0 : (whole ? a1 : r100(a1 * uf)),
+      state: paidFull ? 'paid' : (whole ? 'open' : 'part'),
     });
   });
-  // Подгоняем «после 1-го %» последней строки, чтобы сумма строк точно совпала
-  // с итогом движка (главная колонка = «нам должны»).
-  if (unpaidRows.length) {
-    const sA = unpaidRows.reduce((s, x) => s + x.uAfter1, 0);
-    unpaidRows[unpaidRows.length - 1].uAfter1 += (netAfter1 - sA);
+  // Подгоняем «после 1-го %» последней НЕвыданной строки, чтобы сумма
+  // невыданных частей точно совпала с итогом движка.
+  const openRows = allRows.filter(x => x.state !== 'paid');
+  if (openRows.length) {
+    const sA = openRows.reduce((s, x) => s + x.uAfter1, 0);
+    openRows[openRows.length - 1].uAfter1 += (netAfter1 - sA);
   }
 
-  const inHtml = unpaidRows.map(r => {
+  const sumAll = allRows.reduce((a, x) => a + x.amount, 0);
+  const sumAll1 = allRows.reduce((a, x) => a + x.after1, 0);
+  const sumAll2 = allRows.reduce((a, x) => a + (x.after2 || 0), 0);
+  const anyPct2 = allRows.some(x => x.after2 !== null);
+
+  const inHtml = allRows.map(r => {
     const pcts = [
       (r.pct !== null && r.pct !== undefined && r.pct > 0) ? `${String(r.pct).replace('.', ',')}%` : '',
       (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0) ? `${String(r.pct2).replace('.', ',')}%` : '',
     ].filter(Boolean).join(' / ');
     const tagChip = r.tag ? `<span class="pair-tag" style="margin-left:6px" title="Метка — не участвует в расчёте">🏷 ${escapeHtml(r.tag)}</span>` : '';
-    const partChip = r.partial ? ` <span style="color:var(--muted);font-size:10px">(часть прихода)</span>` : '';
-    return `<div class="wds-break-row">
-      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${partChip}</span>
-      <span class="wds-break-amt">${fmt(r.uAmount)}</span>
+    const chip = r.state === 'paid'
+      ? '<span class="wds-break-chip paid" title="Этот приход уже выдан на руки — в остаток не входит">выдан</span>'
+      : r.state === 'part'
+        ? `<span class="wds-break-chip part" title="Выдан частично; в остаток входит ${fmt(r.uAfter1)}">часть</span>`
+        : '';
+    const a2 = (r.after2 === null) ? '—' : fmt(r.after2);
+    const diff = (r.after2 === null) ? '—' : fmt(r.after1 - r.after2);
+    return `<div class="wds-break-row${r.state === 'paid' ? ' is-paid' : ''}">
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${chip}</span>
+      <span class="wds-break-amt">${fmt(r.amount)}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
-      <span class="wds-break-after">→ ${fmt(r.uAfter1)}</span>
+      <span class="wds-break-after">→ ${fmt(r.after1)}</span>
+      <span class="wds-break-after2">→ ${a2}</span>
+      <span class="wds-break-diff">${diff}</span>
     </div>`;
   }).join('');
   return `<div class="wds-break">
     <div class="wds-break-head">
-      <span>Невыданные приходы:</span>
+      <span>Приходы пары:</span>
       <span>сумма</span>
       <span>%</span>
       <span>после 1-го %</span>
+      <span>после 2-го %</span>
+      <span>разница</span>
     </div>
-    ${inHtml || '<div class="wds-break-empty">— всё выдано —</div>'}
+    ${inHtml || '<div class="wds-break-empty">— приходов нет —</div>'}
+    <div class="wds-break-all">
+      <span>Всего приходов:</span>
+      <span><b>${fmt(sumAll)}</b></span>
+      <span></span>
+      <span><b>${fmt(sumAll1)}</b></span>
+      <span><b>${anyPct2 ? fmt(sumAll2) : '—'}</b></span>
+      <span><b>${anyPct2 ? fmt(sumAll1 - sumAll2) : '—'}</b></span>
+    </div>
     <div class="wds-break-net">
       <span>Итого невыдано:</span>
       <span><b>${fmt(netBase)}</b></span>
       <span></span>
       <span><b>${fmt(netAfter1)}</b></span>
+      <span></span>
+      <span></span>
     </div>
   </div>`;
 }
