@@ -1205,7 +1205,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v110</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v111</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -7120,6 +7120,9 @@ function importData() {
 const GDRIVE_CLIENT_ID_KEY = 'gdrive_client_id_v1';
 const GDRIVE_FILE_ID_KEY = 'gdrive_file_id_v1';
 const GDRIVE_AUTOSYNC_KEY = 'gdrive_autosync_v1';
+// Разрешение Google дают один раз. Дальше токен продлевается молча,
+// и показывать окно согласия больше не за что.
+const GDRIVE_GRANTED_KEY = 'gdrive_granted_v1';
 const GDRIVE_LAST_SYNC_KEY = 'gdrive_last_sync_v1';
 const GDRIVE_TOKEN_KEY = 'gdrive_token_v1';
 const GDRIVE_FOLDER_NAME = 'Расчётная_программа';
@@ -7130,6 +7133,16 @@ let gapiInited = false;
 let gisInited = false;
 let tokenClient = null;
 let accessToken = null;
+// Токен Google живёт час. Держим срок в памяти, иначе после его истечения
+// программа продолжает считать себя подключённой и ловит 401 на каждом запросе.
+let tokenExpiresAt = 0;
+// Кто ждёт токен прямо сейчас: колбэк у tokenClient один на всех.
+let tokenWaiters = [];
+function tokenAlive() { return !!accessToken && Date.now() < tokenExpiresAt; }
+function flushTokenWaiters(ok) {
+  const list = tokenWaiters; tokenWaiters = [];
+  list.forEach(fn => { try { fn(ok); } catch (e) {} });
+}
 let autoSyncTimer = null;
 
 function getClientId() {
@@ -7234,19 +7247,22 @@ function initGoogleApis() {
         scope: GDRIVE_SCOPES,
         callback: (resp) => {
           if (resp.error) {
-            showToast('Ошибка авторизации: ' + resp.error, true);
+            // Тихое продление не вышло — молчим: скажет тот, кто просил токен.
+            flushTokenWaiters(false);
             return;
           }
           accessToken = resp.access_token;
+          tokenExpiresAt = Date.now() + (((resp.expires_in || 3600) - 300) * 1000);
           // Запоминаем токен (действует ~1 час), чтобы не входить заново при каждом открытии
           try {
             localStorage.setItem(GDRIVE_TOKEN_KEY, JSON.stringify({
               token: resp.access_token,
-              expiresAt: Date.now() + (((resp.expires_in || 3600) - 300) * 1000)
+              expiresAt: tokenExpiresAt
             }));
           } catch (e) {}
+          try { localStorage.setItem(GDRIVE_GRANTED_KEY, '1'); } catch (e) {}
           refreshSyncUI();
-          showToast('Подключено к Google Drive');
+          flushTokenWaiters(true);
         }
       });
       gisInited = true;
@@ -7256,15 +7272,46 @@ function initGoogleApis() {
   }
 }
 
-function connectGDrive() {
+/**
+ * Достать рабочий токен.
+ *
+ * `prompt: ''` — Google продлевает молча, если человек уже вошёл в свой аккаунт
+ * в этом браузере и однажды дал разрешение. Окно не показывается.
+ * `prompt: 'consent'` показываем ТОЛЬКО когда разрешения ещё не было —
+ * иначе окно согласия выскакивает при каждой синхронизации.
+ *
+ * interactive=false — для автосинхронизации: не вышло тихо, просто ждём
+ * следующего раза. Никаких всплывающих окон за спиной у человека.
+ */
+function ensureToken(interactive) {
+  return new Promise((resolve) => {
+    if (tokenAlive()) { resolve(true); return; }
+    if (!tokenClient) { initGoogleApis(); resolve(false); return; }
+    const granted = localStorage.getItem(GDRIVE_GRANTED_KEY) === '1';
+    tokenWaiters.push(resolve);
+    if (tokenWaiters.length > 1) return;      // запрос уже в пути — просто ждём
+    try {
+      tokenClient.requestAccessToken({ prompt: granted ? '' : 'consent' });
+    } catch (e) {
+      flushTokenWaiters(false);
+    }
+  });
+}
+
+async function connectGDrive() {
   if (!tokenClient) {
     showToast('Google API ещё загружается, подожди секунду', true);
     initGoogleApis();
     setTimeout(connectGDrive, 1000);
     return;
   }
-  // prompt='' — если уже логинен, не показывать окно
-  tokenClient.requestAccessToken({ prompt: 'consent' });
+  const ok = await ensureToken(true);
+  if (ok) {
+    localStorage.setItem(GDRIVE_GRANTED_KEY, '1');
+    showToast('Подключено к Google Drive');
+  } else {
+    showToast('Не получилось подключиться к Google', true);
+  }
 }
 
 function disconnectGDrive() {
@@ -7317,7 +7364,7 @@ async function ensureFolderAndFile() {
 }
 
 async function saveToGDrive() {
-  if (!accessToken) { showToast('Сначала подключись', true); return; }
+  if (!(await ensureToken(true))) { showToast('Сначала подключись к Google Drive', true); return; }
   gapi.client.setToken({ access_token: accessToken });
   try {
     showToast('Сохраняем...');
@@ -7359,7 +7406,7 @@ async function saveToGDrive() {
 }
 
 async function loadFromGDrive() {
-  if (!accessToken) { showToast('Сначала подключись', true); return; }
+  if (!(await ensureToken(true))) { showToast('Сначала подключись к Google Drive', true); return; }
   if (!confirm('Загрузить данные с Диска? Текущие данные в браузере будут заменены.')) return;
   gapi.client.setToken({ access_token: accessToken });
   try {
@@ -7391,7 +7438,7 @@ async function loadFromGDrive() {
 async function smartSync(opts) {
   opts = opts || {};
   const silent = !!opts.silent; // не показывать toast'ы если silent
-  if (!accessToken) {
+  if (!(await ensureToken(!silent))) {
     if (!silent) showToast('Сначала подключись к Google Drive', true);
     return { status: 'no-auth' };
   }
@@ -7503,9 +7550,8 @@ function toggleAutoSync() {
 function startAutoSync(intervalMin) {
   stopAutoSync();
   autoSyncTimer = setInterval(async () => {
-    if (accessToken) {
-      try { await smartSync({ silent: true }); } catch(e) { console.warn('Autosync failed:', e); }
-    }
+    // Токен мог истечь — ensureToken внутри smartSync продлит его молча.
+    try { await smartSync({ silent: true }); } catch(e) { console.warn('Autosync failed:', e); }
   }, intervalMin * 60 * 1000);
 }
 
@@ -7527,6 +7573,7 @@ function restoreSavedToken() {
     const saved = JSON.parse(localStorage.getItem(GDRIVE_TOKEN_KEY) || 'null');
     if (saved && saved.token && Date.now() < saved.expiresAt) {
       accessToken = saved.token;
+      tokenExpiresAt = saved.expiresAt;
     } else if (saved) {
       localStorage.removeItem(GDRIVE_TOKEN_KEY);
     }
@@ -7555,10 +7602,11 @@ document.addEventListener('visibilitychange', () => {
     const now = Date.now();
     if (now - lastVisibilitySync < 30000) return;
     lastVisibilitySync = now;
-    if (accessToken && getClientId()) {
+    if (getClientId()) {
       // Если приложение разблокировано
       const loginVisible = !document.getElementById('loginOverlay').classList.contains('hidden');
       if (!loginVisible) {
+        // Токен мог протухнуть, пока вкладка была свёрнута — smartSync продлит молча
         smartSync({ silent: true }).catch(e => console.warn('Visibility sync failed:', e));
       }
     }
