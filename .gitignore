@@ -6,3 +6,11 @@
 # Что отправляем — только это:
 !index.html
 !.gitignore
+
+# Установка как приложение — эти файлы отдаёт GitHub Pages вместе со страницей
+!manifest.json
+!sw.js
+!icon-192.png
+!icon-512.png
+!icon-maskable-512.png
+!apple-touch-icon.png
