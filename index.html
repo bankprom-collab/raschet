@@ -1196,7 +1196,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v108</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v109</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3522,8 +3522,8 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
       <details class="wds-break-details" open>
-        <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
-        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'overdue')}
+        <summary>📋 Раскрыть базу: только неотданные приходы</summary>
+        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'overdue', true)}
       </details>
     </div>`;
   }).join('');
@@ -3672,8 +3672,8 @@ function openDebtOutModal() {
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
           </div>
           <details class="wds-break-details">
-            <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
-            ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current')}
+            <summary>📋 Раскрыть базу: только неотданные приходы</summary>
+            ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current', true)}
           </details>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
@@ -4173,7 +4173,10 @@ function collectPairBaseBreakdown(pair, scope) {
 // (см. collectPairBaseBreakdown) — какую часть периода показывать; должен
 // совпадать с тем, откуда взят remain (строка «эта неделя» / «просрочено»).
 // Расчётную логику это не меняет — только показ.
-function renderPairBaseBreakdownHtml(pair, remain, scope) {
+// onlyUnpaid=true — в списке ТОЛЬКО невыданные приходы. Так показывают
+// «Просрочено» и «Сумма к отдаче»: это списки долга, отданному там не место.
+// В недельном блоке onlyUnpaid=false — там нужен полный состав суммы.
+function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
   const p = (pair || '').trim();
   const { inRows, outRows } = collectPairBaseBreakdown(pair, scope);
   if (!inRows.length && !outRows.length) {
@@ -4234,12 +4237,18 @@ function renderPairBaseBreakdownHtml(pair, remain, scope) {
     openRows[openRows.length - 1].uAfter1 += (netAfter1 - sA);
   }
 
-  const sumAll = allRows.reduce((a, x) => a + x.amount, 0);
-  const sumAll1 = allRows.reduce((a, x) => a + x.after1, 0);
-  const sumAll2 = allRows.reduce((a, x) => a + (x.after2 || 0), 0);
-  const anyPct2 = allRows.some(x => x.after2 !== null);
+  // Списки долга показывают только неотданное — выданные приходы отсеиваем.
+  const shown = onlyUnpaid ? allRows.filter(x => x.state !== 'paid') : allRows;
+  if (onlyUnpaid && !shown.length) {
+    return `<div class="wds-break"><div class="wds-break-empty">— всё выдано —</div></div>`;
+  }
 
-  const inHtml = allRows.map(r => {
+  const sumAll = shown.reduce((a, x) => a + x.amount, 0);
+  const sumAll1 = shown.reduce((a, x) => a + x.after1, 0);
+  const sumAll2 = shown.reduce((a, x) => a + (x.after2 || 0), 0);
+  const anyPct2 = shown.some(x => x.after2 !== null);
+
+  const inHtml = shown.map(r => {
     const pcts = [
       (r.pct !== null && r.pct !== undefined && r.pct > 0) ? `${String(r.pct).replace('.', ',')}%` : '',
       (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0) ? `${String(r.pct2).replace('.', ',')}%` : '',
@@ -4263,7 +4272,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope) {
   }).join('');
   return `<div class="wds-break">
     <div class="wds-break-head">
-      <span>Приходы пары:</span>
+      <span>${onlyUnpaid ? 'Невыданные приходы:' : 'Приходы пары:'}</span>
       <span>сумма</span>
       <span>%</span>
       <span>после 1-го %</span>
@@ -4272,7 +4281,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope) {
     </div>
     ${inHtml || '<div class="wds-break-empty">— приходов нет —</div>'}
     <div class="wds-break-all">
-      <span>Всего приходов:</span>
+      <span>${onlyUnpaid ? 'Итого по списку:' : 'Всего приходов:'}</span>
       <span><b>${fmt(sumAll)}</b></span>
       <span></span>
       <span><b>${fmt(sumAll1)}</b></span>
