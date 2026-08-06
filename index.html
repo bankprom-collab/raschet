@@ -484,6 +484,22 @@
     background: rgba(255,183,77,.06);
     border-top: 1px solid rgba(255,183,77,.35);
   }
+  /* Архив закрытых начислений куратора */
+  .cm-arch { margin-top: 12px; border: 1px solid rgba(255,183,77,.2); border-radius: 10px;
+    background: rgba(255,183,77,.03); }
+  .cm-arch > summary { cursor: pointer; padding: 9px 12px; font-size: 12.5px;
+    color: var(--muted-bright); list-style: none; }
+  .cm-arch > summary::-webkit-details-marker { display: none; }
+  .cm-arch > summary:hover { color: #ffb74d; }
+  .cm-arch[open] > summary { color: #ffb74d; border-bottom: 1px dashed rgba(255,183,77,.2); }
+  .cm-arch-day { padding: 8px 12px; border-bottom: 1px dashed rgba(255,255,255,.04); }
+  .cm-arch-day:last-child { border-bottom: none; }
+  .cm-arch-head { display: flex; justify-content: space-between; font-size: 12px;
+    color: #ffb74d; font-weight: 700; margin-bottom: 4px; }
+  .cm-arch-head b { font-family: var(--font-num); }
+  .cm-arch-row { display: flex; justify-content: space-between; gap: 10px;
+    font-size: 11.5px; color: var(--muted); padding: 2px 0; }
+
   /* Блок «Отдано куратору в этой неделе» + форма ввода */
   .cm-paid-block {
     margin-top: 16px; padding: 12px 14px;
@@ -1205,7 +1221,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v113</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v114</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2812,6 +2828,56 @@ function curatorPaidAll(dayStr) {
     if (dd && typeof dd.curatorPaid === 'number') sum += dd.curatorPaid;
   }
   return sum;
+}
+
+/**
+ * Разнести выдачи куратору по начислениям: старые начисления гасятся первыми.
+ * Тот же порядок, что у пар, — иначе «отдано» повисало бы общей суммой и было
+ * бы не видно, что именно закрыто.
+ *
+ * Ничего не пересчитывает: суммы те же, что у `curatorAccruedTotal`
+ * и `curatorPaidAll`. Меняется только то, к какой строке они привязаны.
+ */
+function curatorSettlement(dayStr) {
+  const cover = pairPaidCoverage(dayStr);
+  const accr = [], pays = [];
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    const dd = state.days[d];
+    if (!dd) continue;
+    if (typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
+      pays.push({ date: d, amount: dd.curatorPaid });
+    }
+    if (!isWeekday(d) || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if (!(r.pctCur > 0)) return;
+      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+      if (frac <= 0) return;
+      const sum = floor100((r.amount || 0) * r.pctCur / 100 * frac);
+      if (sum <= 0) return;
+      accr.push({ date: d, idx: idx, pair: r.client || '—', amount: r.amount || 0,
+                  pctCur: r.pctCur, frac: frac, sum: sum, paid: 0, rest: sum, closedBy: [] });
+    });
+  }
+
+  let pi = 0, left = pays.length ? pays[0].amount : 0;
+  accr.forEach(a => {
+    while (a.paid < a.sum && pi < pays.length) {
+      const take = Math.min(a.sum - a.paid, left);
+      if (take > 0) {
+        a.paid += take;
+        a.closedBy.push({ date: pays[pi].date, amount: take });
+        left -= take;
+      }
+      if (left <= 0.0001) { pi++; left = pi < pays.length ? pays[pi].amount : 0; }
+    }
+    a.rest = Math.max(0, a.sum - a.paid);
+  });
+
+  // Хвост выдач, которому не нашлось начислений: отдали вперёд.
+  let ahead = left;
+  for (let k = pi + 1; k < pays.length; k++) ahead += pays[k].amount;
+  return { accr, pays, open: accr.filter(a => a.rest > 0), closed: accr.filter(a => a.rest <= 0), ahead };
 }
 
 /** Сколько должны куратору сейчас: начислено за всё время − отдано за всё время. */
@@ -4550,7 +4616,14 @@ function collectCuratorPayments(dayStr) {
 function openCuratorMineModal() {
   const box = document.getElementById('curator-mine-body');
   if (!box) return;
-  const rows = collectCuratorMineRows(currentDate);
+  // В таблице — только то, что ещё не отдано. Закрытое уходит в архив ниже:
+  // владельцу нужна картина «сколько должен сегодня», а не вся история подряд.
+  const SET = curatorSettlement(currentDate);
+  const rows = SET.open.map(a => ({
+    date: a.date, pair: a.pair, amount: a.amount, pctCur: a.pctCur,
+    frac: a.frac, curatorSum: a.rest, idx: a.idx,
+    partPaid: a.paid > 0 ? a.paid : 0
+  }));
   const __ctot = curatorMineTotals(currentDate);
   const accrued = __ctot.accrued;
   const paid = __ctot.paid;
@@ -4577,6 +4650,8 @@ function openCuratorMineModal() {
         const trs = rows.map((r, i) => {
           const partial = (r.frac !== undefined && r.frac < 0.999)
             ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.round(r.frac * 100)}%</span>` : '';
+          const partPaid = r.partPaid
+            ? ` <span style="color:#ffb74d;font-size:10.5px">· частично закрыто ${fmt(r.partPaid)}</span>` : '';
           acc += r.curatorSum;
           const paidBy = payDates.reduce((sum, d) => d <= r.date ? sum + payByDate[d] : sum, 0);
           const due = acc - paidBy;
@@ -4588,7 +4663,7 @@ function openCuratorMineModal() {
           return `
           <tr>
             <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
-            <td>${escapeHtml(r.pair)}${partial}</td>
+            <td>${escapeHtml(r.pair)}${partial}${partPaid}</td>
             <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
             <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
             <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
@@ -4641,6 +4716,30 @@ function openCuratorMineModal() {
       `).join('')
     : `<div class="cm-pay-empty">Пока ничего не отдано в этой неделе.</div>`;
 
+  // Архив: что закрыто, сгруппировано по дате выдачи — «что я отдал такого-то».
+  const archByPay = {};
+  SET.closed.forEach(a => {
+    a.closedBy.forEach(c => {
+      (archByPay[c.date] = archByPay[c.date] || []).push({ a, part: c.amount });
+    });
+  });
+  const archDates = Object.keys(archByPay).sort().reverse();
+  const archBlock = !archDates.length ? '' : `
+    <details class="cm-arch">
+      <summary>🗄 Архив закрытых начислений · ${SET.closed.length} шт.</summary>
+      ${archDates.map(d => {
+        const items = archByPay[d];
+        const tot = items.reduce((x, i) => x + i.part, 0);
+        return `<div class="cm-arch-day">
+          <div class="cm-arch-head"><span>Отдано ${formatDateShort(d)}</span><b>${fmt(tot)}</b></div>
+          ${items.map(i => `<div class="cm-arch-row">
+              <span>${formatDateShort(i.a.date)} · ${escapeHtml(i.a.pair)}</span>
+              <span style="font-family:var(--font-num)">${fmt(i.part)}</span>
+            </div>`).join('')}
+        </div>`;
+      }).join('')}
+    </details>`;
+
   const payBlock = `
     <div class="cm-paid-block">
       <div class="cm-paid-head">📤 Отдано куратору в этой неделе</div>
@@ -4666,6 +4765,7 @@ function openCuratorMineModal() {
       <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
     </div>
     ${table}
+    ${archBlock}
     ${payBlock}
   `;
   const m = document.getElementById('curator-mine-modal');
