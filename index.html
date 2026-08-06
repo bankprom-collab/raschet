@@ -1221,7 +1221,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v114</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v115</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4561,38 +4561,46 @@ function collectCuratorMineRows(dayStr) {
 function renderCuratorTile() {
   const body = document.getElementById('tileCuratorMineBody');
   if (!body) return;
-  const __ctot = curatorMineTotals(currentDate);
-  const accrued = __ctot.accrued;
-  const paid = __ctot.paid;
-  const remain = accrued - paid;
-  const debt = curatorDebt(currentDate);          // сквозной, через все недели
-  if (accrued <= 0 && debt <= 0) { body.innerHTML = 'Куратору к отдаче ничего нет (учитывается только выданная на руки часть приходов).'; return; }
-  const rows = collectCuratorMineRows(currentDate);
-  const topByPair = {};
-  rows.forEach(r => { topByPair[r.pair] = (topByPair[r.pair] || 0) + r.curatorSum; });
-  const topList = Object.entries(topByPair).sort((a,b) => b[1] - a[1]).slice(0, 3);
-  const topHtml = topList.map(([p, v]) =>
+
+  /* Плитка показывает ТОЛЬКО непогашенное. Начисление, закрытое выдачей,
+     уходит отсюда совсем — оно живёт в архиве внутри окна. Владельцу нужна
+     одна картина: сколько он должен куратору сегодня, а не вся история. */
+  const SET = curatorSettlement(currentDate);
+  const debt = curatorDebt(currentDate);
+
+  if (debt <= 0 && !SET.open.length) {
+    body.innerHTML = SET.ahead > 0
+      ? `Долгов перед куратором нет. Отдано вперёд: <b style="color:#ffb74d">${fmt(SET.ahead)}</b>.`
+      : 'Долгов перед куратором нет — всё отдано.';
+    return;
+  }
+
+  // По парам — только остатки непогашенных начислений
+  const restByPair = {};
+  SET.open.forEach(a => { restByPair[a.pair] = (restByPair[a.pair] || 0) + a.rest; });
+  const top = Object.entries(restByPair).sort((a, b) => b[1] - a[1]);
+  const shown = top.slice(0, 3);
+  const restCount = top.length - shown.length;
+
+  const topHtml = shown.map(([p, v]) =>
     `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
        <span style="color:var(--muted-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p)}</span>
        <span style="font-family:var(--font-num);color:#ffb74d;font-weight:700">${fmt(v)}</span>
-     </div>`).join('');
+     </div>`).join('')
+    + (restCount > 0
+        ? `<div style="color:var(--muted);font-size:10.5px;line-height:1.5">и ещё ${restCount}</div>`
+        : '');
+
+  const oldest = SET.open.length ? SET.open[0].date : null;
+
   body.innerHTML =
     `<div style="display:flex;flex-direction:column;gap:2px;margin-bottom:6px;font-family:var(--font-num)">
-       <div style="display:flex;justify-content:space-between;gap:8px">
-         <span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Накоплено</span>
-         <span style="font-size:14px;font-weight:700;color:#ffb74d">${fmt(accrued)}</span>
+       <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+         <span style="font-size:10.5px;color:#ffb74d;text-transform:uppercase;letter-spacing:.04em;font-weight:700">Должен куратору</span>
+         <span style="font-size:18px;font-weight:700;color:#ffb74d">${fmt(debt)}</span>
        </div>
-       <div style="display:flex;justify-content:space-between;gap:8px">
-         <span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">− Отдано</span>
-         <span style="font-size:12px;color:var(--muted-bright)">${fmt(paid)}</span>
-       </div>
-       <div style="display:flex;justify-content:space-between;gap:8px;border-top:1px dashed rgba(255,183,77,.25);padding-top:3px;margin-top:2px">
-         <span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">= за эту неделю</span>
-         <span style="font-size:13px;font-weight:700;color:var(--muted-bright)">${fmt(remain)}</span>
-       </div>
-       <div style="display:flex;justify-content:space-between;gap:8px;border-top:1px solid rgba(255,183,77,.35);padding-top:4px;margin-top:3px">
-         <span style="font-size:10.5px;color:#ffb74d;text-transform:uppercase;letter-spacing:.04em;font-weight:700" title="Начислено за всё время минус отдано за всё время">= долг куратору</span>
-         <span style="font-size:16px;font-weight:700;color:#ffb74d">${fmt(debt)}</span>
+       <div style="font-size:10.5px;color:var(--muted);line-height:1.4">
+         ${SET.open.length} незакрыт. начисл.${oldest ? ' · с ' + formatDateShort(oldest) : ''}
        </div>
      </div>${topHtml}`;
 }
