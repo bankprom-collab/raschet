@@ -8,6 +8,7 @@
 !.gitignore
 
 # Установка как приложение — эти файлы отдаёт GitHub Pages вместе со страницей
+!.nojekyll
 !manifest.json
 !sw.js
 !icon-192.png
