@@ -1221,7 +1221,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v115</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v116</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2838,8 +2838,14 @@ function curatorPaidAll(dayStr) {
  * Ничего не пересчитывает: суммы те же, что у `curatorAccruedTotal`
  * и `curatorPaidAll`. Меняется только то, к какой строке они привязаны.
  */
+/** Дата сброса: всё, начисленное по неё включительно, считается закрытым. */
+function curatorResetDate() {
+  return (state && state.curatorResetAt) ? state.curatorResetAt : null;
+}
+
 function curatorSettlement(dayStr) {
   const cover = pairPaidCoverage(dayStr);
+  const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
@@ -2860,6 +2866,8 @@ function curatorSettlement(dayStr) {
     });
   }
 
+  // Сначала обычное гашение выдачами — оно первично: реально отданное
+  // должно оставаться отданным, а не превращаться в «списано».
   let pi = 0, left = pays.length ? pays[0].amount : 0;
   accr.forEach(a => {
     while (a.paid < a.sum && pi < pays.length) {
@@ -2877,12 +2885,45 @@ function curatorSettlement(dayStr) {
   // Хвост выдач, которому не нашлось начислений: отдали вперёд.
   let ahead = left;
   for (let k = pi + 1; k < pays.length; k++) ahead += pays[k].amount;
-  return { accr, pays, open: accr.filter(a => a.rest > 0), closed: accr.filter(a => a.rest <= 0), ahead };
+
+  /* И только потом — черта. Закрывает лишь то, что ОСТАЛОСЬ непогашенным
+     до неё. Деньгами не проводится: у таких строк своя пометка, чтобы
+     в архиве было видно, что они списаны, а не оплачены. */
+  const before = [];
+  if (reset) {
+    accr.forEach(a => {
+      if (a.rest > 0 && a.date <= reset) {
+        a.byReset = true;
+        a.resetAmount = a.rest;
+        a.rest = 0;
+        before.push(a);
+      }
+    });
+  }
+  return { accr, pays, reset,
+           open: accr.filter(a => a.rest > 0),
+           closed: accr.filter(a => a.rest <= 0),
+           byReset: before, ahead };
 }
 
 /** Сколько должны куратору сейчас: начислено за всё время − отдано за всё время. */
 function curatorDebt(dayStr) {
-  return curatorAccruedTotal(dayStr) - curatorPaidAll(dayStr);
+  // Считаем по остаткам разнесения — тогда черта сброса действует и здесь,
+  // и в таблице, и на плитке. Без сброса результат тот же, что был:
+  // начислено за всё время минус отдано за всё время.
+  return curatorSettlement(dayStr).open.reduce((a, x) => a + x.rest, 0);
+}
+
+/** Провести черту: всё начисленное по dayStr включительно считать закрытым. */
+function curatorResetTo(dayStr) {
+  state.curatorResetAt = dayStr;
+  saveState();
+  render();
+}
+function curatorResetUndo() {
+  delete state.curatorResetAt;
+  saveState();
+  render();
 }
 
 // «Итог сделок» за пн–пт ТЕКУЩЕЙ недели (день dayStr). На след. неделю не переходит.
@@ -4732,9 +4773,24 @@ function openCuratorMineModal() {
     });
   });
   const archDates = Object.keys(archByPay).sort().reverse();
-  const archBlock = !archDates.length ? '' : `
+  const resetHtml = (SET.byReset && SET.byReset.length) ? `
+      <div class="cm-arch-day">
+        <div class="cm-arch-head">
+          <span>Закрыто сбросом ${formatDateShort(SET.reset)}</span>
+          <b>${fmt(SET.byReset.reduce((x, a) => x + (a.resetAmount || a.sum), 0))}</b>
+        </div>
+        ${SET.byReset.map(a => `<div class="cm-arch-row">
+            <span>${formatDateShort(a.date)} · ${escapeHtml(a.pair)}</span>
+            <span style="font-family:var(--font-num)">${fmt(a.resetAmount || a.sum)}</span>
+          </div>`).join('')}
+        <div class="cm-arch-row" style="color:var(--muted);font-style:italic">
+          Деньгами не проводилось — черта подведена вручную.
+        </div>
+      </div>` : '';
+  const archBlock = (!archDates.length && !resetHtml) ? '' : `
     <details class="cm-arch">
       <summary>🗄 Архив закрытых начислений · ${SET.closed.length} шт.</summary>
+      ${resetHtml}
       ${archDates.map(d => {
         const items = archByPay[d];
         const tot = items.reduce((x, i) => x + i.part, 0);
@@ -4764,6 +4820,18 @@ function openCuratorMineModal() {
           <button class="btn btn-primary cm-paid-add" onclick="addCuratorPayment()" style="background:#ffb74d;border-color:#ffb74d;color:#000;font-weight:700">+ Добавить</button>
         </div>
       </div>
+      <div class="cm-paid-form no-print" style="border-top:1px dashed rgba(255,255,255,.08);margin-top:10px;padding-top:10px">
+        <div class="cm-paid-form-lbl">Подвести черту:</div>
+        <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:7px">
+          Всё начисленное по сегодня уйдёт в архив, долг станет нулём.
+          Новые суммы появятся, когда выдадите очередные приходы.
+          Деньгами это не проводится — просто закрывает прошлое.
+        </div>
+        <button class="btn btn-ghost" onclick="askCuratorReset()"
+          style="border-color:#ffb74d;color:#ffb74d;font-size:12px">Обнулить долг на сегодня</button>
+        ${curatorResetDate() ? `<button class="btn btn-ghost" onclick="askCuratorResetUndo()"
+          style="border-color:var(--muted);color:var(--muted);font-size:12px;margin-left:6px">Убрать черту от ${formatDateShort(curatorResetDate())}</button>` : ''}
+      </div>
     </div>
   `;
 
@@ -4778,6 +4846,29 @@ function openCuratorMineModal() {
   `;
   const m = document.getElementById('curator-mine-modal');
   if (m) m.classList.add('open');
+}
+
+/** Подвести черту: закрыть всё начисленное по сегодня. */
+function askCuratorReset() {
+  const S = curatorSettlement(currentDate);
+  const debt = S.open.reduce((a, x) => a + x.rest, 0);
+  if (!S.open.length) { alert('Незакрытых начислений нет — обнулять нечего.'); return; }
+  if (!confirm(
+    'Подвести черту на ' + formatDateShort(currentDate) + '?\n\n' +
+    'В архив уйдёт незакрытых начислений: ' + S.open.length + '\n' +
+    'Долг куратору станет 0 (сейчас ' + fmt(debt) + ')\n\n' +
+    'Деньгами это не проводится. Черту можно убрать обратно.')) return;
+  curatorResetTo(currentDate);
+  if (typeof showToast === 'function') showToast('Черта подведена. Долг обнулён.');
+  openCuratorMineModal();
+}
+
+function askCuratorResetUndo() {
+  if (!confirm('Убрать черту от ' + formatDateShort(curatorResetDate()) +
+               '?\n\nСтарые начисления вернутся в долг.')) return;
+  curatorResetUndo();
+  if (typeof showToast === 'function') showToast('Черта убрана');
+  openCuratorMineModal();
 }
 
 // Добавить новую отдачу куратору (сумму на выбранную дату).
