@@ -374,6 +374,11 @@
   .wds-break-row:last-of-type { border-bottom: none; }
   .wds-break-date { color: var(--muted-bright); }
   .wds-break-amt { color: var(--text); font-weight: 600; }
+  /* Слагаемые прихода (r.parts) — из чего сложилась сумма. Только показ. */
+  .wds-break-parts {
+    display: block; font-size: 10px; color: var(--muted); font-weight: 400;
+    line-height: 1.25; margin-top: 1px; word-break: break-word;
+  }
   .wds-break-pct { color: var(--muted); font-size: 11px; }
   .wds-break-after { color: #ff8a4a; font-weight: 600; }
   .wds-break-after2 { color: #818cf8; font-weight: 600; }
@@ -783,6 +788,7 @@
   .stat-card.s-in::before { background: var(--income); }
   .stat-card.s-balance::before { background: var(--accent); }
   .stat-card.s-curator::before { background: #ffb74d; }
+  .stat-card.s-hand::before { background: var(--accent); }
   .stat-label {
     font-family: var(--font-ui);
     font-size: 9.5px; text-transform: uppercase;
@@ -1221,7 +1227,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v116</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v117</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1267,6 +1273,11 @@
         <button class="btn btn-ghost" onclick="markCuratorPaid()" style="border-color:#ffb74d;color:#ffb74d;font-size:10.5px;padding:2px 9px;line-height:1.3" title="Отметить, что сумма куратора отдана">Отдана</button>
       </div>
       <div id="curator-paid-line" style="display:none;font-size:10px;color:var(--muted);margin-top:3px"></div>
+    </div>
+    <div class="stat-card s-hand" title="Итог сделок за неделю минус процент куратора. То же число, что «= На руки» под приходами.">
+      <div class="stat-label">НА РУКИ ЗА НЕДЕЛЮ</div>
+      <div class="stat-value" style="color:var(--accent)" id="s-hand">—</div>
+      <div id="s-hand-line" style="font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
   </div>
 
@@ -2928,6 +2939,10 @@ function curatorResetUndo() {
 
 // «Итог сделок» за пн–пт ТЕКУЩЕЙ недели (день dayStr). На след. неделю не переходит.
 // Для каждой строки с двумя процентами берётся разница r100(total) − r100(total2).
+// ⚠️ С v117 блок «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» считает через
+// `dealsWeekAll` — со всех приходов недели. Эта функция (только с выданной
+// части) сейчас не вызывается; оставлена как есть — старое правило на случай,
+// если владелец захочет вернуть счёт по выданности.
 function dealsWeeklyAccrued(dayStr) {
   let sum = 0;
   const thisWeek = weekMondayStr(dayStr);
@@ -2951,6 +2966,64 @@ function dealsWeeklyAccrued(dayStr) {
     });
   }
   return sum;
+}
+
+/* ── «НА РУКИ»: ИТОГ СДЕЛОК МИНУС КУРАТОР ────────────────────────────────────
+   Считается СО ВСЕХ приходов недели — выданы они на руки или ещё нет
+   (решение владельца, 07.08.2026). Заработок с приходов виден сразу в день
+   прихода, а не по мере выдачи.
+
+   Это ОТДЕЛЬНЫЕ функции, а не правка `curatorWeeklyAccrued` / `dealsWeeklyAccrued`:
+   на те смотрит таблица куратора «за эту неделю» и сквозной долг куратору, и
+   правило «куратору — только с выданной части» там остаётся нетронутым.
+
+   Единый источник для строки «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» под
+   приходами и для плитки «НА РУКИ» — их суммы обязаны совпадать. */
+
+/** Итог сделок за пн–пт недели дня dayStr — со всех приходов, без учёта выдач. */
+function dealsWeekAll(dayStr) {
+  let sum = 0;
+  const thisWeek = weekMondayStr(dayStr);
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
+    if (!isWeekday(d)) continue;                 // сб/вс не учитываются
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach(r => {
+      const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
+      const hasP2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
+                     && r.total2 !== null && r.total2 !== undefined);
+      if (hasP1 && hasP2) sum += r100(r.total) - r100(r.total2);
+    });
+  }
+  return sum;
+}
+
+/** Начислено куратору за пн–пт недели dayStr — со всех приходов, без учёта выдач. */
+function curatorWeekAll(dayStr) {
+  let sum = 0;
+  const thisWeek = weekMondayStr(dayStr);
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (weekMondayStr(d) !== thisWeek) continue;
+    if (!isWeekday(d)) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach(r => {
+      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
+        sum += floor100((r.amount || 0) * r.pctCur / 100);
+      }
+    });
+  }
+  return sum;
+}
+
+/** «На руки» за неделю: { deals, curator, hand }. Отсюда берут и строка, и плитка. */
+function handWeekly(dayStr) {
+  const deals = dealsWeekAll(dayStr);
+  const curator = curatorWeekAll(dayStr);
+  return { deals: deals, curator: curator, hand: deals - curator };
 }
 
 // Кнопка «Отдана»: записывает, что часть или вся накопленная сумма куратора
@@ -4313,6 +4386,9 @@ function collectPairBaseBreakdown(pair, scope) {
         amount: r.amount || 0,
         pct: r.pct, pct2: r.pct2,
         tag: r.tag || null,
+        // Слагаемые, как их ввели («412 304+301 640,28»). Только для показа —
+        // в расчёт идёт r.amount, как и раньше.
+        parts: (Array.isArray(r.parts) && r.parts.length > 1) ? r.parts.slice() : null,
         after1: (r.pct !== null && r.pct !== undefined && r.pct > 0 && r.total !== null && r.total !== undefined)
                 ? r100(r.total) : (r.total || 0),
         after2: (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0 && r.total2 !== null && r.total2 !== undefined)
@@ -4385,7 +4461,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
     const a1 = r.after1 || 0;
     const a2 = (r.after2 === null || r.after2 === undefined) ? null : r.after2;
     allRows.push({
-      date: r.date, pct: r.pct, pct2: r.pct2, tag: r.tag,
+      date: r.date, pct: r.pct, pct2: r.pct2, tag: r.tag, parts: r.parts || null,
       amount: r.amount || 0, after1: a1, after2: a2,
       // невыданная часть — она и складывается в «Итого невыдано»
       uAfter1: paidFull ? 0 : (whole ? a1 : r100(a1 * uf)),
@@ -4424,9 +4500,14 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
         : '';
     const a2 = (r.after2 === null) ? '—' : fmt(r.after2);
     const diff = (r.after2 === null) ? '—' : fmt(r.after1 - r.after2);
+    // Из чего сложился приход: слагаемые, как их вводили. Строкой под суммой,
+    // чтобы узкая колонка не расползалась на телефоне.
+    const partsHtml = (r.parts && r.parts.length > 1)
+      ? `<span class="wds-break-parts" title="Из чего сложилась сумма">${r.parts.map(n => fmtRaw(n)).join(' + ')}</span>`
+      : '';
     return `<div class="wds-break-row${r.state === 'paid' ? ' is-paid' : ''}">
       <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${chip}</span>
-      <span class="wds-break-amt">${fmt(r.amount)}</span>
+      <span class="wds-break-amt">${fmt(r.amount)}${partsHtml}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
       <span class="wds-break-after">→ ${fmt(r.after1)}</span>
       <span class="wds-break-after2">→ ${a2}</span>
@@ -4978,16 +5059,25 @@ function renderSummary(day) {
       curPaidLine.innerHTML = '';
     }
   }
-  // Блок «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» — недельный нарастающий итог (пн–пт)
-  const dealsWeek = dealsWeeklyAccrued(currentDate);
-  const curatorWeek = curatorWeeklyAccrued(currentDate);
-  const handWeek = dealsWeek - curatorWeek;
+  // Блок «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» — недельный нарастающий итог
+  // (пн–пт) со ВСЕХ приходов недели. Отсюда же берёт плитка «НА РУКИ» —
+  // источник один, суммы обязаны совпадать.
+  const hw = handWeekly(currentDate);
   const dealsEl = document.getElementById('deals-total');
-  if (dealsEl) dealsEl.textContent = fmt(dealsWeek);
+  if (dealsEl) dealsEl.textContent = fmt(hw.deals);
   const dealsCurEl = document.getElementById('deals-curator');
-  if (dealsCurEl) dealsCurEl.textContent = '−' + fmt(curatorWeek);
+  if (dealsCurEl) dealsCurEl.textContent = '−' + fmt(hw.curator);
   const handEl = document.getElementById('hand-total');
-  if (handEl) handEl.textContent = fmt(handWeek);
+  if (handEl) handEl.textContent = fmt(hw.hand);
+  // Плитка «НА РУКИ» на дашборде — то же число + из чего оно сложилось
+  const handTileEl = document.getElementById('s-hand');
+  if (handTileEl) handTileEl.textContent = fmt(hw.hand);
+  const handLineEl = document.getElementById('s-hand-line');
+  if (handLineEl) {
+    handLineEl.textContent = (hw.deals || hw.curator)
+      ? 'сделки ' + fmt(hw.deals) + ' − куратор ' + fmt(hw.curator)
+      : 'за эту неделю (пн–пт)';
+  }
 }
 
 function renderClientSelects() {
