@@ -929,7 +929,11 @@
     box-shadow: inset 3px 0 0 var(--accent);
   }
   @media(max-width: 600px) {
-    .add-form { grid-template-columns: 1fr 1fr; }
+    /* Колонки формы заданы inline прямо в разметке — под широкий экран.
+       Inline сильнее медиазапроса, поэтому на телефоне форма не сворачивалась
+       и растягивала страницу вбок (587px при экране 375). !important
+       возвращает то, ради чего этот медиазапрос и писался. */
+    .add-form { grid-template-columns: 1fr 1fr !important; }
     .add-form .btn { grid-column: span 2; }
   }
 
@@ -962,6 +966,62 @@
   .form-group { margin-bottom: 14px; }
   .form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; letter-spacing: .8px; text-transform: uppercase; }
   .modal-footer { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+
+  /* ── БЫСТРЫЙ ВВОД (крупная форма) ──────────────────────────────────────────
+     Тот же ввод, что в компактной форме под таблицами, только пальцем.
+     Значения живут в тех же полях формы — запись добавляет addRow(). */
+  #quick-entry-modal .modal { padding: 18px 16px 16px; }
+  .qe-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  .qe-tab {
+    padding: 13px 8px; border-radius: 10px; cursor: pointer;
+    background: var(--card); border: 1px solid var(--border); color: var(--muted);
+    font-family: var(--font-ui); font-size: 12px; font-weight: 600;
+    letter-spacing: .3px; line-height: 1.2;
+  }
+  .qe-tab.on { color: #000; }
+  .qe-tab.on[data-t="in"]  { background: var(--income);  border-color: var(--income); }
+  .qe-tab.on[data-t="out"] { background: var(--expense); border-color: var(--expense); color: #fff; }
+  .qe-field { margin-bottom: 14px; }
+  .qe-field > label {
+    display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 7px;
+    letter-spacing: .8px; text-transform: uppercase;
+  }
+  .qe-pairs { display: flex; flex-wrap: wrap; gap: 7px; }
+  .qe-pair {
+    padding: 11px 14px; border-radius: 10px; cursor: pointer;
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--muted-bright); font-family: var(--font-num); font-size: 13.5px;
+  }
+  .qe-pair.on { background: var(--accent3); border-color: var(--accent3); color: #fff; font-weight: 700; }
+  .qe-pair.add { color: var(--accent); border-style: dashed; }
+  /* Крупные поля — попасть пальцем с первого раза */
+  .qe-input, .qe-input-big, .qe-input-num {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-family: var(--font-num);
+  }
+  .qe-input     { padding: 13px 14px; font-size: 14px; }
+  .qe-input-big { padding: 15px 14px; font-size: 22px; font-weight: 700; letter-spacing: .5px; }
+  .qe-input-num { padding: 13px 8px; font-size: 18px; font-weight: 700; text-align: center; }
+  .qe-input:focus, .qe-input-big:focus, .qe-input-num:focus { outline: none; border-color: var(--accent3); }
+  .qe-pct-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .qe-pct-row > div > span {
+    display: block; text-align: center; font-size: 10px; color: var(--muted); margin-bottom: 5px;
+  }
+  .qe-preview {
+    font-family: var(--font-num); font-size: 12px; color: var(--muted-bright);
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 11px 13px; margin-bottom: 14px; white-space: pre-line; line-height: 1.45;
+    min-height: 42px;
+  }
+  .qe-submit {
+    width: 100%; padding: 16px; border: none; border-radius: 12px; cursor: pointer;
+    font-family: var(--font-ui); font-size: 14px; font-weight: 700; letter-spacing: .5px;
+  }
+  .qe-submit[data-t="in"]  { background: var(--income);  color: #000; }
+  .qe-submit[data-t="out"] { background: var(--expense); color: #fff; }
+  /* Селект пары в компактной форме открывает эту модалку — показываем это */
+  #in-client, #out-client { cursor: pointer; }
 
   /* ── TOAST ── */
   .toast {
@@ -1227,7 +1287,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v117</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v118</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1382,6 +1442,48 @@
 
 <!-- ── CLIENTS MODAL ── -->
 <!-- ── ДОЛГ К ОТДАЧЕ СЕГОДНЯ ── -->
+<!-- ── БЫСТРЫЙ ВВОД: крупная форма для телефона ──
+     Открывается тапом по паре в компактной форме (in-client / out-client).
+     Своего расчёта не имеет: пишет в те же поля и добавляет через addRow(). -->
+<div class="modal-overlay" id="quick-entry-modal">
+  <div class="modal" style="max-width:520px">
+    <h2 id="qe-title" style="margin-bottom:14px">➕ Новая запись</h2>
+    <div class="qe-tabs">
+      <button class="qe-tab" data-t="in"  id="qe-tab-in"  onclick="qeSetType('in')">⬇ Приход<br>от клиентов</button>
+      <button class="qe-tab" data-t="out" id="qe-tab-out" onclick="qeSetType('out')">⬆ Получено<br>на руки</button>
+    </div>
+    <div class="qe-field">
+      <label>Пара</label>
+      <div class="qe-pairs" id="qe-pairs"></div>
+    </div>
+    <div class="qe-field">
+      <label id="qe-amount-label">Сумма</label>
+      <input type="text" id="qe-amount" class="qe-input-big" inputmode="decimal"
+             placeholder="5000+3000" oninput="qeOnInput()">
+    </div>
+    <div class="qe-field" id="qe-pcts">
+      <label>Проценты — %1 обязателен, остальные по желанию</label>
+      <div class="qe-pct-row">
+        <div><span>%1</span><input type="text" id="qe-pct" class="qe-input-num" inputmode="decimal"
+             oninput="numericInputFilter(event); qeOnInput()"></div>
+        <div><span>%2</span><input type="text" id="qe-pct2" class="qe-input-num" inputmode="decimal"
+             oninput="numericInputFilter(event); qeOnInput()"></div>
+        <div><span>%кур</span><input type="text" id="qe-pctcur" class="qe-input-num" inputmode="decimal"
+             oninput="numericInputFilter(event); qeOnInput()"></div>
+      </div>
+    </div>
+    <div class="qe-field">
+      <label>Примечание — на расчёт не влияет</label>
+      <input type="text" id="qe-note" class="qe-input" placeholder="необязательно" oninput="qeOnInput()">
+    </div>
+    <div class="qe-preview" id="qe-preview">—</div>
+    <button class="qe-submit" id="qe-submit" onclick="qeSubmit()">Добавить запись</button>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('quick-entry-modal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="debt-out-modal">
   <div class="modal" style="max-width:720px">
     <h2 style="color:#ff8a4a">💸 Сумма к отдаче по парам</h2>
@@ -1969,6 +2071,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter') { e.preventDefault(); addRow('in'); }
     });
   });
+  // Тап по паре в компактной форме → крупная форма ввода (v118).
+  // pointerdown с preventDefault: нативный список выбора не открывается,
+  // вместо него модалка, где пара выбирается кнопкой под палец.
+  [['in-client', 'in'], ['out-client', 'out']].forEach(([id, type]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.title = 'Нажми — откроется крупная форма ввода';
+    el.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      el.blur();
+      openQuickEntry(type);
+    });
+  });
   // Enter в поле переходящего остатка → установить
   const coInp = document.getElementById('carryover-input');
   if (coInp) coInp.addEventListener('keydown', e => {
@@ -2078,6 +2193,21 @@ function migrateState(s) {
   // Если данные старее текущей версии — принудительно переопределяем carryoverManual
   const needForceRemap = !s._migrationVersion || s._migrationVersion < MIGRATION_VERSION;
 
+  /* Склейка note → client (v118).
+     В САМОЙ старой схеме в поле note лежал получатель, и его надо было
+     приклеить к имени пары. Сейчас note — обычное примечание к записи,
+     но склейка выполнялась при КАЖДОЙ загрузке: примечание, введённое
+     сегодня, назавтра становилось частью имени пары («Вейс(рук)-Рынок-
+     вернуть в пятницу»), и такая пара оседала в базе. Отсюда и разовая
+     чистка суффиксов v9 ниже — она убирала следствие, а не причину.
+
+     Теперь склейка одноразовая: только для данных СТАРЕЕ схемы 9, то есть
+     тех, что и правда пришли из модели «получатель в note». Данные, уже
+     дожившие до 9-й схемы, помечаются как склеенные и больше не трогаются —
+     примечание в них остаётся примечанием. */
+  const mergeLegacyNotes = !s._notesMerged
+    && (!s._migrationVersion || s._migrationVersion < 9);
+
   for (const d of allDays) {
     const day = s.days[d];
     if (!day) continue;
@@ -2091,14 +2221,14 @@ function migrateState(s) {
     // склеиваем в client. Операция идемпотентна (после склейки note пустой).
     day.out.forEach(r => {
       if (typeof r.note !== 'string') r.note = '';
-      if (r.note) {
+      if (r.note && mergeLegacyNotes) {
         r.client = r.client ? (r.client + '-' + r.note) : r.note;
         r.note = '';
       }
     });
     day.in.forEach(r => {
       if (typeof r.note !== 'string') r.note = '';
-      if (r.note) {
+      if (r.note && mergeLegacyNotes) {
         r.client = r.client ? (r.client + '-' + r.note) : r.note;
         r.note = '';
       }
@@ -2137,6 +2267,8 @@ function migrateState(s) {
   }
 
   s._migrationVersion = MIGRATION_VERSION;
+  // Склейка получателя из note сделана (или не требовалась) — больше никогда.
+  s._notesMerged = true;
 
   // Хранилище дат отдачи по парам, ключ 'YYYY-MM-DD_понедельник::пара' → 'YYYY-MM-DD'.
   // Только метаданные для планирования — на расчёт долгов/куратора не влияют.
@@ -5118,6 +5250,116 @@ function addClientPair(name) {
 // Запрашивает у пользователя новую пару, ТРЕБУЯ вторую часть.
 // Если введено одно имя без дефиса — подсказывает дописать получателя.
 // Возвращает имя добавленной пары или null (отмена).
+/* ── БЫСТРЫЙ ВВОД: крупная форма для телефона (v118) ─────────────────────────
+   Компактная форма под таблицами осталась как была. Модалка — только крупный
+   фасад над ней: своих значений не хранит и НИЧЕГО не считает.
+   Всё набранное переносится в поля компактной формы, предпросмотр рисует
+   `updateInPreview()`, запись добавляет `addRow()` — те же самые функции.
+   Поэтому расчёт от способа ввода не зависит. */
+let qeType = 'in';
+
+/** Открыть крупную форму: 'in' — приход, 'out' — получено на руки. */
+function openQuickEntry(type) {
+  qeSetType(type === 'out' ? 'out' : 'in');
+  document.getElementById('quick-entry-modal').classList.add('open');
+}
+
+/** Переключить вкладку приход/выдача и подтянуть то, что уже набрано в форме. */
+function qeSetType(type) {
+  qeType = (type === 'out') ? 'out' : 'in';
+  const isIn = qeType === 'in';
+  const g = (id) => document.getElementById(id);
+  g('qe-tab-in').classList.toggle('on', isIn);
+  g('qe-tab-out').classList.toggle('on', !isIn);
+  const title = g('qe-title');
+  title.textContent = isIn ? '⬇ Приход от клиентов' : '⬆ Получено на руки';
+  title.style.color = isIn ? 'var(--income)' : 'var(--expense)';
+  g('qe-pcts').style.display = isIn ? '' : 'none';
+  g('qe-amount').placeholder = isIn ? '5000+3000' : 'Сумма';
+  g('qe-amount-label').textContent = isIn ? 'Сумма — можно слагаемыми через +' : 'Сумма';
+  const sub = g('qe-submit');
+  sub.dataset.t = qeType;
+  sub.textContent = isIn ? 'Добавить приход' : 'Добавить выдачу';
+  g('qe-amount').value = g(isIn ? 'in-amount' : 'out-amount').value;
+  g('qe-note').value   = g(isIn ? 'in-note'   : 'out-note').value;
+  if (isIn) {
+    g('qe-pct').value    = g('in-pct').value;
+    g('qe-pct2').value   = g('in-pct2').value;
+    g('qe-pctcur').value = g('in-pctcur').value;
+  }
+  qeRenderPairs();
+  qeOnInput();
+}
+
+/** Пары крупными кнопками. Выбранная — та же, что в селекте компактной формы. */
+function qeRenderPairs() {
+  const wrap = document.getElementById('qe-pairs');
+  if (!wrap) return;
+  const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
+  const cur = sel ? sel.value : '';
+  wrap.innerHTML = state.clients.map((c, i) =>
+      `<button class="qe-pair${c === cur ? ' on' : ''}" onclick="qePickPair(${i})">${escapeHtml(c)}</button>`
+    ).join('')
+    + `<button class="qe-pair add" onclick="qeAddPair()">➕ Пара</button>`;
+}
+
+/** Выбрать пару по её месту в state.clients (индекс — чтобы не экранировать имя). */
+function qePickPair(i) {
+  const name = state.clients[i];
+  if (!name) return;
+  const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
+  if (sel) { sel.value = name; _lastClientSel[sel.id] = name; }
+  qeRenderPairs();
+}
+
+/** Добавить новую пару — тем же диалогом, что и компактная форма. */
+function qeAddPair() {
+  const added = promptNewPair();
+  if (!added) return;
+  const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
+  if (sel) { sel.value = added; _lastClientSel[sel.id] = added; }
+  qeRenderPairs();
+}
+
+/** Перенести набранное в поля компактной формы и обновить предпросмотр. */
+function qeOnInput() {
+  const g = (id) => document.getElementById(id);
+  if (qeType === 'in') {
+    g('in-amount').value = g('qe-amount').value;
+    g('in-pct').value    = g('qe-pct').value;
+    g('in-pct2').value   = g('qe-pct2').value;
+    g('in-pctcur').value = g('qe-pctcur').value;
+    g('in-note').value   = g('qe-note').value;
+    updateInPreview();                       // единственный расчёт предпросмотра
+    g('qe-preview').textContent = g('in-preview').textContent;
+  } else {
+    g('out-amount').value = g('qe-amount').value;
+    g('out-note').value   = g('qe-note').value;
+    const n = parseDecimal(g('qe-amount').value);
+    g('qe-preview').textContent = (isNaN(n) || n <= 0) ? '—' : fmtExact(n) + ' ₽';
+  }
+}
+
+/** Добавить запись. Проверки и запись — внутри addRow(), здесь их нет. */
+function qeSubmit() {
+  qeOnInput();
+  const day = getDay(currentDate);
+  const before = (day[qeType] || []).length;
+  addRow(qeType);
+  // addRow сам ругается и ничего не пишет, если поля не заполнены —
+  // тогда модалку не закрываем, чтобы было что поправить.
+  if ((getDay(currentDate)[qeType] || []).length <= before) return;
+  const g = (id) => document.getElementById(id);
+  g('qe-amount').value = '';
+  g('qe-note').value = '';
+  if (qeType === 'in') {
+    g('qe-pct').value    = g('in-pct').value;
+    g('qe-pct2').value   = g('in-pct2').value;
+    g('qe-pctcur').value = g('in-pctcur').value;   // %кур форма оставляет — оставляем и мы
+  }
+  closeModal('quick-entry-modal');
+}
+
 function promptNewPair() {
   let prefill = '';
   // до 5 попыток, чтобы не зациклиться
