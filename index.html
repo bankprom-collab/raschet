@@ -1004,6 +1004,28 @@
   .qe-input-big { padding: 15px 14px; font-size: 22px; font-weight: 700; letter-spacing: .5px; }
   .qe-input-num { padding: 13px 8px; font-size: 18px; font-weight: 700; text-align: center; }
   .qe-input:focus, .qe-input-big:focus, .qe-input-num:focus { outline: none; border-color: var(--accent3); }
+  /* Суммы прихода — каждая своей строкой, складываются внизу */
+  .qe-sum-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+  .qe-sum-row .qe-input-big { flex: 1; min-width: 0; }
+  .qe-sum-del {
+    flex: 0 0 46px; border-radius: 10px; cursor: pointer;
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--muted); font-size: 18px; line-height: 1;
+  }
+  .qe-sum-del:hover { color: var(--expense); border-color: var(--expense); }
+  .qe-add-sum {
+    width: 100%; padding: 12px; border-radius: 10px; cursor: pointer;
+    background: transparent; border: 1px dashed var(--border);
+    color: var(--accent); font-family: var(--font-ui); font-size: 12.5px; font-weight: 600;
+  }
+  .qe-add-sum:hover { border-color: var(--accent); background: rgba(0,229,176,.06); }
+  .qe-sum-total {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border);
+    font-family: var(--font-num);
+  }
+  .qe-sum-total .l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .qe-sum-total .v { font-size: 19px; font-weight: 700; color: var(--accent); }
   .qe-pct-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .qe-pct-row > div > span {
     display: block; text-align: center; font-size: 10px; color: var(--muted); margin-bottom: 5px;
@@ -1215,6 +1237,10 @@
           <div class="ic">👔</div><div class="t">Куратор ко мне</div>
           <div class="s" id="tileCuratorMineBody">—</div>
         </div>
+        <div class="board-tile feature" id="tileHand" style="--tile-c:#00e5b0;border-color:rgba(0,229,176,.4)" onclick="hideBoard()">
+          <div class="ic">🫱</div><div class="t">На руки</div>
+          <div class="s" id="tileHandBody">—</div>
+        </div>
       </div>
     </div>
 
@@ -1287,7 +1313,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v118</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v119</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1457,9 +1483,12 @@
       <div class="qe-pairs" id="qe-pairs"></div>
     </div>
     <div class="qe-field">
-      <label id="qe-amount-label">Сумма</label>
-      <input type="text" id="qe-amount" class="qe-input-big" inputmode="decimal"
-             placeholder="5000+3000" oninput="qeOnInput()">
+      <label id="qe-amount-label">Суммы — каждая своей строкой</label>
+      <div id="qe-sum-rows"></div>
+      <button class="qe-add-sum" id="qe-add-sum" onclick="qeAddSumRow(true)">+ ещё сумма</button>
+      <div class="qe-sum-total" id="qe-sum-total-box">
+        <span class="l">Итого</span><span class="v" id="qe-sum-total">0 ₽</span>
+      </div>
     </div>
     <div class="qe-field" id="qe-pcts">
       <label>Проценты — %1 обязателен, остальные по желанию</label>
@@ -3561,6 +3590,7 @@ function renderInBody(day) {
   // Это только обновление отображения — расчётные функции те же.
   try { renderDebtOutTile(); } catch (e) {}
   try { renderCuratorTile(); } catch (e) {}
+  try { renderHandTile(); } catch (e) {}
 }
 
 // Сводный блок: задолженность по ВСЕМ парам за текущую неделю.
@@ -4812,6 +4842,29 @@ function collectCuratorMineRows(dayStr) {
   return rows;
 }
 
+/* Плитка «На руки» на Доске — рядом с «Куратор ко мне» (v119).
+   Считает то же, что строка «= НА РУКИ» под приходами и плитка на дашборде:
+   итог сделок за неделю минус процент куратора. Источник один — handWeekly. */
+function renderHandTile() {
+  const body = document.getElementById('tileHandBody');
+  if (!body) return;
+  const hw = handWeekly(currentDate);
+  if (!hw.deals && !hw.curator) {
+    body.innerHTML = 'За эту неделю сделок пока нет.';
+    return;
+  }
+  body.innerHTML =
+    `<div style="font-family:var(--font-num);font-size:20px;font-weight:700;color:#00e5b0;line-height:1.2">${fmt(hw.hand)}</div>
+     <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5;margin-top:4px">
+       <span style="color:var(--muted-bright)">итог сделок</span>
+       <span style="font-family:var(--font-num);color:var(--accent3);font-weight:700">${fmt(hw.deals)}</span>
+     </div>
+     <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
+       <span style="color:var(--muted-bright)">− куратору</span>
+       <span style="font-family:var(--font-num);color:#ffb74d;font-weight:700">${fmt(hw.curator)}</span>
+     </div>`;
+}
+
 function renderCuratorTile() {
   const body = document.getElementById('tileCuratorMineBody');
   if (!body) return;
@@ -5275,19 +5328,124 @@ function qeSetType(type) {
   title.textContent = isIn ? '⬇ Приход от клиентов' : '⬆ Получено на руки';
   title.style.color = isIn ? 'var(--income)' : 'var(--expense)';
   g('qe-pcts').style.display = isIn ? '' : 'none';
-  g('qe-amount').placeholder = isIn ? '5000+3000' : 'Сумма';
-  g('qe-amount-label').textContent = isIn ? 'Сумма — можно слагаемыми через +' : 'Сумма';
   const sub = g('qe-submit');
   sub.dataset.t = qeType;
   sub.textContent = isIn ? 'Добавить приход' : 'Добавить выдачу';
-  g('qe-amount').value = g(isIn ? 'in-amount' : 'out-amount').value;
-  g('qe-note').value   = g(isIn ? 'in-note'   : 'out-note').value;
+  g('qe-amount-label').textContent = isIn ? 'Суммы — каждая своей строкой' : 'Сумма';
+  // То, что уже набрано в компактной форме, раскладываем обратно по строкам
+  const parsedRaw = parseSumString(g(isIn ? 'in-amount' : 'out-amount').value || '');
+  qeSums = (parsedRaw && parsedRaw.parts.length) ? parsedRaw.parts.map(n => fmtExact(n)) : [''];
+  g('qe-note').value = g(isIn ? 'in-note' : 'out-note').value;
   if (isIn) {
     g('qe-pct').value    = g('in-pct').value;
     g('qe-pct2').value   = g('in-pct2').value;
     g('qe-pctcur').value = g('in-pctcur').value;
   }
   qeRenderPairs();
+  qeRenderSumRows();
+  qeSyncSums();
+}
+
+/* Суммы прихода строками (v119).
+   Владелец вводит приход по частям: сумма → Enter → пустая строка → следующая.
+   Складывать их вручную через «+» больше не нужно.
+   Сам расчёт не трогаем: строки собираются в ту же запись «412304+301640.28»,
+   что и раньше набирали руками, и уходят в поле компактной формы. Разбирает
+   её, как и прежде, parseSumString — он же кладёт слагаемые в r.parts. */
+let qeSums = [''];
+
+/** Число из строки поля: убираем пробелы-разделители и запятую. */
+function qeParseSum(v) {
+  const s = String(v === null || v === undefined ? '' : v).replace(/\s/g, '').replace(',', '.');
+  if (!s) return NaN;
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+}
+
+/** Перерисовать строки сумм. Вызывать только при добавлении/удалении — иначе
+    поле теряет фокус посреди набора. */
+function qeRenderSumRows() {
+  const wrap = document.getElementById('qe-sum-rows');
+  if (!wrap) return;
+  const single = (qeType === 'out');       // выдача — одна сумма, как в addRow
+  if (single) qeSums = [qeSums[0] || ''];
+  if (!qeSums.length) qeSums = [''];
+  // Приводим уже введённое к виду «412 304»: при перерисовке поле пересоздаётся,
+  // и blur на нём сработать не успевает.
+  qeSums = qeSums.map(v => { const n = qeParseSum(v); return isNaN(n) ? v : fmtExact(n); });
+  wrap.innerHTML = qeSums.map((v, i) => `
+    <div class="qe-sum-row">
+      <input type="text" class="qe-input-big" inputmode="decimal" value="${escapeHtml(String(v))}"
+             placeholder="${i === 0 ? 'Сумма' : 'Ещё сумма'}"
+             oninput="qeOnSumInput(${i}, this)"
+             onblur="qeBlurSum(${i}, this)"
+             onkeydown="qeSumKey(event)">
+      ${qeSums.length > 1 ? `<button class="qe-sum-del" onclick="qeDelSumRow(${i})" title="Убрать строку">✕</button>` : ''}
+    </div>`).join('');
+  const addBtn = document.getElementById('qe-add-sum');
+  if (addBtn) addBtn.style.display = single ? 'none' : '';
+  const totalBox = document.getElementById('qe-sum-total-box');
+  if (totalBox) totalBox.style.display = single ? 'none' : '';
+}
+
+function qeOnSumInput(i, el) {
+  numericInputFilter({ target: el });
+  qeSums[i] = el.value;
+  qeSyncSums();
+}
+
+/** Ушли из поля — показываем сумму с пробелами: 412 304 читается легче. */
+function qeBlurSum(i, el) {
+  const n = qeParseSum(el.value);
+  if (isNaN(n)) return;
+  el.value = fmtExact(n);
+  qeSums[i] = el.value;
+  qeSyncSums();
+}
+
+/** Enter в строке суммы = «дальше»: заводит следующую пустую строку. */
+function qeSumKey(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  qeAddSumRow(true);
+}
+
+function qeAddSumRow(focusNew) {
+  if (qeType === 'out') return;
+  qeSums.push('');
+  qeRenderSumRows();
+  qeSyncSums();
+  if (focusNew) {
+    const inputs = document.querySelectorAll('#qe-sum-rows input');
+    const last = inputs[inputs.length - 1];
+    if (last) last.focus();
+  }
+}
+
+function qeDelSumRow(i) {
+  qeSums.splice(i, 1);
+  if (!qeSums.length) qeSums = [''];
+  qeRenderSumRows();
+  qeSyncSums();
+}
+
+/** Собрать строки в поле компактной формы и показать «Итого». */
+function qeSyncSums() {
+  const g = (id) => document.getElementById(id);
+  const nums = qeSums.map(qeParseSum).filter(n => !isNaN(n));
+  // В поле уходит запись БЕЗ пробелов: parseSumString считает пробел
+  // разделителем слагаемых, и «412 304» превратилось бы в 412 + 304.
+  const joined = nums.map(n => String(n)).join('+');
+  if (qeType === 'in') {
+    g('in-amount').value = joined;
+  } else {
+    g('out-amount').value = nums.length ? String(nums[0]) : '';
+  }
+  const totalEl = g('qe-sum-total');
+  if (totalEl) {
+    const parsed = parseSumString(joined);          // точное сложение, через копейки
+    totalEl.textContent = parsed ? fmt(parsed.sum) : '0 ₽';
+  }
   qeOnInput();
 }
 
@@ -5324,8 +5482,8 @@ function qeAddPair() {
 /** Перенести набранное в поля компактной формы и обновить предпросмотр. */
 function qeOnInput() {
   const g = (id) => document.getElementById(id);
+  // Суммы в поля формы кладёт qeSyncSums — здесь только проценты и примечание.
   if (qeType === 'in') {
-    g('in-amount').value = g('qe-amount').value;
     g('in-pct').value    = g('qe-pct').value;
     g('in-pct2').value   = g('qe-pct2').value;
     g('in-pctcur').value = g('qe-pctcur').value;
@@ -5333,9 +5491,8 @@ function qeOnInput() {
     updateInPreview();                       // единственный расчёт предпросмотра
     g('qe-preview').textContent = g('in-preview').textContent;
   } else {
-    g('out-amount').value = g('qe-amount').value;
-    g('out-note').value   = g('qe-note').value;
-    const n = parseDecimal(g('qe-amount').value);
+    g('out-note').value = g('qe-note').value;
+    const n = parseDecimal(g('out-amount').value);
     g('qe-preview').textContent = (isNaN(n) || n <= 0) ? '—' : fmtExact(n) + ' ₽';
   }
 }
@@ -5350,7 +5507,10 @@ function qeSubmit() {
   // тогда модалку не закрываем, чтобы было что поправить.
   if ((getDay(currentDate)[qeType] || []).length <= before) return;
   const g = (id) => document.getElementById(id);
-  g('qe-amount').value = '';
+  qeSums = [''];
+  qeRenderSumRows();
+  const totalEl = g('qe-sum-total');
+  if (totalEl) totalEl.textContent = '0 ₽';
   g('qe-note').value = '';
   if (qeType === 'in') {
     g('qe-pct').value    = g('in-pct').value;
@@ -5829,6 +5989,7 @@ function updateBoardHero() {
   set('boardCarry', txt('s-carryover'));
   try { renderDebtOutTile(); } catch (e) {}
   try { renderCuratorTile(); } catch (e) {}
+  try { renderHandTile(); } catch (e) {}
 }
 function showBoard() {
   try { updateBoardHero(); } catch (e) {}
