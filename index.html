@@ -967,6 +967,33 @@
   .form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; letter-spacing: .8px; text-transform: uppercase; }
   .modal-footer { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
 
+  /* ── НА РУКИ ЗА НЕДЕЛЮ (окно с плитки на Доске) ── */
+  .hm-sum {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px;
+  }
+  .hm-sum > div {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; text-align: center;
+  }
+  .hm-sum .l { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .hm-sum .v { font-family: var(--font-num); font-size: 16px; font-weight: 700; margin-top: 4px; }
+  .hm-row {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+    padding: 9px 0; border-bottom: 1px dashed rgba(255,255,255,.06);
+  }
+  .hm-row:last-of-type { border-bottom: none; }
+  .hm-when { font-family: var(--font-num); font-size: 12px; color: var(--muted-bright); }
+  .hm-pair { font-size: 11.5px; color: var(--muted); margin-top: 2px; word-break: break-word; }
+  .hm-nums { text-align: right; font-family: var(--font-num); font-size: 11.5px; white-space: nowrap; }
+  .hm-nums b { font-size: 14px; color: var(--accent); display: block; margin-bottom: 2px; }
+  .hm-foot {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12);
+    font-family: var(--font-num);
+  }
+  .hm-foot .v { font-size: 19px; font-weight: 700; color: var(--accent); }
+  .hm-note { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 12px; line-height: 1.45; }
+
   /* ── БЫСТРЫЙ ВВОД (крупная форма) ──────────────────────────────────────────
      Тот же ввод, что в компактной форме под таблицами, только пальцем.
      Значения живут в тех же полях формы — запись добавляет addRow(). */
@@ -1237,7 +1264,7 @@
           <div class="ic">👔</div><div class="t">Куратор ко мне</div>
           <div class="s" id="tileCuratorMineBody">—</div>
         </div>
-        <div class="board-tile feature" id="tileHand" style="--tile-c:#00e5b0;border-color:rgba(0,229,176,.4)" onclick="hideBoard()">
+        <div class="board-tile feature" id="tileHand" style="--tile-c:#00e5b0;border-color:rgba(0,229,176,.4)" onclick="openHandModal()">
           <div class="ic">🫱</div><div class="t">На руки</div>
           <div class="s" id="tileHandBody">—</div>
         </div>
@@ -1313,7 +1340,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v119</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v120</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1468,6 +1495,17 @@
 
 <!-- ── CLIENTS MODAL ── -->
 <!-- ── ДОЛГ К ОТДАЧЕ СЕГОДНЯ ── -->
+<!-- ── НА РУКИ ЗА НЕДЕЛЮ ── -->
+<div class="modal-overlay" id="hand-modal">
+  <div class="modal" style="max-width:720px">
+    <h2 style="color:#00e5b0">🫱 На руки за неделю</h2>
+    <div id="hand-modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('hand-modal')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── БЫСТРЫЙ ВВОД: крупная форма для телефона ──
      Открывается тапом по паре в компактной форме (in-client / out-client).
      Своего расчёта не имеет: пишет в те же поля и добавляет через addRow(). -->
@@ -4863,6 +4901,79 @@ function renderHandTile() {
        <span style="color:var(--muted-bright)">− куратору</span>
        <span style="font-family:var(--font-num);color:#ffb74d;font-weight:700">${fmt(hw.curator)}</span>
      </div>`;
+}
+
+/* Из чего сложилось «на руки» за неделю — построчно (v120).
+   Формулы те же, что в dealsWeekAll и curatorWeekAll: итог сделки
+   r100(total) − r100(total2), куратору floor100(сумма × %кур).
+   Ничего не пересчитывает по-своему — иначе окно разошлось бы с плиткой. */
+function handWeekRows(dayStr) {
+  const rows = [];
+  const thisWeek = weekMondayStr(dayStr);
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (weekMondayStr(d) !== thisWeek) continue;
+    if (!isWeekday(d)) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach(r => {
+      const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
+      const hasP2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
+                     && r.total2 !== null && r.total2 !== undefined);
+      const deal = (hasP1 && hasP2) ? (r100(r.total) - r100(r.total2)) : 0;
+      const cur = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
+        ? floor100((r.amount || 0) * r.pctCur / 100) : 0;
+      if (!deal && !cur) return;              // приход без сделки и без куратора
+      rows.push({ date: d, pair: r.client || '—', amount: r.amount || 0,
+                  pct: r.pct, pct2: r.pct2, pctCur: r.pctCur,
+                  deal: deal, curator: cur, hand: deal - cur });
+    });
+  }
+  return rows;
+}
+
+function openHandModal() {
+  const box = document.getElementById('hand-modal-body');
+  if (!box) return;
+  const hw = handWeekly(currentDate);
+  const rows = handWeekRows(currentDate);
+  const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
+
+  const head =
+    `<div class="hm-sum">
+       <div><div class="l">Итог сделок</div><div class="v" style="color:var(--accent3)">${fmt(hw.deals)}</div></div>
+       <div><div class="l">− Куратору</div><div class="v" style="color:#ffb74d">${fmt(hw.curator)}</div></div>
+       <div><div class="l">= На руки</div><div class="v" style="color:var(--accent)">${fmt(hw.hand)}</div></div>
+     </div>`;
+
+  if (!rows.length) {
+    box.innerHTML = head + '<div style="color:var(--muted);padding:8px 0">За эту неделю сделок пока нет.</div>';
+    document.getElementById('hand-modal').classList.add('open');
+    return;
+  }
+
+  const body = rows.map(r => {
+    const pcts = [r.pct ? pf(r.pct) + '%' : '', r.pct2 ? pf(r.pct2) + '%' : ''].filter(Boolean).join(' / ') || '—';
+    const curLine = r.curator
+      ? `куратору ${pf(r.pctCur)}%: <span style="color:#ffb74d">${fmt(r.curator)}</span>`
+      : '<span style="color:var(--muted)">куратора нет</span>';
+    return `<div class="hm-row">
+      <div>
+        <div class="hm-when">${formatDateShort(r.date)}</div>
+        <div class="hm-pair">${escapeHtml(r.pair)} · ${fmt(r.amount)} · ${pcts}</div>
+      </div>
+      <div class="hm-nums">
+        <b>${fmt(r.hand)}</b>
+        сделка: <span style="color:var(--accent3)">${fmt(r.deal)}</span><br>${curLine}
+      </div>
+    </div>`;
+  }).join('');
+
+  box.innerHTML = head + body +
+    `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
+       <span class="v">${fmt(hw.hand)}</span></div>
+     <div class="hm-note">Неделя с понедельника по пятницу. Считается со всех приходов недели — выданы они на руки или ещё нет. То же число показывают плитка на Доске и строка «= На руки» под приходами.</div>`;
+  document.getElementById('hand-modal').classList.add('open');
 }
 
 function renderCuratorTile() {
