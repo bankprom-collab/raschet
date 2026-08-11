@@ -1031,6 +1031,28 @@
   .qe-input-big { padding: 15px 14px; font-size: 22px; font-weight: 700; letter-spacing: .5px; }
   .qe-input-num { padding: 13px 8px; font-size: 18px; font-weight: 700; text-align: center; }
   .qe-input:focus, .qe-input-big:focus, .qe-input-num:focus { outline: none; border-color: var(--accent3); }
+  /* Невыданные приходы пары — строка-кнопка на каждый день */
+  .qe-unpaid-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    width: 100%; margin-bottom: 7px; padding: 12px 14px; cursor: pointer;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    font-family: var(--font-num); text-align: left;
+  }
+  .qe-unpaid-row:hover { border-color: var(--expense); }
+  .qe-unpaid-row .d { font-size: 13px; color: var(--muted-bright); }
+  .qe-unpaid-row .s { font-size: 15px; font-weight: 700; color: var(--expense); white-space: nowrap; }
+  .qe-unpaid-row .chip {
+    font-size: 9.5px; padding: 1px 6px; border-radius: 5px; margin-left: 6px;
+    background: rgba(255,138,74,.15); color: #ff8a4a; font-family: var(--font-ui);
+  }
+  .qe-unpaid-all {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border);
+    font-family: var(--font-num); font-size: 12px; color: var(--muted);
+  }
+  .qe-unpaid-all b { font-size: 15px; color: var(--expense); }
+  .qe-unpaid-empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 4px 0; }
+
   /* Суммы прихода — каждая своей строкой, складываются внизу */
   .qe-sum-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
   .qe-sum-row .qe-input-big { flex: 1; min-width: 0; }
@@ -1340,7 +1362,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v122</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v123</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1519,6 +1541,11 @@
     <div class="qe-field">
       <label>Пара</label>
       <div class="qe-pairs" id="qe-pairs"></div>
+    </div>
+    <!-- Невыданные приходы выбранной пары: нажал на день — сумма подставилась -->
+    <div class="qe-field" id="qe-unpaid-field" style="display:none">
+      <label id="qe-unpaid-label">Ещё не выдано — нажми день, чтобы подставить сумму</label>
+      <div id="qe-unpaid"></div>
     </div>
     <div class="qe-field">
       <label id="qe-amount-label">Суммы — каждая своей строкой</label>
@@ -5428,8 +5455,87 @@ function qeSetType(type) {
     g('qe-pctcur').value = g('in-pctcur').value;
   }
   qeRenderPairs();
+  qeRenderUnpaid();
   qeRenderSumRows();
   qeSyncSums();
+}
+
+/* ── НЕВЫДАННЫЕ ПРИХОДЫ ПАРЫ (v123) ─────────────────────────────────────────
+   Выбрал пару в «Получено на руки» — видишь её приходы, которые ещё не отдал,
+   по дням. Нажал на день — сумма подставилась в поле, править её можно.
+
+   Ничего не считает заново: берёт выданность из `pairPaidCoverage` и сумму
+   после 1-го % (`r100(r.total)`) — те же данные, на которых стоит «Раскрыть
+   базу». Порядок 'fifo', как там же: выдачи гасят старые приходы первыми,
+   поэтому невыданными остаются свежие. Это показ, не расчёт. */
+function pairUnpaidRows(pair, dayStr) {
+  const p = (pair || '').trim();
+  const rows = [];
+  if (!p) return rows;
+  const cover = pairPaidCoverage(dayStr, 'fifo');
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (!isWeekday(d)) continue;            // в базе участвуют только будни
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() !== p) return;
+      const frac = cover[p + '#' + d + '#' + idx] || 0;
+      const unpaidPart = 1 - frac;
+      if (unpaidPart <= 0.0005) return;     // выдан целиком
+      const after1 = (r.pct !== null && r.pct !== undefined && r.pct > 0
+                      && r.total !== null && r.total !== undefined)
+        ? r100(r.total) : (r.total || 0);
+      const left = (frac <= 0.0005) ? after1 : r100(after1 * unpaidPart);
+      if (left <= 0) return;
+      rows.push({ date: d, left: left, full: after1, partial: frac > 0.0005 });
+    });
+  }
+  return rows;
+}
+
+let qeUnpaid = [];      // список под кнопками — что сейчас показано
+
+/** Показать невыданные приходы выбранной пары. Только для выдачи. */
+function qeRenderUnpaid() {
+  const field = document.getElementById('qe-unpaid-field');
+  const box = document.getElementById('qe-unpaid');
+  if (!field || !box) return;
+  if (qeType !== 'out') { field.style.display = 'none'; qeUnpaid = []; return; }
+  field.style.display = '';
+  const sel = document.getElementById('out-client');
+  const pair = sel ? sel.value : '';
+  qeUnpaid = pairUnpaidRows(pair, currentDate);
+  if (!qeUnpaid.length) {
+    box.innerHTML = '<div class="qe-unpaid-empty">У этой пары невыданных приходов нет.</div>';
+    return;
+  }
+  const LIMIT = 12;
+  const shown = qeUnpaid.slice(-LIMIT).reverse();   // свежие сверху
+  const hidden = qeUnpaid.length - shown.length;
+  const total = qeUnpaid.reduce((s, x) => s + x.left, 0);
+  box.innerHTML = shown.map(r => {
+    const i = qeUnpaid.indexOf(r);
+    const chip = r.partial
+      ? `<span class="chip" title="Выдан частично, остаток ${fmt(r.left)} из ${fmt(r.full)}">часть</span>`
+      : '';
+    return `<button type="button" class="qe-unpaid-row" onclick="qePickUnpaid(${i})">
+        <span class="d">${formatDateShort(r.date)}${chip}</span>
+        <span class="s">${fmt(r.left)}</span>
+      </button>`;
+  }).join('')
+    + (hidden > 0 ? `<div class="qe-unpaid-empty">…и ещё ${hidden} раньше</div>` : '')
+    + `<div class="qe-unpaid-all"><span>Не выдано всего</span><b>${fmt(total)}</b></div>`;
+}
+
+/** Нажали на день — подставили его невыданный остаток в поле суммы. */
+function qePickUnpaid(i) {
+  const r = qeUnpaid[i];
+  if (!r) return;
+  qeSums = [fmtExact(r.left)];
+  qeRenderSumRows();
+  qeSyncSums();
+  showToast('Подставлено ' + fmt(r.left) + ' за ' + formatDateShort(r.date));
 }
 
 /* Суммы прихода строками (v119).
@@ -5554,6 +5660,7 @@ function qePickPair(i) {
   const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
   if (sel) { sel.value = name; _lastClientSel[sel.id] = name; }
   qeRenderPairs();
+  qeRenderUnpaid();       // у другой пары свои невыданные приходы
 }
 
 /** Добавить новую пару — тем же диалогом, что и компактная форма. */
@@ -5563,6 +5670,7 @@ function qeAddPair() {
   const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
   if (sel) { sel.value = added; _lastClientSel[sel.id] = added; }
   qeRenderPairs();
+  qeRenderUnpaid();
 }
 
 /** Перенести набранное в поля компактной формы и обновить предпросмотр. */
