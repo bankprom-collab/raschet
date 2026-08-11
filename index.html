@@ -1340,7 +1340,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v121</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v122</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1387,8 +1387,8 @@
       </div>
       <div id="curator-paid-line" style="display:none;font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
-    <div class="stat-card s-hand" title="Итог сделок минус процент куратора — по выданным на руки приходам, как у куратора. То же число, что «= На руки» под приходами.">
-      <div class="stat-label">НА РУКИ (ВЫДАННОЕ)</div>
+    <div class="stat-card s-hand" title="Итог сделки минус доля куратора — по тем же сделкам, что показывает «Куратор ко мне». Рассчитались с куратором — сделка уходит с обеих плиток.">
+      <div class="stat-label">НА РУКИ</div>
       <div class="stat-value" style="color:var(--accent)" id="s-hand">—</div>
       <div id="s-hand-line" style="font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
@@ -1456,7 +1456,7 @@
         </div>
         <div id="in-preview" style="font-size:11px;color:var(--muted-bright);padding:0 16px 10px;line-height:1.3;min-height:1em">—</div>
         <div id="in-totals" style="border-top:1px solid var(--border);padding:14px 18px;background:var(--surface)">
-          <div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:4px">По выданным на руки сделкам — как у куратора</div>
+          <div style="font-size:10px;color:var(--muted);font-style:italic;margin-bottom:4px">По сделкам, не закрытым с куратором</div>
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-family:'Unbounded',sans-serif">Итог сделок</div>
             <div id="deals-total" style="font-family:'Unbounded',sans-serif;font-size:16px;font-weight:700;color:var(--accent3)">0 ₽</div>
@@ -1498,7 +1498,7 @@
 <!-- ── НА РУКИ ЗА НЕДЕЛЮ ── -->
 <div class="modal-overlay" id="hand-modal">
   <div class="modal" style="max-width:720px">
-    <h2 style="color:#00e5b0">🫱 На руки — по выданным сделкам</h2>
+    <h2 style="color:#00e5b0">🫱 На руки — по незакрытым сделкам</h2>
     <div id="hand-modal-body"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('hand-modal')">Закрыть</button>
@@ -3167,47 +3167,54 @@ function dealsWeeklyAccrued(dayStr) {
   return sum;
 }
 
-/* ── «НА РУКИ»: ИТОГ СДЕЛОК МИНУС КУРАТОР ────────────────────────────────────
-   Начисляется ПО ФАКТУ ВЫДАЧИ — ровно как куратору (решение владельца,
-   08.08.2026). Пока приход не выдан клиенту на руки, заработка с него нет.
-   Выдали часть — начислится доля, выдали всё — начислится целиком.
+/* ── «НА РУКИ»: ИТОГ СДЕЛКИ МИНУС КУРАТОР ────────────────────────────────────
+   Плитка — ЗЕРКАЛО плитки «Куратор ко мне» (v122, по разбору с владельцем
+   08.08.2026 на его цифрах: сделка 9 900 − куратору 4 500 = на руки 5 400).
 
-   Границы недели нет, как и у сквозного долга куратору: выданность берётся
-   на текущий день, поэтому приход, выданный на следующей неделе, досчитается
-   задним числом и не потеряется между неделями. Ровно эту дыру чинили у
-   куратора в v113, когда на реальных данных пропало 100 100 ₽.
+   Берём ровно те начисления, что показывает «Куратор ко мне», — незакрытые
+   (`curatorSettlement().open`). По каждому: итог сделки по выданной части
+   минус непогашенный остаток куратора. Рассчитались с куратором — сделка
+   уходит с обеих плиток разом, они всегда описывают одно и то же.
 
-   Куратора берём готовым — `curatorAccruedTotal`, тот же, что и у плитки
-   «Куратор ко мне». Два счёта одной величины развели бы суммы.
+   Так было не всегда: до v122 здесь складывались ВСЕ сделки за всю историю,
+   и плитка показывала 252 800 вместо 5 400 — «всё в кучу». Не возвращать.
+
+   Следствие, о котором владелец знает: приход БЕЗ процента куратора в
+   расчётах с куратором не участвует, поэтому и сюда не попадает. Появятся
+   такие сделки — решать отдельно, молча включать нельзя: снова начнёт копиться.
 
    Единый источник для строки «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» под
    приходами, плитки на дашборде, плитки на Доске и окна с разбором. */
 
-/** Итог сделок за всё время до dayStr — только с выданной на руки части. */
-function dealsAccruedTotal(dayStr) {
-  let sum = 0;
-  const cover = pairPaidCoverage(dayStr);   // доля выданности каждого прихода
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > dayStr) break;
-    if (!isWeekday(d)) continue;            // сб/вс не учитываются
-    const dd = state.days[d];
-    if (!dd || !Array.isArray(dd.in)) continue;
-    dd.in.forEach((r, idx) => {
-      const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
-      const hasP2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
-                     && r.total2 !== null && r.total2 !== undefined);
-      if (!(hasP1 && hasP2)) return;
-      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
-      if (frac > 0) sum += r100((r100(r.total) - r100(r.total2)) * frac);
-    });
-  }
-  return sum;
+/** Итог сделки одной строки прихода по выданной доле frac. */
+function dealOfRow(r, frac) {
+  const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
+  const hasP2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
+                 && r.total2 !== null && r.total2 !== undefined);
+  if (!(hasP1 && hasP2)) return 0;
+  return r100((r100(r.total) - r100(r.total2)) * frac);
+}
+
+/** Незакрытые сделки построчно: { date, idx, pair, amount, frac, deal, curator, hand }. */
+function handOpenRows(dayStr) {
+  const rows = [];
+  curatorSettlement(dayStr).open.forEach(a => {
+    const dd = state.days[a.date];
+    const r = dd && Array.isArray(dd.in) ? dd.in[a.idx] : null;
+    if (!r) return;
+    const deal = dealOfRow(r, a.frac);
+    rows.push({ date: a.date, idx: a.idx, pair: a.pair, amount: a.amount, frac: a.frac,
+                pct: r.pct, pct2: r.pct2, pctCur: r.pctCur,
+                deal: deal, curator: a.rest, hand: deal - a.rest });
+  });
+  return rows;
 }
 
 /** «На руки»: { deals, curator, hand }. Отсюда берут и строка, и обе плитки, и окно. */
 function handTotals(dayStr) {
-  const deals = dealsAccruedTotal(dayStr);
-  const curator = curatorAccruedTotal(dayStr);
+  const rows = handOpenRows(dayStr);
+  const deals = rows.reduce((s, x) => s + x.deal, 0);
+  const curator = rows.reduce((s, x) => s + x.curator, 0);
   return { deals: deals, curator: curator, hand: deals - curator };
 }
 
@@ -4874,7 +4881,7 @@ function renderHandTile() {
   if (!body) return;
   const hw = handTotals(currentDate);
   if (!hw.deals && !hw.curator) {
-    body.innerHTML = 'Выданных сделок пока нет — считать нечего.';
+    body.innerHTML = 'Незакрытых сделок нет — с куратором рассчитались по всем.';
     return;
   }
   body.innerHTML =
@@ -4889,43 +4896,12 @@ function renderHandTile() {
      </div>`;
 }
 
-/* Из чего сложилось «на руки» — построчно, по выданным приходам (v121).
-   Формулы повторяют `dealsAccruedTotal` и `curatorAccruedTotal`: доля выданности
-   frac, итог сделки r100((r100(total) − r100(total2)) × frac), куратору
-   floor100(сумма × %кур × frac). Невыданные приходы сюда не попадают вовсе.
-   Своего расчёта нет — иначе окно разошлось бы с плиткой. */
-function handWeekRows(dayStr) {
-  const rows = [];
-  const cover = pairPaidCoverage(dayStr);
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > dayStr) break;
-    if (!isWeekday(d)) continue;
-    const dd = state.days[d];
-    if (!dd || !Array.isArray(dd.in)) continue;
-    dd.in.forEach((r, idx) => {
-      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
-      if (frac <= 0) return;                  // ещё не выдан — заработка нет
-      const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
-      const hasP2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
-                     && r.total2 !== null && r.total2 !== undefined);
-      const deal = (hasP1 && hasP2) ? r100((r100(r.total) - r100(r.total2)) * frac) : 0;
-      const cur = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
-        ? floor100((r.amount || 0) * r.pctCur / 100 * frac) : 0;
-      if (!deal && !cur) return;              // приход без сделки и без куратора
-      rows.push({ date: d, pair: r.client || '—', amount: r.amount || 0, frac: frac,
-                  pct: r.pct, pct2: r.pct2, pctCur: r.pctCur,
-                  deal: deal, curator: cur, hand: deal - cur });
-    });
-  }
-  return rows;
-}
-
 function openHandModal() {
   const box = document.getElementById('hand-modal-body');
   if (!box) return;
   const hw = handTotals(currentDate);
-  const all = handWeekRows(currentDate);
-  const LIMIT = 40;                       // счёт сквозной: показываем свежие
+  const all = handOpenRows(currentDate);
+  const LIMIT = 40;
   const rows = all.slice(-LIMIT).reverse();
   const hidden = all.length - rows.length;
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
@@ -4938,7 +4914,7 @@ function openHandModal() {
      </div>`;
 
   if (!rows.length) {
-    box.innerHTML = head + '<div style="color:var(--muted);padding:8px 0">Выданных сделок пока нет. Пока приход не выдан клиенту на руки, заработка с него нет — как и у куратора.</div>';
+    box.innerHTML = head + '<div style="color:var(--muted);padding:8px 0">Незакрытых сделок нет — с куратором рассчитались по всем.</div>';
     document.getElementById('hand-modal').classList.add('open');
     return;
   }
@@ -4971,7 +4947,7 @@ function openHandModal() {
   box.innerHTML = head + body + more +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
-     <div class="hm-note">Начисляется по факту выдачи — как куратору. Пока приход не выдан клиенту на руки, заработка с него нет; выдали часть — начислится доля. Границы недели нет, поэтому приход, выданный позже, не теряется. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
+     <div class="hm-note">Здесь сделки, по которым ещё не рассчитались с куратором — ровно те же, что на плитке «Куратор ко мне». По каждой: итог сделки минус доля куратора. Отметите сумму куратора отданной — сделка уйдёт с обеих плиток сразу. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
   document.getElementById('hand-modal').classList.add('open');
 }
 
