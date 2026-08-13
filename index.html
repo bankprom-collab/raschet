@@ -1364,7 +1364,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v127</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v128</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3213,6 +3213,11 @@ function dealsWeeklyAccrued(dayStr) {
    Единый источник для строки «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» под
    приходами, плитки на дашборде, плитки на Доске и окна с разбором. */
 
+/* Начало счёта «На руки» (v128). Всё, что раньше этой даты, — закрытая
+   история: в плитки и в окно не попадает. Владелец 14.08.2026: «зачем ты мне
+   на руки пихаешь все подряд за старые числа, их не должно быть». */
+const HAND_START_DATE = '2026-08-03';
+
 /** Итог сделки одной строки прихода по выданной доле frac. */
 function dealOfRow(r, frac) {
   const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
@@ -3230,6 +3235,7 @@ function handOpenRows(dayStr) {
   const cover = pairPaidCoverage(dayStr);
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
+    if (d < HAND_START_DATE) continue;          // старая история в счёт не идёт
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
@@ -3255,14 +3261,12 @@ function handOpenRows(dayStr) {
 function handExcludedRows(dayStr) {
   const rows = [];
   const cover = pairPaidCoverage(dayStr);
-  const SET = curatorSettlement(dayStr);
-  const inOpen = {}, inClosed = {}, inReset = {};
-  SET.open.forEach(a => { inOpen[a.date + '#' + a.idx] = true; });
-  SET.closed.forEach(a => { inClosed[a.date + '#' + a.idx] = true; });
-  (SET.byReset || []).forEach(a => { inReset[a.date + '#' + a.idx] = true; });
+  const inOpen = {};
+  handOpenRows(dayStr).forEach(x => { inOpen[x.date + '#' + x.idx] = true; });
   const reset = curatorResetDate();
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
+    if (d < HAND_START_DATE) continue;               // старая история — не разбираем
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
@@ -3275,8 +3279,7 @@ function handExcludedRows(dayStr) {
       if (!dealFull && !hasCur) return;               // ни сделки, ни куратора — не о чем
       let why = null;
       if (frac <= 0) why = 'ещё не выдан на руки';
-      else if (inReset[k] || (reset && d <= reset)) why = 'закрыт чертой сброса';
-      else if (inClosed[k]) why = 'с куратором по нему рассчитались';
+      else if (reset && d <= reset) why = 'закрыт чертой сброса';
       else if (!hasCur && !dealFull) why = 'нет второго процента — сделки нет';
       if (!why) return;                               // должен быть в счёте
       rows.push({ date: d, pair: r.client || '—', amount: r.amount || 0,
@@ -5074,7 +5077,7 @@ function openHandModal() {
   box.innerHTML = head + body + more + handExcludedBlockHtml(currentDate) +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
-     <div class="hm-note">Здесь все сделки, выданные на руки, за всё время — без деления на недели. По каждой: итог сделки минус доля куратора; если процента куратора нет, вся сделка идёт на руки. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
+     <div class="hm-note">Здесь все сделки, выданные на руки, начиная с 3 августа 2026 — без деления на недели. Всё, что было раньше, в счёт не входит. По каждой: итог сделки минус доля куратора; если процента куратора нет, вся сделка идёт на руки. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
   document.getElementById('hand-modal').classList.add('open');
 }
 
