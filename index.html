@@ -1364,7 +1364,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v130</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v131</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5163,16 +5163,18 @@ function openCuratorMineModal() {
      В колонке «К куратору» — полное начисление по сделке, а не остаток:
      отданное показываем отдельной пометкой, из списка сделка не исчезает. */
   const SET = curatorSettlement(currentDate);
-  const rows = SET.accr.map(a => ({
+  const rows = SET.open.map(a => ({
     date: a.date, pair: a.pair, amount: a.amount, pctCur: a.pctCur,
     frac: a.frac, curatorSum: a.sum, idx: a.idx,
     partPaid: a.paid > 0 ? a.paid : 0,
-    closed: a.rest <= 0.0001,
-    byReset: !!a.byReset
+    rest: a.rest
   }));
-  const __ctot = curatorMineTotals(currentDate);
-  const accrued = __ctot.accrued;
-  const paid = __ctot.paid;
+  /* Итоги считаем ПО ЭТИМ ЖЕ строкам (v131). Раньше здесь стоял недельный
+     `curatorMineTotals`, и он показывал 133 200 при сумме строк 52 300 —
+     владелец справедливо назвал это мусором. Теперь всё сходится:
+     начислено − отдано = долг, и долг равен плитке «Куратор ко мне». */
+  const accrued = rows.reduce((x, r) => x + r.curatorSum, 0);
+  const paid = rows.reduce((x, r) => x + r.partPaid, 0);
   const remain = accrued - paid;
   const wkStart = weekMondayStr(currentDate);
   const wkEndDt = new Date(wkStart + 'T12:00:00');
@@ -5196,12 +5198,9 @@ function openCuratorMineModal() {
         const trs = rows.map((r, i) => {
           const partial = (r.frac !== undefined && r.frac < 0.999)
             ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.round(r.frac * 100)}%</span>` : '';
-          const partPaid = (r.partPaid && !r.closed)
-            ? ` <span style="color:#ffb74d;font-size:10.5px">· частично закрыто ${fmt(r.partPaid)}</span>` : '';
-          // Сделка остаётся в списке и после расчёта — просто помечена
-          const doneChip = r.byReset
-            ? ` <span style="color:var(--muted);font-size:10.5px">· списано чертой</span>`
-            : (r.closed ? ` <span style="color:var(--accent);font-size:10.5px">· отдано</span>` : '');
+          const partPaid = r.partPaid
+            ? ` <span style="color:#ffb74d;font-size:10.5px">· частично отдано ${fmt(r.partPaid)}</span>` : '';
+          const doneChip = '';
           acc += r.curatorSum;
           const paidBy = payDates.reduce((sum, d) => d <= r.date ? sum + payByDate[d] : sum, 0);
           const due = acc - paidBy;
@@ -5211,7 +5210,7 @@ function openCuratorMineModal() {
           const payChip = (lastOfDay && paidHere)
             ? `<div style="color:var(--muted);font-size:10px;font-weight:400">отдано ${fmt(paidHere)}</div>` : '';
           return `
-          <tr${r.closed ? ' style="opacity:.55"' : ''}>
+          <tr>
             <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
             <td>${escapeHtml(r.pair)}${partial}${partPaid}${doneChip}</td>
             <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
@@ -5235,20 +5234,16 @@ function openCuratorMineModal() {
           <tbody>${trs}</tbody>
           <tfoot>
             <tr class="cm-total-row">
-              <td colspan="5" style="text-align:right;font-weight:700">ИТОГО начислено:</td>
+              <td colspan="5" style="text-align:right;font-weight:700">Начислено по этим сделкам:</td>
               <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(accrued)}</td>
             </tr>
-            <tr class="cm-paid-row">
-              <td colspan="5" style="text-align:right;color:var(--muted)">− уже отдано в этой неделе:</td>
+            ${paid > 0 ? `<tr class="cm-paid-row">
+              <td colspan="5" style="text-align:right;color:var(--muted)">− отдано по ним:</td>
               <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
-            </tr>
+            </tr>` : ''}
             <tr class="cm-grand-row">
-              <td colspan="5" style="text-align:right;font-weight:700;color:var(--muted-bright);font-size:13px">К отдаче за эту неделю:</td>
-              <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:var(--muted-bright);font-size:14px">${fmt(remain)}</td>
-            </tr>
-            <tr class="cm-grand-row">
-              <td colspan="5" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px" title="Начислено за всё время минус отдано за всё время">ДОЛГ КУРАТОРУ ВСЕГО:</td>
-              <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(curatorDebt(currentDate))}</td>
+              <td colspan="5" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px" title="Столько должны куратору сейчас">ДОЛГ КУРАТОРУ:</td>
+              <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(remain)}</td>
             </tr>
           </tfoot>
         </table>`;
@@ -5336,11 +5331,23 @@ function openCuratorMineModal() {
     </div>
   `;
 
+  /* Черта сброса убирает сделки из счёта — без объяснения это выглядит как
+     пропажа. Показываем прямо под шапкой: сколько списано и чем вернуть. */
+  const resetSum = (SET.byReset || []).reduce((x, a) => x + (a.resetAmount || a.sum), 0);
+  const resetNote = (SET.reset && resetSum > 0) ? `
+    <div style="margin:10px 0 4px;padding:10px 12px;border-radius:10px;background:rgba(255,183,77,.10);border:1px solid rgba(255,183,77,.35);font-size:12px;line-height:1.5">
+      <b style="color:#ffb74d">Черта от ${formatDateShort(SET.reset)}</b> — сделки по эту дату списаны и в счёт не входят:
+      <b style="font-family:var(--font-num);color:#ffb74d">${fmt(resetSum)}</b> (${SET.byReset.length} шт., они в архиве ниже).
+      <button class="btn btn-ghost" onclick="askCuratorResetUndo()"
+        style="border-color:#ffb74d;color:#ffb74d;font-size:11.5px;padding:3px 10px;margin-left:6px">Убрать черту</button>
+    </div>` : '';
+
   box.innerHTML = `
     <div class="cm-head">
       <div class="cm-period">Счёт с ${formatDateShort(HAND_START_DATE)} · по факту выдачи, без деления на недели</div>
       <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
     </div>
+    ${resetNote}
     ${table}
     ${archBlock}
     ${payBlock}
