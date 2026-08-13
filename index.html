@@ -1362,7 +1362,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v123</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v124</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3206,9 +3206,11 @@ function dealsWeeklyAccrued(dayStr) {
    Так было не всегда: до v122 здесь складывались ВСЕ сделки за всю историю,
    и плитка показывала 252 800 вместо 5 400 — «всё в кучу». Не возвращать.
 
-   Следствие, о котором владелец знает: приход БЕЗ процента куратора в
-   расчётах с куратором не участвует, поэтому и сюда не попадает. Появятся
-   такие сделки — решать отдельно, молча включать нельзя: снова начнёт копиться.
+   Сделка БЕЗ процента куратора (v124): к куратору не относится совсем, а на
+   руки идёт ЦЕЛИКОМ — так решил владелец 13.08.2026. Такую сделку закрывать
+   нечем (расчётов с куратором по ней нет), поэтому её закрывает общая черта
+   сброса `curatorResetAt` — то же, что закрывает старые долги куратору.
+   Без черты она висит, пока владелец не проведёт её сам.
 
    Единый источник для строки «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» под
    приходами, плитки на дашборде, плитки на Доске и окна с разбором. */
@@ -3225,15 +3227,44 @@ function dealOfRow(r, frac) {
 /** Незакрытые сделки построчно: { date, idx, pair, amount, frac, deal, curator, hand }. */
 function handOpenRows(dayStr) {
   const rows = [];
+  const seen = {};                       // дата#idx, уже учтённые через куратора
+
+  // 1. Сделки с куратором — те же начисления, что показывает «Куратор ко мне»
   curatorSettlement(dayStr).open.forEach(a => {
     const dd = state.days[a.date];
     const r = dd && Array.isArray(dd.in) ? dd.in[a.idx] : null;
     if (!r) return;
     const deal = dealOfRow(r, a.frac);
+    seen[a.date + '#' + a.idx] = true;
     rows.push({ date: a.date, idx: a.idx, pair: a.pair, amount: a.amount, frac: a.frac,
                 pct: r.pct, pct2: r.pct2, pctCur: r.pctCur,
                 deal: deal, curator: a.rest, hand: deal - a.rest });
   });
+
+  // 2. Сделки БЕЗ процента куратора — к куратору не относятся, на руки идут
+  //    целиком. Закрывает их только черта сброса.
+  const reset = curatorResetDate();
+  const cover = pairPaidCoverage(dayStr);
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (reset && d <= reset) continue;             // закрыто чертой
+    if (!isWeekday(d)) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) return;  // уже выше
+      if (seen[d + '#' + idx]) return;
+      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+      if (frac <= 0) return;                        // ещё не выдан — заработка нет
+      const deal = dealOfRow(r, frac);
+      if (deal <= 0) return;                        // без двух процентов сделки нет
+      rows.push({ date: d, idx: idx, pair: r.client || '—', amount: r.amount || 0, frac: frac,
+                  pct: r.pct, pct2: r.pct2, pctCur: null,
+                  deal: deal, curator: 0, hand: deal });
+    });
+  }
+
+  rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.idx - b.idx));
   return rows;
 }
 
@@ -4950,7 +4981,7 @@ function openHandModal() {
     const pcts = [r.pct ? pf(r.pct) + '%' : '', r.pct2 ? pf(r.pct2) + '%' : ''].filter(Boolean).join(' / ') || '—';
     const curLine = r.curator
       ? `куратору ${pf(r.pctCur)}%: <span style="color:#ffb74d">${fmt(r.curator)}</span>`
-      : '<span style="color:var(--muted)">куратора нет</span>';
+      : '<span style="color:var(--muted)">без куратора — вся сделка ваша</span>';
     // Приход, выданный не целиком, даёт свою долю — показываем, какую именно
     const part = (r.frac < 0.9995)
       ? ` <span style="color:#ff8a4a">выдано ${Math.round(r.frac * 100)}%</span>`
