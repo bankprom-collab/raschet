@@ -1039,6 +1039,8 @@
     font-family: var(--font-num); text-align: left;
   }
   .qe-unpaid-row:hover { border-color: var(--expense); }
+  .qe-unpaid-row.on { border-color: var(--accent); background: rgba(0,229,176,.10); }
+  .qe-unpaid-row.on .d { color: var(--accent); font-weight: 700; }
   .qe-unpaid-row .d { font-size: 13px; color: var(--muted-bright); }
   .qe-unpaid-row .s { font-size: 15px; font-weight: 700; color: var(--expense); white-space: nowrap; }
   .qe-unpaid-row .chip {
@@ -1362,7 +1364,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v124</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v126</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3268,6 +3270,44 @@ function handOpenRows(dayStr) {
   return rows;
 }
 
+/* Почему сделки нет в счёте «на руки» (v125) — диагностика, не расчёт.
+   Перечисляет приходы, которые в список не попали, и называет причину:
+   не выдан / рассчитались с куратором / закрыт чертой / нет второго процента.
+   Нужна, когда владелец ждёт сумму на плитке, а её там нет. */
+function handExcludedRows(dayStr) {
+  const rows = [];
+  const cover = pairPaidCoverage(dayStr);
+  const SET = curatorSettlement(dayStr);
+  const inOpen = {}, inClosed = {}, inReset = {};
+  SET.open.forEach(a => { inOpen[a.date + '#' + a.idx] = true; });
+  SET.closed.forEach(a => { inClosed[a.date + '#' + a.idx] = true; });
+  (SET.byReset || []).forEach(a => { inReset[a.date + '#' + a.idx] = true; });
+  const reset = curatorResetDate();
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (!isWeekday(d)) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      const k = d + '#' + idx;
+      if (inOpen[k]) return;                          // уже в счёте
+      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+      const dealFull = dealOfRow(r, 1);
+      const hasCur = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0);
+      if (!dealFull && !hasCur) return;               // ни сделки, ни куратора — не о чем
+      let why = null;
+      if (frac <= 0) why = 'ещё не выдан на руки';
+      else if (inReset[k] || (reset && d <= reset)) why = 'закрыт чертой сброса';
+      else if (inClosed[k]) why = 'с куратором по нему рассчитались';
+      else if (!hasCur && !dealFull) why = 'нет второго процента — сделки нет';
+      if (!why) return;                               // должен быть в счёте
+      rows.push({ date: d, pair: r.client || '—', amount: r.amount || 0,
+                  frac: frac, deal: dealOfRow(r, frac || 1), why: why });
+    });
+  }
+  return rows;
+}
+
 /** «На руки»: { deals, curator, hand }. Отсюда берут и строка, и обе плитки, и окно. */
 function handTotals(dayStr) {
   const rows = handOpenRows(dayStr);
@@ -4818,23 +4858,45 @@ function pairPaidCoverage(dayStr, order) {
       dd.in.forEach((r, idx) => {
         const p = (r.client || '').trim();
         if (!p) return;
-        (byPair[p] || (byPair[p] = { ins: [], out: 0 })).ins.push({ date: d, idx, after1: calcInRowFinal(r) });
+        (byPair[p] || (byPair[p] = { ins: [], out: 0, aimed: {} })).ins.push({ date: d, idx, after1: calcInRowFinal(r) });
       });
     }
     if (Array.isArray(dd.out)) {
       dd.out.forEach(o => {
         const p = (o.client || '').trim();
         if (!p) return;
-        (byPair[p] || (byPair[p] = { ins: [], out: 0 })).out += (o.amount || 0);
+        const bp = (byPair[p] || (byPair[p] = { ins: [], out: 0, aimed: {} }));
+        // Выдача может быть привязана к конкретному приходу (v126, поле forIn:
+        // «дата#номер»). Тогда она гасит ИМЕННО его, а не самый старый долг.
+        // Без привязки всё как раньше — общий пул.
+        if (o.forIn) bp.aimed[o.forIn] = (bp.aimed[o.forIn] || 0) + (o.amount || 0);
+        else bp.out += (o.amount || 0);
       });
     }
   }
   const cover = {};
   const dOut = state.debtOutDates || {};
   for (const p in byPair) {
-    let pool = byPair[p].out;             // сколько всего выдано этой паре
-    // порядок гашения приходов выдачами
+    const aimed = byPair[p].aimed || {};
+    let pool = byPair[p].out;             // выдачи без привязки
     const list = (order === 'lifo') ? byPair[p].ins.slice().reverse() : byPair[p].ins;
+
+    // Проход 1: адресные выдачи гасят свои приходы. Что осталось сверх суммы
+    // прихода (или указывает на несуществующий) — уходит в общий пул.
+    const paid = {};
+    list.forEach(inr => {
+      const key = inr.date + '#' + inr.idx;
+      const a = inr.after1 || 0;
+      const aim = aimed[key] || 0;
+      if (aim <= 0) return;
+      const take = Math.min(a, aim);
+      paid[key] = take;
+      if (aim > take) pool += (aim - take);
+      delete aimed[key];
+    });
+    for (const k in aimed) pool += aimed[k];   // привязка «в никуда» — в общий пул
+
+    // Проход 2: остальное — по порядку, как и раньше.
     list.forEach(inr => {
       // «Число отдачи» недели этого прихода: приход ПО дату отдачи включительно
       // считается ОТДАННЫМ (frac = 1), даже если реальной выдачи по нему нет.
@@ -4846,14 +4908,15 @@ function pairPaidCoverage(dayStr, order) {
         cover[p + '#' + inr.date + '#' + inr.idx] = 1;
         return;
       }
+      const key = inr.date + '#' + inr.idx;
       const a = inr.after1 || 0;
-      let frac = 0;
-      if (a > 0 && pool > 0) {
-        const covered = Math.min(pool, a);
-        frac = covered / a;
-        pool -= covered;
+      let covered = paid[key] || 0;
+      if (a > 0 && covered < a && pool > 0) {
+        const take = Math.min(pool, a - covered);
+        covered += take;
+        pool -= take;
       }
-      cover[p + '#' + inr.date + '#' + inr.idx] = frac;
+      cover[p + '#' + inr.date + '#' + inr.idx] = (a > 0) ? Math.min(1, covered / a) : 0;
     });
   }
   return cover;
@@ -4954,6 +5017,32 @@ function renderHandTile() {
      </div>`;
 }
 
+/** Блок «почему сделки нет в списке» — раскрывается по нажатию. */
+function handExcludedBlockHtml(dayStr) {
+  const ex = handExcludedRows(dayStr);
+  if (!ex.length) return '';
+  const shown = ex.slice(-25).reverse();
+  const byWhy = {};
+  ex.forEach(r => { byWhy[r.why] = (byWhy[r.why] || 0) + 1; });
+  const summary = Object.entries(byWhy).map(([w, n]) => `${w} — ${n}`).join(' · ');
+  return `<details class="wds-break-details" style="margin-top:14px">
+    <summary>🔍 Почему сделки нет в списке (${ex.length})</summary>
+    <div style="padding:8px 2px">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.45">${escapeHtml(summary)}</div>
+      ${shown.map(r => `
+        <div style="display:flex;justify-content:space-between;gap:10px;line-height:1.6;font-family:var(--font-num);font-size:11.5px;padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.05)">
+          <span style="color:var(--muted-bright)">${formatDateShort(r.date)} · ${escapeHtml(r.pair)} · ${fmt(r.amount)}</span>
+          <span style="text-align:right;white-space:nowrap">
+            <span style="color:var(--accent3)">${fmt(r.deal)}</span><br>
+            <span style="color:#ff8a4a;font-size:10.5px">${escapeHtml(r.why)}${r.frac > 0 && r.frac < 0.9995 ? ' · выдано ' + Math.round(r.frac * 100) + '%' : ''}</span>
+          </span>
+        </div>`).join('')}
+      ${ex.length > shown.length ? `<div style="color:var(--muted);font-size:11px;padding-top:6px">…и ещё ${ex.length - shown.length} раньше</div>` : ''}
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.45">Выдачи гасят приходы от старых к новым. Если свежий приход числится невыданным, значит деньги зачлись в более ранний долг этой пары.</div>
+    </div>
+  </details>`;
+}
+
 function openHandModal() {
   const box = document.getElementById('hand-modal-body');
   if (!box) return;
@@ -4972,7 +5061,9 @@ function openHandModal() {
      </div>`;
 
   if (!rows.length) {
-    box.innerHTML = head + '<div style="color:var(--muted);padding:8px 0">Незакрытых сделок нет — с куратором рассчитались по всем.</div>';
+    box.innerHTML = head
+      + '<div style="color:var(--muted);padding:8px 0">Незакрытых сделок нет — с куратором рассчитались по всем.</div>'
+      + handExcludedBlockHtml(currentDate);
     document.getElementById('hand-modal').classList.add('open');
     return;
   }
@@ -5002,7 +5093,7 @@ function openHandModal() {
     ? `<div style="color:var(--muted);font-size:11px;padding:8px 0 0">Показаны последние ${rows.length}. Раньше было ещё ${hidden} — они уже вошли в итог выше.</div>`
     : '';
 
-  box.innerHTML = head + body + more +
+  box.innerHTML = head + body + more + handExcludedBlockHtml(currentDate) +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
      <div class="hm-note">Здесь сделки, по которым ещё не рассчитались с куратором — ровно те же, что на плитке «Куратор ко мне». По каждой: итог сделки минус доля куратора. Отметите сумму куратора отданной — сделка уйдёт с обеих плиток сразу. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
@@ -5519,20 +5610,21 @@ function pairUnpaidRows(pair, dayStr) {
         ? r100(r.total) : (r.total || 0);
       const left = (frac <= 0.0005) ? after1 : r100(after1 * unpaidPart);
       if (left <= 0) return;
-      rows.push({ date: d, left: left, full: after1, partial: frac > 0.0005 });
+      rows.push({ date: d, idx: idx, left: left, full: after1, partial: frac > 0.0005 });
     });
   }
   return rows;
 }
 
 let qeUnpaid = [];      // список под кнопками — что сейчас показано
+let qeAimedIn = null;   // «дата#номер» прихода, за который идёт эта выдача
 
 /** Показать невыданные приходы выбранной пары. Только для выдачи. */
 function qeRenderUnpaid() {
   const field = document.getElementById('qe-unpaid-field');
   const box = document.getElementById('qe-unpaid');
   if (!field || !box) return;
-  if (qeType !== 'out') { field.style.display = 'none'; qeUnpaid = []; return; }
+  if (qeType !== 'out') { field.style.display = 'none'; qeUnpaid = []; qeAimedIn = null; return; }
   field.style.display = '';
   const sel = document.getElementById('out-client');
   const pair = sel ? sel.value : '';
@@ -5550,23 +5642,34 @@ function qeRenderUnpaid() {
     const chip = r.partial
       ? `<span class="chip" title="Выдан частично, остаток ${fmt(r.left)} из ${fmt(r.full)}">часть</span>`
       : '';
-    return `<button type="button" class="qe-unpaid-row" onclick="qePickUnpaid(${i})">
-        <span class="d">${formatDateShort(r.date)}${chip}</span>
+    const on = (qeAimedIn === r.date + '#' + r.idx);
+    return `<button type="button" class="qe-unpaid-row${on ? ' on' : ''}" onclick="qePickUnpaid(${i})">
+        <span class="d">${on ? '✓ ' : ''}${formatDateShort(r.date)}${chip}</span>
         <span class="s">${fmt(r.left)}</span>
       </button>`;
   }).join('')
     + (hidden > 0 ? `<div class="qe-unpaid-empty">…и ещё ${hidden} раньше</div>` : '')
-    + `<div class="qe-unpaid-all"><span>Не выдано всего</span><b>${fmt(total)}</b></div>`;
+    + `<div class="qe-unpaid-all"><span>Не выдано всего</span><b>${fmt(total)}</b></div>`
+    + (qeAimedIn
+        ? '<div style="font-size:10.5px;color:var(--accent);margin-top:6px;line-height:1.4">Выдача зачтётся именно за отмеченный день. Нажмите на него ещё раз, чтобы снять привязку.</div>'
+        : '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;line-height:1.4">Без отметки деньги пойдут на самый ранний невыданный приход.</div>');
 }
 
 /** Нажали на день — подставили его невыданный остаток в поле суммы. */
 function qePickUnpaid(i) {
   const r = qeUnpaid[i];
   if (!r) return;
+  // Нажатие не просто подставляет сумму — оно ПРИВЯЗЫВАЕТ выдачу к этому
+  // приходу (v126). Иначе деньги уходят на самый старый долг пары, и свежий
+  // приход остаётся «невыданным»: ни куратора по нему, ни доли на руки.
+  qeAimedIn = (qeAimedIn === r.date + '#' + r.idx) ? null : (r.date + '#' + r.idx);
   qeSums = [fmtExact(r.left)];
   qeRenderSumRows();
+  qeRenderUnpaid();
   qeSyncSums();
-  showToast('Подставлено ' + fmt(r.left) + ' за ' + formatDateShort(r.date));
+  showToast(qeAimedIn
+    ? 'Выдача зачтётся за ' + formatDateShort(r.date) + ' — ' + fmt(r.left)
+    : 'Привязка снята — деньги пойдут на самый ранний долг');
 }
 
 /* Суммы прихода строками (v119).
@@ -5690,6 +5793,7 @@ function qePickPair(i) {
   if (!name) return;
   const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
   if (sel) { sel.value = name; _lastClientSel[sel.id] = name; }
+  qeAimedIn = null;       // привязка была к приходу прошлой пары
   qeRenderPairs();
   qeRenderUnpaid();       // у другой пары свои невыданные приходы
 }
@@ -5731,6 +5835,19 @@ function qeSubmit() {
   // addRow сам ругается и ничего не пишет, если поля не заполнены —
   // тогда модалку не закрываем, чтобы было что поправить.
   if ((getDay(currentDate)[qeType] || []).length <= before) return;
+  // Выдача с привязкой: дописываем её в только что созданную запись, чтобы
+  // деньги зачлись за выбранный приход, а не за самый ранний долг (v126).
+  if (qeType === 'out' && qeAimedIn) {
+    const outs = getDay(currentDate).out;
+    const last = outs[outs.length - 1];
+    if (last) {
+      last.forIn = qeAimedIn;
+      recalcCarryoversAfter(currentDate);
+      saveState();
+      render();
+    }
+    qeAimedIn = null;
+  }
   const g = (id) => document.getElementById(id);
   qeSums = [''];
   qeRenderSumRows();
