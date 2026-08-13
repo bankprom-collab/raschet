@@ -1364,7 +1364,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v129</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v130</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5157,13 +5157,18 @@ function collectCuratorPayments(dayStr) {
 function openCuratorMineModal() {
   const box = document.getElementById('curator-mine-body');
   if (!box) return;
-  // В таблице — только то, что ещё не отдано. Закрытое уходит в архив ниже:
-  // владельцу нужна картина «сколько должен сегодня», а не вся история подряд.
+  /* В таблице — ВСЕ выданные сделки с процентом куратора, ровно те же строки,
+     что в окне «На руки» (v130, требование владельца: «мне нужно, чтобы
+     у куратора то же самое отражалось, и те же расчёты, как у меня»).
+     В колонке «К куратору» — полное начисление по сделке, а не остаток:
+     отданное показываем отдельной пометкой, из списка сделка не исчезает. */
   const SET = curatorSettlement(currentDate);
-  const rows = SET.open.map(a => ({
+  const rows = SET.accr.map(a => ({
     date: a.date, pair: a.pair, amount: a.amount, pctCur: a.pctCur,
-    frac: a.frac, curatorSum: a.rest, idx: a.idx,
-    partPaid: a.paid > 0 ? a.paid : 0
+    frac: a.frac, curatorSum: a.sum, idx: a.idx,
+    partPaid: a.paid > 0 ? a.paid : 0,
+    closed: a.rest <= 0.0001,
+    byReset: !!a.byReset
   }));
   const __ctot = curatorMineTotals(currentDate);
   const accrued = __ctot.accrued;
@@ -5191,8 +5196,12 @@ function openCuratorMineModal() {
         const trs = rows.map((r, i) => {
           const partial = (r.frac !== undefined && r.frac < 0.999)
             ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.round(r.frac * 100)}%</span>` : '';
-          const partPaid = r.partPaid
+          const partPaid = (r.partPaid && !r.closed)
             ? ` <span style="color:#ffb74d;font-size:10.5px">· частично закрыто ${fmt(r.partPaid)}</span>` : '';
+          // Сделка остаётся в списке и после расчёта — просто помечена
+          const doneChip = r.byReset
+            ? ` <span style="color:var(--muted);font-size:10.5px">· списано чертой</span>`
+            : (r.closed ? ` <span style="color:var(--accent);font-size:10.5px">· отдано</span>` : '');
           acc += r.curatorSum;
           const paidBy = payDates.reduce((sum, d) => d <= r.date ? sum + payByDate[d] : sum, 0);
           const due = acc - paidBy;
@@ -5202,9 +5211,9 @@ function openCuratorMineModal() {
           const payChip = (lastOfDay && paidHere)
             ? `<div style="color:var(--muted);font-size:10px;font-weight:400">отдано ${fmt(paidHere)}</div>` : '';
           return `
-          <tr>
+          <tr${r.closed ? ' style="opacity:.55"' : ''}>
             <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
-            <td>${escapeHtml(r.pair)}${partial}${partPaid}</td>
+            <td>${escapeHtml(r.pair)}${partial}${partPaid}${doneChip}</td>
             <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
             <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
             <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
