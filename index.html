@@ -1364,7 +1364,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v128</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v129</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2207,6 +2207,13 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── STATE ──────────────────────────────────────────────────────────────────
+/* Начало счёта для куратора и «На руки» (v128–v129). Всё, что раньше этой
+   даты, — закрытая история: и приходы, и выдачи, и выплаты куратору. Владелец
+   14.08.2026: «зачем ты мне на руки пихаешь все подряд за старые числа».
+   Объявлена ДО loadState() — как MIGRATION_VERSION, чтобы не попасть в
+   мёртвую зону. Двигать только по прямой просьбе владельца. */
+const HAND_START_DATE = '2026-08-03';
+
 const STORAGE_KEY = 'ledger_v1';
 
 // ── РЕЗЕРВНЫЕ КОПИИ: константы (объявлены до loadState — важно) ──
@@ -3043,9 +3050,10 @@ function curatorRunningBalance(dayStr) {
 /** Начислено куратору за всё время до dayStr — по выданности на этот день. */
 function curatorAccruedTotal(dayStr) {
   let sum = 0;
-  const cover = pairPaidCoverage(dayStr);
+  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
+    if (d < HAND_START_DATE) continue;
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
@@ -3063,6 +3071,7 @@ function curatorPaidAll(dayStr) {
   let sum = 0;
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
+    if (d < HAND_START_DATE) continue;
     const dd = state.days[d];
     if (dd && typeof dd.curatorPaid === 'number') sum += dd.curatorPaid;
   }
@@ -3083,11 +3092,13 @@ function curatorResetDate() {
 }
 
 function curatorSettlement(dayStr) {
-  const cover = pairPaidCoverage(dayStr);
+  // Считаем с HAND_START_DATE — той же даты, что и «На руки» (v129).
+  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
+    if (d < HAND_START_DATE) continue;
     const dd = state.days[d];
     if (!dd) continue;
     if (typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
@@ -3213,11 +3224,6 @@ function dealsWeeklyAccrued(dayStr) {
    Единый источник для строки «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» под
    приходами, плитки на дашборде, плитки на Доске и окна с разбором. */
 
-/* Начало счёта «На руки» (v128). Всё, что раньше этой даты, — закрытая
-   история: в плитки и в окно не попадает. Владелец 14.08.2026: «зачем ты мне
-   на руки пихаешь все подряд за старые числа, их не должно быть». */
-const HAND_START_DATE = '2026-08-03';
-
 /** Итог сделки одной строки прихода по выданной доле frac. */
 function dealOfRow(r, frac) {
   const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
@@ -3232,7 +3238,7 @@ function dealOfRow(r, frac) {
     здесь, и складывается со всеми остальными выданными. */
 function handOpenRows(dayStr) {
   const rows = [];
-  const cover = pairPaidCoverage(dayStr);
+  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (d < HAND_START_DATE) continue;          // старая история в счёт не идёт
@@ -4828,11 +4834,15 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
 //     раскладывался на реальные целые приходы (напр. два прихода от 8 июл).
 // Возвращает карту `пара#дата#idx → доля выдано 0..1`. Итоговый остаток пары
 // от порядка не зависит — меняется лишь то, какие приходы считаются невыданными.
-function pairPaidCoverage(dayStr, order) {
+function pairPaidCoverage(dayStr, order, startDate) {
   const allDays = Object.keys(state.days).sort();
   const byPair = {};
   for (const d of allDays) {
     if (d > dayStr) break;
+    // startDate — считать период с нуля: и приходы, и выдачи только с этой даты.
+    // Нужно куратору и «На руки» (v129), чтобы свежая выдача гасила свежий
+    // приход, а не проваливалась в старый долг пары.
+    if (startDate && d < startDate) continue;
     const dd = state.days[d];
     if (!dd) continue;
     if (isWeekday(d) && Array.isArray(dd.in)) {
@@ -5166,7 +5176,7 @@ function openCuratorMineModal() {
 
   const table = !rows.length
     ? `<div style="color:var(--muted);padding:8px 0">
-        На этой неделе (${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)}) нет выданных на руки приходов с процентом куратора.
+        С ${formatDateShort(HAND_START_DATE)} нет выданных на руки приходов с процентом куратора.
       </div>`
     : (() => {
         // Долг после каждой операции: всё начисленное по эту строку включительно
@@ -5319,7 +5329,7 @@ function openCuratorMineModal() {
 
   box.innerHTML = `
     <div class="cm-head">
-      <div class="cm-period">Неделя ${formatDateShort(wkStart)} – ${formatDateShort(wkEnd)} · пн–пт</div>
+      <div class="cm-period">Счёт с ${formatDateShort(HAND_START_DATE)} · по факту выдачи, без деления на недели</div>
       <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
     </div>
     ${table}
