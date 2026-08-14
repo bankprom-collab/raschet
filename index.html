@@ -301,8 +301,9 @@
   }
   .wds-head {
     display: flex; justify-content: space-between; align-items: center;
-    font-size: 11px; font-weight: 700; color: #ff8a4a;
-    text-transform: uppercase; letter-spacing: .04em;
+    font-family: var(--font-ui);
+    font-size: 12.5px; font-weight: 600; color: #ff8a4a;
+    text-transform: none; letter-spacing: 0;
     margin-bottom: 8px; gap: 8px; flex-wrap: wrap;
   }
   .wds-total { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: 0; }
@@ -931,6 +932,15 @@
     box-shadow: inset 3px 0 0 var(--accent);
   }
   @media(max-width: 600px) {
+    /* ── Блок задолженности под телефон (v138) ──────────────────────────────
+       Строка «база · −13% · −15% · разница» не помещалась в ширину и уезжала
+       вправо вместе с полоской выданности. Разворачиваем по вертикали. */
+    .wds-val { white-space: normal; line-height: 1.7; font-size: 11.5px; }
+    .wds-row-main { flex-direction: column; align-items: stretch; gap: 4px; }
+    .wds-head { font-size: 10.5px; }
+    .wds-total { line-height: 1.6; }
+    .wds-foot { line-height: 1.5; }
+
     /* ── Таблицы дня → карточки (v136) ──────────────────────────────────────
        На узком экране колонки не помещались, и «Сумма» уезжала за край.
        Строка становится карточкой: пара сверху, сумма крупно, кнопки справа. */
@@ -993,6 +1003,17 @@
   .form-group { margin-bottom: 14px; }
   .form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; letter-spacing: .8px; text-transform: uppercase; }
   .modal-footer { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+
+  /* ── ЧИПЫ СОСТОЯНИЙ (v138): одна форма на все пометки ── */
+  .chip {
+    display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 6px;
+    font-family: var(--font-ui); font-size: 10px; font-weight: 500;
+    white-space: nowrap; line-height: 1.5;
+    background: rgba(255,255,255,.06); color: var(--muted);
+  }
+  .chip-warn { background: rgba(255,138,74,.14); color: #ff8a4a; }
+  .chip-ok   { background: rgba(0,229,176,.13); color: var(--accent); }
+  .chip-info { background: rgba(123,140,255,.14); color: var(--accent3); }
 
   /* ── ЛИПКАЯ ПАНЕЛЬ ВВОДА (v136) ── */
   #quick-bar { display: none; }
@@ -1414,7 +1435,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v137</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v138</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3658,9 +3679,8 @@ function dueChipHtml(dueDate, dayStr) {
   const color = late ? 'var(--expense)' : (now ? '#ffb74d' : 'var(--accent3)');
   const label = late ? 'просрочен срок' : (now ? 'отдать сегодня' : 'отдать до');
   const when = (late || now) ? '' : ' ' + formatDateShort(d);
-  return `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;`
-    + `font-size:10px;font-family:var(--font-ui);white-space:nowrap;`
-    + `background:rgba(255,255,255,.05);color:${color}" title="Когда надо отдать эти деньги">`
+  const cls = late ? 'chip chip-warn' : (now ? 'chip' : 'chip chip-info');
+  return `<span class="${cls}" style="${late || now ? 'color:' + color : ''}" title="Когда надо отдать эти деньги">`
     + `📅 ${label}${when}${(late || now) ? ' · ' + formatDateShort(d) : ''}</span>`;
 }
 
@@ -4158,6 +4178,43 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
   </div>`;
 }
 
+/* Доля выданного по паре (v138) — для полоски в блоке задолженности.
+   Ничего не пересчитывает: берёт `pairPaidCoverage` и взвешивает по суммам
+   после 1-го %. Чисто показ. */
+function pairPaidShare(pair, dayStr) {
+  const p = (pair || '').trim();
+  if (!p) return 0;
+  const day = dayStr || currentDate;
+  const cover = pairPaidCoverage(day, 'fifo');
+  let all = 0, paid = 0;
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > day) break;
+    if (!isWeekday(d)) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() !== p) return;
+      const a1 = calcInRowFinal(r);
+      if (!(a1 > 0)) return;
+      all += a1;
+      paid += a1 * (cover[p + '#' + d + '#' + idx] || 0);
+    });
+  }
+  return all > 0 ? Math.max(0, Math.min(1, paid / all)) : 0;
+}
+
+/** Полоска «сколько уже выдано» для строки пары. */
+function pairProgressHtml(pair) {
+  const share = pairPaidShare(pair, currentDate);
+  const pct = Math.round(share * 100);
+  return `<div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <div style="flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:var(--accent);border-radius:99px"></div>
+      </div>
+      <span style="font-family:var(--font-ui);font-size:10.5px;color:var(--muted);white-space:nowrap">выдано ${pct}%</span>
+    </div>`;
+}
+
 /* Сроки отдачи по паре (v133). Смотрим невыданные приходы пары и берём их
    даты `dueDate`. Расчёт не трогаем — `pairUnpaidRows` только читает данные. */
 function pairDueDates(pair, dayStr) {
@@ -4200,9 +4257,9 @@ function renderWeekDebtSummary() {
   const body = rows.map(r => {
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
     const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
-    const tag = r.carry ? ` <span style="font-size:10px;color:#a78bfa">↪ перенос</span>` : '';
-    const man = r.manual ? ` <span style="font-size:10px;color:#ff8a4a">✋ ручная</span>` : '';
-    const reop = r.reopenedAfterGiven ? ` <span style="font-size:10px;color:#4ade80" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
+    const tag = r.carry ? ` <span class="chip chip-info">↪ перенос</span>` : '';
+    const man = r.manual ? ` <span class="chip chip-warn">✋ ручная</span>` : '';
+    const reop = r.reopenedAfterGiven ? ` <span class="chip chip-ok" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
     const editBtn = (state.manualMode === true)
       ? ` <span style="cursor:pointer" title="Изменить сумму пары вручную" onclick="editWeekDebtPair('${escapeHtml(r.name).replace(/'/g, "\\'")}')">✏️</span>`
       : '';
@@ -4217,6 +4274,7 @@ function renderWeekDebtSummary() {
         </span>
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
         ${pairDueHtml(r.name)}
+        ${pairProgressHtml(r.name)}
       </div>
       <details class="wds-break-details">
         <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
@@ -4235,7 +4293,7 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом ЗА ЭТУ НЕДЕЛЮ (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Долг с прошлых недель сюда не подмешивается — смотри блок «⏰ Просрочено» ниже.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</div>
+    <details class="wds-foot"><summary style="cursor:pointer;list-style:none">Как это считается</summary>По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом ЗА ЭТУ НЕДЕЛЮ (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Долг с прошлых недель сюда не подмешивается — смотри блок «⏰ Просрочено» ниже.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</details>
   </div>` : '';
 
   const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff);
@@ -4314,9 +4372,9 @@ function openDebtOutModal() {
       const bodyRows = rows.map(r => {
         const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
         const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
-        const tag = r.carry ? ` <span style="font-size:10px;color:#a78bfa">↪ перенос</span>` : '';
-        const man = r.manual ? ` <span style="font-size:10px;color:#ff8a4a">✋ ручная</span>` : '';
-        const reop = r.reopenedAfterGiven ? ` <span style="font-size:10px;color:#4ade80" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
+        const tag = r.carry ? ` <span class="chip chip-info">↪ перенос</span>` : '';
+        const man = r.manual ? ` <span class="chip chip-warn">✋ ручная</span>` : '';
+        const reop = r.reopenedAfterGiven ? ` <span class="chip chip-ok" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
         const dateKey = wk + '::' + r.name;
         const savedDate = (state.debtOutDates && state.debtOutDates[dateKey]) || '';
         const nameAttr = encodeURIComponent(r.name);
