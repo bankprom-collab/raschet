@@ -314,6 +314,7 @@
   .wds-row:last-of-type { border-bottom: none; }
   .wds-pair { font-family: 'JetBrains Mono', monospace; color: var(--text); }
   .wds-val { font-family: 'JetBrains Mono', monospace; color: var(--muted); white-space: nowrap; }
+  .wds-foot { font-family: var(--font-ui); }
   .wds-foot { font-size: 10px; color: var(--muted); font-style: italic; margin-top: 8px; opacity: .8; }
   /* Ряд долга с полем даты — переносим на две строки, чтобы дата не жалась */
   .wds-row-debt { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 0; }
@@ -783,22 +784,26 @@
     content: '';
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
   }
-  .stat-card.s-carryover::before { background: var(--accent3); }
-  .stat-card.s-out::before { background: var(--expense); }
-  .stat-card.s-in::before { background: var(--income); }
-  .stat-card.s-balance::before { background: var(--accent); }
-  .stat-card.s-curator::before { background: #ffb74d; }
-  .stat-card.s-hand::before { background: var(--accent); }
+  /* Полоска осталась только у главной плитки — когда подчёркнуто всё,
+     не подчёркнуто ничего (v134). */
+  .stat-card::before { background: transparent; }
+  .stat-card.s-balance::before { background: var(--accent); height: 3px; }
   .stat-label {
     font-family: var(--font-ui);
-    font-size: 9.5px; text-transform: uppercase;
-    letter-spacing: .5px; color: var(--muted); margin-bottom: 4px;
+    font-size: 10.5px; text-transform: none;      /* КАПС читается медленнее (v134) */
+    letter-spacing: .1px; color: var(--muted); margin-bottom: 5px; font-weight: 500;
   }
   .stat-value {
     font-family: var(--font-num);
     font-size: 16px; font-weight: 600;
     line-height: 1.15;
   }
+  /* Итог дня — единственное по-настоящему главное число на экране (v134) */
+  .stat-card.s-balance { grid-column: 1 / -1; order: -1; padding: 14px 16px; }
+  .stat-card.s-balance .stat-value { font-size: 30px; font-weight: 700; letter-spacing: -.5px; }
+  .stat-card.s-balance .stat-label { font-size: 11px; color: var(--muted-bright); }
+  /* Остальные — тише */
+  .stat-card:not(.s-balance) .stat-value { font-size: 15px; }
   .stat-value.pos { color: var(--income); }
   .stat-value.neg { color: var(--expense); }
   .stat-value.neutral { color: var(--accent3); }
@@ -821,8 +826,8 @@
   }
   .section-title {
     font-family: var(--font-ui);
-    font-size: 12px; font-weight: 600;
-    letter-spacing: .4px; text-transform: uppercase;
+    font-size: 13.5px; font-weight: 600;
+    letter-spacing: .1px; text-transform: none;   /* капс читается медленнее (v134) */
   }
   .section-title.t-out { color: var(--expense); }
   .section-title.t-in { color: var(--income); }
@@ -861,13 +866,10 @@
     border-radius: 10px;
     padding: 10px 14px;
     margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
     box-shadow: 0 2px 8px rgba(0,0,0,.16);
   }
+  .carryover-panel > summary::-webkit-details-marker { display: none; }
+  .carryover-panel[open] > summary { margin-bottom: 4px; }
   .carryover-panel > div:first-child { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   .carryover-input-row input[type="text"] { padding: 7px 11px !important; font-size: 12px !important; width: 160px !important; }
   .carryover-input-row .btn { padding: 6px 12px !important; font-size: 11.5px !important; box-shadow: none !important; }
@@ -927,6 +929,15 @@
   .add-form:focus-within {
     background: #13161e;
     box-shadow: inset 3px 0 0 var(--accent);
+  }
+  @media(max-width: 600px) {
+    /* Шапка съедала треть экрана до первой цифры — ужимаем (v134) */
+    header { padding: 10px 12px; gap: 8px; }
+    .logo span:first-of-type { display: none; }        /* «/ daily ledger» */
+    .header-btns { gap: 6px; }
+    .header-btns .btn { font-size: 11px; padding: 7px 10px; }
+    .summary-row { gap: 7px; }
+    .stat-card { padding: 10px 12px; }
   }
   @media(max-width: 600px) {
     /* Колонки формы заданы inline прямо в разметке — под широкий экран.
@@ -1364,7 +1375,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v133</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v134</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1392,11 +1403,11 @@
       <div class="stat-value neutral" id="s-carryover">—</div>
     </div>
     <div class="stat-card s-out">
-      <div class="stat-label">ПОЛУЧЕНО НА РУКИ</div>
+      <div class="stat-label">Получено на руки</div>
       <div class="stat-value neg" id="s-out">—</div>
     </div>
     <div class="stat-card s-in">
-      <div class="stat-label">ПРИХОД ОТ КЛИЕНТОВ НА</div>
+      <div class="stat-label">Приход от клиентов</div>
       <div class="stat-value pos" id="s-in">—</div>
     </div>
     <div class="stat-card s-balance">
@@ -1404,7 +1415,7 @@
       <div class="stat-value main" id="s-balance">—</div>
     </div>
     <div class="stat-card s-curator">
-      <div class="stat-label">КУРАТОР КО МНЕ</div>
+      <div class="stat-label">Куратор ко мне</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
         <div class="stat-value" style="color:#ffb74d" id="s-curator">—</div>
         <button class="btn btn-ghost" onclick="markCuratorPaid()" style="border-color:#ffb74d;color:#ffb74d;font-size:10.5px;padding:2px 9px;line-height:1.3" title="Отметить, что сумма куратора отдана">Отдана</button>
@@ -1412,15 +1423,20 @@
       <div id="curator-paid-line" style="display:none;font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
     <div class="stat-card s-hand" title="Итог сделки минус доля куратора — по тем же сделкам, что показывает «Куратор ко мне». Рассчитались с куратором — сделка уходит с обеих плиток.">
-      <div class="stat-label">НА РУКИ</div>
+      <div class="stat-label">На руки</div>
       <div class="stat-value" style="color:var(--accent)" id="s-hand">—</div>
       <div id="s-hand-line" style="font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
   </div>
 
   <!-- Carry-over -->
-  <div class="carryover-panel">
-    <div>
+  <details class="carryover-panel" id="carryover-panel">
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-family:var(--font-ui);font-size:12px;color:var(--muted)">
+      <span>Переходящий остаток на день</span>
+      <b style="font-family:var(--font-num);color:var(--accent3);font-size:13px" id="carryover-summary">—</b>
+      <span style="margin-left:auto;color:var(--accent);font-size:11.5px">изменить</span>
+    </summary>
+    <div style="margin-top:10px">
       <div class="carryover-label">Переходящий остаток на этот день <span id="carryover-mode" style="font-size:10px;color:var(--accent);margin-left:6px"></span></div>
       <div class="carryover-value" id="carryover-display">0 ₽</div>
       <div id="carryover-mismatch" style="display:none;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:6px;background:rgba(255,183,77,.12);border:1px solid rgba(255,183,77,.3);color:#ffb74d;font-family:'JetBrains Mono',monospace;max-width:520px"></div>
@@ -1431,14 +1447,14 @@
       <button class="btn btn-ghost" onclick="resetCarryover()" title="Брать с предыдущего дня">↺ Авто</button>
       <button class="btn btn-ghost" onclick="recalcAllCarryovers()" title="Пересчитать переходящие остатки во всех днях по цепочке">⟳ Пересчёт всех</button>
     </div>
-  </div>
+  </details>
 
   <div class="grid">
     <!-- ПОЛУЧЕНО НА РУКИ -->
     <div>
       <div class="section">
         <div class="section-head">
-          <div class="section-title t-out">⬆ ПОЛУЧЕНО НА РУКИ</div>
+          <div class="section-title t-out">⬆ Получено на руки</div>
           <div id="out-total" style="font-weight:700;color:var(--expense)">0 ₽</div>
         </div>
         <table>
@@ -1462,7 +1478,7 @@
     <div>
       <div class="section">
         <div class="section-head">
-          <div class="section-title t-in">⬇ ПРИХОД ОТ КЛИЕНТОВ НА</div>
+          <div class="section-title t-in">⬇ Приход от клиентов</div>
           <div id="in-total" style="font-weight:700;color:var(--income)">0 ₽</div>
         </div>
         <table>
@@ -5547,6 +5563,8 @@ function renderSummary(day) {
   const handT = dealsT - curatorT;
 
   document.getElementById('s-carryover').textContent = fmt(co);
+  const coSum = document.getElementById('carryover-summary');
+  if (coSum) coSum.textContent = fmt(co);
   document.getElementById('s-out').textContent = fmt(outT);
   document.getElementById('s-in').textContent = fmt(inT);
   document.getElementById('s-balance').textContent = fmt(balance);
