@@ -1364,7 +1364,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v132</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v133</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1452,6 +1452,8 @@
         </div>
         <div style="padding:0 16px 12px">
           <input type="text" id="out-note" placeholder="Примечание (необязательно, на расчёт не влияет)" style="width:100%">
+          <input type="date" id="out-due" title="Когда отдавать эти деньги — только напоминание, на расчёт не влияет"
+                 style="width:100%;margin-top:8px">
         </div>
       </div>
     </div>
@@ -1477,6 +1479,8 @@
         </div>
         <div style="padding:0 16px 12px">
           <input type="text" id="in-note" placeholder="Примечание к сумме (необязательно)" oninput="updateInPreview()" style="width:100%">
+          <input type="date" id="in-due" title="Когда отдавать эти деньги — только напоминание, на расчёт не влияет"
+                 style="width:100%;margin-top:8px">
         </div>
         <div id="in-preview" style="font-size:11px;color:var(--muted-bright);padding:0 16px 10px;line-height:1.3;min-height:1em">—</div>
         <div id="in-totals" style="border-top:1px solid var(--border);padding:14px 18px;background:var(--surface)">
@@ -1567,6 +1571,10 @@
         <div><span>%кур</span><input type="text" id="qe-pctcur" class="qe-input-num" inputmode="decimal"
              oninput="numericInputFilter(event); qeOnInput()"></div>
       </div>
+    </div>
+    <div class="qe-field">
+      <label id="qe-due-label">Когда отдавать — напоминание, на расчёт не влияет</label>
+      <input type="date" id="qe-due" class="qe-input" oninput="qeOnDue()">
     </div>
     <div class="qe-field">
       <label>Примечание — на расчёт не влияет</label>
@@ -3571,6 +3579,22 @@ function render() {
   renderClientSelects();
 }
 
+/* Чип «отдать до …» (v133). Только показ: dueDate — напоминание, в расчётах
+   не участвует. Просроченный срок подсвечиваем красным, сегодняшний — жёлтым. */
+function dueChipHtml(dueDate, dayStr) {
+  const d = (dueDate || '').trim();
+  if (!d) return '';
+  const today = dayStr || currentDate;
+  const late = d < today, now = d === today;
+  const color = late ? 'var(--expense)' : (now ? '#ffb74d' : 'var(--accent3)');
+  const label = late ? 'просрочен срок' : (now ? 'отдать сегодня' : 'отдать до');
+  const when = (late || now) ? '' : ' ' + formatDateShort(d);
+  return `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;`
+    + `font-size:10px;font-family:var(--font-ui);white-space:nowrap;`
+    + `background:rgba(255,255,255,.05);color:${color}" title="Когда надо отдать эти деньги">`
+    + `📅 ${label}${when}${(late || now) ? ' · ' + formatDateShort(d) : ''}</span>`;
+}
+
 function renderOutBody(day) {
   const tbody = document.getElementById('out-body');
   if (!day.out.length) {
@@ -3583,7 +3607,7 @@ function renderOutBody(day) {
         : '';
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}${noteHtml}</td>
+        <td class="client-name">${escapeHtml(r.client)}${dueChipHtml(r.dueDate)}${noteHtml}</td>
         <td class="amount neg">${fmt(r.amount)}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="editRow('out',${i})" title="Редактировать">✏️</button>
@@ -3686,7 +3710,7 @@ function renderInBody(day) {
       }
       return `
       <tr>
-        <td class="client-name">${clientHtml}${tagHtml}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
+        <td class="client-name">${clientHtml}${tagHtml}${dueChipHtml(r.dueDate)}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
         <td class="pct">${pctDisplay}</td>
         <td class="amount pos">${totalDisplay}</td>
         <td><div class="row-actions">
@@ -4063,6 +4087,33 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
   </div>`;
 }
 
+/* Сроки отдачи по паре (v133). Смотрим невыданные приходы пары и берём их
+   даты `dueDate`. Расчёт не трогаем — `pairUnpaidRows` только читает данные. */
+function pairDueDates(pair, dayStr) {
+  const out = [];
+  try {
+    pairUnpaidRows(pair, dayStr || currentDate).forEach(r => {
+      const dd = state.days[r.date];
+      const row = dd && Array.isArray(dd.in) ? dd.in[r.idx] : null;
+      if (row && row.dueDate) out.push({ due: row.dueDate, left: r.left, date: r.date });
+    });
+  } catch (e) {}
+  out.sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+  return out;
+}
+
+/** Строка «отдать до …» для блока задолженности: ближайший срок + сколько ещё. */
+function pairDueHtml(pair) {
+  const list = pairDueDates(pair, currentDate);
+  if (!list.length) return '';
+  const first = list[0];
+  const more = list.length > 1
+    ? ` <span style="color:var(--muted)">и ещё ${list.length - 1}</span>` : '';
+  return `<div style="margin-top:3px;font-size:11px;font-family:var(--font-ui)">
+      ${dueChipHtml(first.due)}<span style="color:var(--muted);margin-left:4px">${fmt(first.left)}</span>${more}
+    </div>`;
+}
+
 function renderWeekDebtSummary() {
   const box = document.getElementById('week-debt-summary');
   if (!box) return;
@@ -4094,6 +4145,7 @@ function renderWeekDebtSummary() {
           <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button>
         </span>
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+        ${pairDueHtml(r.name)}
       </div>
       <details class="wds-break-details">
         <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
@@ -4207,6 +4259,7 @@ function openDebtOutModal() {
               <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс, напр. «-Авангард»)">🏷️</button>
             </span>
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+            ${pairDueHtml(r.name)}
           </div>
           <details class="wds-break-details">
             <summary>📋 Раскрыть базу: только неотданные приходы</summary>
@@ -4687,6 +4740,7 @@ function collectPairBaseBreakdown(pair, scope) {
         amount: r.amount || 0,
         pct: r.pct, pct2: r.pct2,
         tag: r.tag || null,
+        dueDate: r.dueDate || null,      // срок отдачи — только показ (v133)
         // Слагаемые, как их ввели («412 304+301 640,28»). Только для показа —
         // в расчёт идёт r.amount, как и раньше.
         parts: (Array.isArray(r.parts) && r.parts.length > 1) ? r.parts.slice() : null,
@@ -4763,6 +4817,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
     const a2 = (r.after2 === null || r.after2 === undefined) ? null : r.after2;
     allRows.push({
       date: r.date, pct: r.pct, pct2: r.pct2, tag: r.tag, parts: r.parts || null,
+      dueDate: r.dueDate || null,
       amount: r.amount || 0, after1: a1, after2: a2,
       // невыданная часть — она и складывается в «Итого невыдано»
       uAfter1: paidFull ? 0 : (whole ? a1 : r100(a1 * uf)),
@@ -4807,7 +4862,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
       ? `<span class="wds-break-parts" title="Из чего сложилась сумма">${r.parts.map(n => fmtRaw(n)).join(' + ')}</span>`
       : '';
     return `<div class="wds-break-row${r.state === 'paid' ? ' is-paid' : ''}">
-      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${chip}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${chip}${r.state !== 'paid' ? dueChipHtml(r.dueDate) : ''}</span>
       <span class="wds-break-amt">${fmt(r.amount)}${partsHtml}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
       <span class="wds-break-after">→ ${fmt(r.after1)}</span>
@@ -5601,6 +5656,8 @@ function qeSetType(type) {
   const parsedRaw = parseSumString(g(isIn ? 'in-amount' : 'out-amount').value || '');
   qeSums = (parsedRaw && parsedRaw.parts.length) ? parsedRaw.parts.map(n => fmtExact(n)) : [''];
   g('qe-note').value = g(isIn ? 'in-note' : 'out-note').value;
+  const dueEl = g(isIn ? 'in-due' : 'out-due');
+  g('qe-due').value = dueEl ? dueEl.value : '';
   if (isIn) {
     g('qe-pct').value    = g('in-pct').value;
     g('qe-pct2').value   = g('in-pct2').value;
@@ -5838,6 +5895,12 @@ function qeAddPair() {
   qeRenderUnpaid();
 }
 
+/** Дата отдачи — просто переносим в поле формы, расчёта не касается (v133). */
+function qeOnDue() {
+  const el = document.getElementById(qeType === 'in' ? 'in-due' : 'out-due');
+  if (el) el.value = document.getElementById('qe-due').value;
+}
+
 /** Перенести набранное в поля компактной формы и обновить предпросмотр. */
 function qeOnInput() {
   const g = (id) => document.getElementById(id);
@@ -5884,6 +5947,7 @@ function qeSubmit() {
   const totalEl = g('qe-sum-total');
   if (totalEl) totalEl.textContent = '0 ₽';
   g('qe-note').value = '';
+  g('qe-due').value = '';
   if (qeType === 'in') {
     g('qe-pct').value    = g('in-pct').value;
     g('qe-pct2').value   = g('in-pct2').value;
@@ -6169,9 +6233,12 @@ function addRow(type) {
     if (!client || isNaN(amount) || amount <= 0) { showToast('Заполните поля', true); return; }
     const outNote = document.getElementById('out-note').value.trim();
     // Храним точное число (без округления). note — свободный текст, в расчётах не участвует.
-    day.out.push({ client, amount: amount, note: outNote });
+    // dueDate — когда эти деньги надо отдать. Напоминание, в расчётах не участвует (v133).
+    const outDue = (document.getElementById('out-due') || {}).value || '';
+    day.out.push({ client, amount: amount, note: outNote, dueDate: outDue || null });
     document.getElementById('out-amount').value = '';
     document.getElementById('out-note').value = '';
+    if (document.getElementById('out-due')) document.getElementById('out-due').value = '';
   } else {
     const client = document.getElementById('in-client').value;
     const raw = document.getElementById('in-amount').value;
@@ -6198,7 +6265,9 @@ function addRow(type) {
       total: afterP1,            // после первого процента (точно)
       total2: afterP2,           // после второго процента (или null)
       parts: parsed.parts.length > 1 ? parsed.parts : null,
-      note: noteVal
+      note: noteVal,
+      // Когда эти деньги надо отдать. Напоминание, в расчётах не участвует (v133).
+      dueDate: ((document.getElementById('in-due') || {}).value || '') || null
     });
     // Запоминаем последний введённый процент куратора, чтобы автоподставлять в форму
     if (!isNaN(pctCur) && pctCur > 0) {
@@ -6215,6 +6284,7 @@ function addRow(type) {
     }
     document.getElementById('in-preview').textContent = '—';
     document.getElementById('in-note').value = '';
+    if (document.getElementById('in-due')) document.getElementById('in-due').value = '';
   }
   recalcCarryoversAfter(currentDate);
   saveState();
