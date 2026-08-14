@@ -686,6 +686,15 @@
   }
   #abPrintContent h3 { font-size: 13px; margin: 14px 0 4px; color: #444; }
   #abPrintContent table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  /* Предпросмотр отчёта на телефоне: ужимаем, чтобы влезали все колонки (v139).
+     На печати А4 размеры обычные — это правило только для экрана. */
+  @media screen and (max-width: 600px) {
+    #abPrintContent { padding: 10px 8px; }
+    #abPrintContent table { font-size: 10px; }
+    #abPrintContent th, #abPrintContent td { padding: 4px 5px !important; }
+    #abPrintContent h1 { font-size: 15px; }
+    #abPrintContent h2 { font-size: 12.5px; }
+  }
   #abPrintContent th, #abPrintContent td {
     border: 1px solid #ccc; padding: 5px 8px; text-align: left; font-size: 12px;
   }
@@ -1276,7 +1285,7 @@
   .board-date { font-size:13px; color:var(--muted-bright); margin-top:6px; }
   .board-stats { display:flex; gap:10px; flex-wrap:wrap; }
   .board-stat { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; min-width:128px; }
-  .board-stat .l { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); }
+  .board-stat .l { font-family:var(--font-ui); font-size:10.5px; text-transform:none; letter-spacing:.1px; color:var(--muted); }
   .board-stat .v { font-size:18px; font-weight:700; margin-top:3px; }
   .board-grid { margin-top:24px; display:grid; gap:14px; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); }
   .board-tile {
@@ -1302,6 +1311,7 @@
   /* ── ЗОНЫ ДОСКИ (A3: цвет закреплён за группой) ── */
   .board-zone { margin-top:26px; }
   .board-zone .board-grid { margin-top:10px; }
+  .board-zone-head { font-family: var(--font-ui); text-transform: none; letter-spacing: .1px; }
   .board-zone-head {
     display:flex; align-items:center; gap:10px;
     font-family:'Unbounded',sans-serif; font-weight:600;
@@ -1358,6 +1368,10 @@
         <div class="board-tile feature" id="tileCuratorMine" style="--tile-c:#ffb74d;border-color:rgba(255,183,77,.4)" onclick="openCuratorMineModal()">
           <div class="ic">👔</div><div class="t">Куратор ко мне</div>
           <div class="s" id="tileCuratorMineBody">—</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#818cf8" onclick="printDayReport()">
+          <div class="ic">🧾</div><div class="t">Отчёт за день</div>
+          <div class="s">Один лист: итоги, приходы, выдачи, долги, куратор. Печать или PDF.</div>
         </div>
         <div class="board-tile feature" id="tileHand" style="--tile-c:#00e5b0;border-color:rgba(0,229,176,.4)" onclick="openHandModal()">
           <div class="ic">🫱</div><div class="t">На руки</div>
@@ -1435,7 +1449,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v138</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v140</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3471,7 +3485,9 @@ function floor100(n) {
 function fmt(n) {
   if (n === null || n === undefined || isNaN(n)) return '—';
   const rounded = Math.round(n * 100) / 100; // убираем хвосты типа 0.30000000004
-  return rounded.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' ₽';
+  // Неразрывный пробел перед ₽ (v140): иначе знак отрывается от суммы
+  // и уезжает на следующую строку — заметно в отчёте и на плитках.
+  return rounded.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + '\u00A0₽';
 }
 // fmtRounded — округлено до сотен + ₽ (для итога после процента)
 function fmtRounded(n) {
@@ -7458,6 +7474,112 @@ function printAnalyticsBase(scope) {
     ? 'Аналитика базы — всё время'
     : 'Аналитика базы — неделя ' + weekRangeLabel(scope);
   showAbPrintOverlay(title, '<h1>Аналитика база — зелёные суммы</h1>' + body);
+}
+
+
+/* ── ОТЧЁТ ЗА ДЕНЬ (v139) ────────────────────────────────────────────────────
+   Один лист: итоги дня, приходы, выдачи, долги по парам, куратор и «на руки».
+   Ничего не считает сам — берёт готовые значения из тех же функций, что и
+   экран. Показывается в общем окне печати (`showAbPrintOverlay`), откуда
+   можно печатать или сохранить PDF. */
+function printDayReport() {
+  const d = currentDate;
+  const day = getDay(d);
+  const co = day.carryover || 0;
+  const outT = (day.out || []).reduce((s, r) => s + r.amount, 0);
+  const inT = (day.in || []).reduce((s, r) => s + calcInRowFinal(r), 0);
+  const balance = co - outT + inT;
+  const pf = (x) => (x === null || x === undefined) ? '—' : String(x).replace('.', ',') + '%';
+  const money = (n) => fmt(n);
+
+  const head = `
+    <h1>Расчёт за ${formatDateLong(d)}</h1>
+    <table>
+      <tr><th style="width:60%">Показатель</th><th style="text-align:right">Сумма</th></tr>
+      <tr><td>Переходящий остаток</td><td class="g" style="text-align:right">${money(co)}</td></tr>
+      <tr><td>Приход от клиентов</td><td class="g" style="text-align:right">${money(inT)}</td></tr>
+      <tr><td>Получено на руки (выдано)</td><td class="o" style="text-align:right">${money(outT)}</td></tr>
+      <tr><td><b>Итого на конец дня</b></td><td style="text-align:right"><b>${money(balance)}</b></td></tr>
+    </table>`;
+
+  const inRows = (day.in || []).map(r => {
+    const a1 = (r.pct > 0 && r.total != null) ? r100(r.total) : (r.total || 0);
+    const a2 = (r.pct2 > 0 && r.total2 != null) ? r100(r.total2) : null;
+    const deal = (a2 !== null) ? (a1 - a2) : 0;
+    const cur = (r.pctCur > 0) ? floor100((r.amount || 0) * r.pctCur / 100) : 0;
+    return `<tr>
+      <td>${escapeHtml(r.client || '—')}${r.dueDate ? '<br><span class="bd">отдать до ' + formatDateShort(r.dueDate) + '</span>' : ''}</td>
+      <td style="text-align:right">${money(r.amount)}</td>
+      <td style="text-align:right">${pf(r.pct)}${r.pct2 > 0 ? ' / ' + pf(r.pct2) : ''}</td>
+      <td style="text-align:right">${money(a1)}</td>
+      <td style="text-align:right">${a2 === null ? '—' : money(a2)}</td>
+      <td style="text-align:right">${deal ? money(deal) : '—'}</td>
+      <td style="text-align:right">${cur ? money(cur) : '—'}</td>
+    </tr>`;
+  }).join('');
+  const inBlock = (day.in || []).length ? `
+    <h2>Приходы от клиентов</h2>
+    <table>
+      <tr><th>Пара</th><th style="text-align:right">Сумма</th><th style="text-align:right">%</th>
+          <th style="text-align:right">После 1-го</th><th style="text-align:right">После 2-го</th>
+          <th style="text-align:right">Итог сделки</th><th style="text-align:right">Куратору</th></tr>
+      ${inRows}
+    </table>` : '';
+
+  const outRows = (day.out || []).map(r => `<tr>
+      <td>${escapeHtml(r.client || '—')}${r.dueDate ? '<br><span class="bd">отдать до ' + formatDateShort(r.dueDate) + '</span>' : ''}</td>
+      <td style="text-align:right">${money(r.amount)}</td>
+      <td class="bd">${escapeHtml(r.note || '')}</td>
+    </tr>`).join('');
+  const outBlock = (day.out || []).length ? `
+    <h2>Получено на руки</h2>
+    <table>
+      <tr><th>Пара</th><th style="text-align:right">Сумма</th><th>Примечание</th></tr>
+      ${outRows}
+    </table>` : '';
+
+  const D = computeWeekPairDebt();
+  const debtRows = [...D.rows, ...D.overdueRows].map(r => {
+    const due = pairDueDates(r.name, d)[0];
+    const share = Math.round(pairPaidShare(r.name, d) * 100);
+    return `<tr>
+      <td>${escapeHtml(r.name)}${due ? '<br><span class="bd">отдать до ' + formatDateShort(due.due) + '</span>' : ''}</td>
+      <td style="text-align:right">${money(r.base || 0)}</td>
+      <td style="text-align:right">${money(r.v1)}</td>
+      <td style="text-align:right">${money(r.v2)}</td>
+      <td style="text-align:right">${share}%</td>
+    </tr>`;
+  }).join('');
+  const debtBlock = debtRows ? `
+    <h2>Задолженность по парам</h2>
+    <table>
+      <tr><th>Пара</th><th style="text-align:right">База</th><th style="text-align:right">Нам должны</th>
+          <th style="text-align:right">Мы должны отдать</th><th style="text-align:right">Выдано</th></tr>
+      ${debtRows}
+      <tr><td><b>Итого</b></td>
+          <td style="text-align:right"><b>${money(D.grandBase)}</b></td>
+          <td style="text-align:right"><b>${money(D.grandTotal)}</b></td>
+          <td style="text-align:right"><b>${money(D.grandTotal2)}</b></td>
+          <td></td></tr>
+    </table>
+    ${D.overdueRows.length ? '<p class="bd">Из них просрочено: ' + money(D.overdueTotal) + '</p>' : ''}` : '';
+
+  const hw = handTotals(d);
+  const shareBlock = (hw.deals || hw.curator) ? `
+    <h2>Сделки: куратор и на руки</h2>
+    <table>
+      <tr><th style="width:60%">Показатель</th><th style="text-align:right">Сумма</th></tr>
+      <tr><td>Итог сделок</td><td style="text-align:right">${money(hw.deals)}</td></tr>
+      <tr><td>Куратору</td><td class="o" style="text-align:right">${money(hw.curator)}</td></tr>
+      <tr><td><b>На руки</b></td><td class="g" style="text-align:right"><b>${money(hw.hand)}</b></td></tr>
+      <tr><td>Долг куратору сейчас</td><td style="text-align:right">${money(curatorDebt(d))}</td></tr>
+    </table>` : '';
+
+  const note = (day.note && day.note.trim())
+    ? `<h2>Заметка к дню</h2><p>${escapeHtml(day.note)}</p>` : '';
+
+  showAbPrintOverlay('Расчёт ' + formatDateShort(d),
+    head + inBlock + outBlock + debtBlock + shareBlock + note);
 }
 
 // Окно предпросмотра: показывает отчёт с кнопками «Печать» и «Сохранить как PDF»
