@@ -1449,7 +1449,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v140</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v141</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -8600,6 +8600,7 @@ const GDRIVE_GRANTED_KEY = 'gdrive_granted_v1';
    выходить — окно согласия не показывала уже никогда. */
 let tokenAskInteractive = false;
 let tokenRetriedConsent = false;
+let lastTokenError = '';        // что именно ответил Google (v141)
 const GDRIVE_LAST_SYNC_KEY = 'gdrive_last_sync_v1';
 const GDRIVE_TOKEN_KEY = 'gdrive_token_v1';
 const GDRIVE_FOLDER_NAME = 'Расчётная_программа';
@@ -8674,8 +8675,22 @@ function refreshSyncUI() {
   const connected = !!accessToken;
   document.getElementById('sync-not-connected').style.display = connected ? 'none' : 'block';
   document.getElementById('sync-connected').style.display = connected ? 'block' : 'none';
-  document.getElementById('sync-status-line').textContent =
-    connected ? '✅ Подключено к Google Drive' : 'Не подключено';
+  /* Строка состояния показывает, ЧТО именно не так (v141): раньше при любой
+     беде было просто «Не подключено», и владелец не понимал, куда смотреть. */
+  const st = document.getElementById('sync-status-line');
+  if (connected) {
+    st.textContent = '✅ Подключено к Google Drive';
+    st.style.color = '';
+  } else {
+    const googleReady = (typeof gapi !== 'undefined' && typeof google !== 'undefined');
+    let why;
+    if (!getClientId())        why = '⚠ Не задан Client ID — впишите его в поле ниже';
+    else if (!googleReady)     why = '⚠ Google не загрузился — проверьте интернет и обновите страницу';
+    else if (lastTokenError)   why = '⚠ Google отказал: ' + lastTokenError;
+    else                       why = 'Не подключено — нажмите «Подключить Google Drive»';
+    st.textContent = why;
+    st.style.color = why.startsWith('⚠') ? '#ffb74d' : '';
+  }
 
   const lastSync = localStorage.getItem(GDRIVE_LAST_SYNC_KEY);
   const accLine = document.getElementById('sync-account');
@@ -8728,6 +8743,7 @@ function initGoogleApis() {
                Если человек нажал «Подключить» — показываем окно согласия
                (один раз). Если это была фоновая синхронизация, просто снимаем
                отметку о разрешении, чтобы следующий ручной клик спросил. */
+            lastTokenError = resp.error_description || resp.error || '';
             try { localStorage.removeItem(GDRIVE_GRANTED_KEY); } catch (e) {}
             if (tokenAskInteractive && !tokenRetriedConsent && tokenClient) {
               tokenRetriedConsent = true;
@@ -8739,6 +8755,7 @@ function initGoogleApis() {
             return;
           }
           tokenRetriedConsent = false;
+          lastTokenError = '';
           accessToken = resp.access_token;
           tokenExpiresAt = Date.now() + (((resp.expires_in || 3600) - 300) * 1000);
           // Запоминаем токен (действует ~1 час), чтобы не входить заново при каждом открытии
@@ -8801,19 +8818,40 @@ async function reconnectGDrive() {
   await connectGDrive();
 }
 
+let _connectTries = 0;
 async function connectGDrive() {
+  // Без Client ID подключаться не к чему — раньше программа молча крутилась
+  // в бесконечном «Google API ещё загружается» (v141).
+  if (!getClientId()) {
+    showToast('Сначала впишите Client ID — поле выше, инструкция под ним', true);
+    const inp = document.getElementById('sync-client-id');
+    if (inp) { inp.style.borderColor = 'var(--expense)'; inp.focus(); }
+    return;
+  }
+  if (typeof gapi === 'undefined' || typeof google === 'undefined') {
+    showToast('Google не загрузился. Проверьте интернет и обновите страницу', true);
+    return;
+  }
   if (!tokenClient) {
+    if (_connectTries++ >= 5) {          // пять секунд ждём, потом честно говорим
+      _connectTries = 0;
+      showToast('Google API не поднялся. Обновите страницу; если не поможет — проверьте Client ID', true);
+      return;
+    }
     showToast('Google API ещё загружается, подожди секунду', true);
     initGoogleApis();
     setTimeout(connectGDrive, 1000);
     return;
   }
+  _connectTries = 0;
   const ok = await ensureToken(true);
   if (ok) {
     localStorage.setItem(GDRIVE_GRANTED_KEY, '1');
     showToast('Подключено к Google Drive');
   } else {
-    showToast('Google не дал доступ. Проверь, что вошёл в нужный аккаунт, и нажми «Подключить» ещё раз', true);
+    showToast(lastTokenError
+      ? 'Google отказал: ' + lastTokenError
+      : 'Google не дал доступ. Проверьте, что вошли в нужный аккаунт, и нажмите «Подключить» ещё раз', true);
   }
 }
 
