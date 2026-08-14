@@ -1364,7 +1364,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v131</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v132</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4013,8 +4013,19 @@ function computeWeekPairDebt() {
   const overdueTotal = overdueRows.reduce((s, r) => s + r.v1, 0);
   const overdueTotal2 = overdueRows.reduce((s, r) => s + r.v2, 0);
   const overdueTotalDiff = overdueRows.reduce((s, r) => s + r.diff, 0);
+  /* Общий итог «к отдаче» = текущая неделя + просрочка (v132).
+     До этого просрочка в итог не входила, и «Сумма к отдаче» расходилась с
+     переходящим остатком ровно на неё: у владельца 8 468 000 в кассе против
+     7 832 600 к отдаче — разница 635 400 была невыданным приходом от 7 авг.
+     Строки по-прежнему разделены: блок «⏰ Просрочено» показывает, что именно
+     висит с прошлых недель. Складываем только суммы. */
+  const grandBase  = totalBase  + overdueTotalBase;
+  const grandTotal = total      + overdueTotal;
+  const grandTotal2 = total2    + overdueTotal2;
+  const grandDiff  = totalDiff  + overdueTotalDiff;
   return { rows, givenRows, overdueRows, totalBase, total, total2, totalDiff,
-           overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff };
+           overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff,
+           grandBase, grandTotal, grandTotal2, grandDiff };
 }
 
 // Отдельный блок «Просрочено»: долг с недель ДО текущей, всё ещё не
@@ -4048,7 +4059,7 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
       <span class="wds-total">${totalLine}</span>
     </div>
     ${body}
-    <div class="wds-foot">Долг с недель ДО текущей, который так и не погашен. В общий итог «к отдаче» выше НЕ входит — это расхождение: проверь, отдано фактически или нет (реальная выдача уменьшит его сама; «Раскрыть базу» ниже показывает, каким именно приходам он соответствует).</div>
+    <div class="wds-foot">Долг с недель ДО текущей, который так и не погашен. Входит в общий итог «к отдаче» выше (с v132). Здесь показано отдельно, чтобы видеть, что именно висит с прошлых недель: проверь, отдано фактически или нет (реальная выдача уменьшит его сама; «Раскрыть базу» ниже показывает, каким именно приходам он соответствует).</div>
   </div>`;
 }
 
@@ -4091,7 +4102,9 @@ function renderWeekDebtSummary() {
     </div>`;
   }).join('');
 
-  const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>`;
+  const G = computeWeekPairDebt();
+  const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(G.grandBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(G.grandTotal)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(G.grandTotal2)}</b> · разница: <b style="color:var(--accent)">${fmt(G.grandDiff)}</b>`
+    + (overdueRows.length ? ` <span style="font-size:10.5px;color:#f59e0b">(включая просрочку ${fmt(overdueTotal)})</span>` : '');
 
   const mainBlock = rows.length ? `<div class="week-debt-block${isFri ? ' fri' : ''}">
     <div class="wds-head">
@@ -4116,12 +4129,19 @@ function computeDebtOut() { return computeWeekPairDebt(); }
 function renderDebtOutTile() {
   const body = document.getElementById('tileDebtOutBody');
   if (!body) return;
-  const { rows, overdueRows, totalBase, total, total2, totalDiff, overdueTotal } = computeWeekPairDebt();
+  const { rows, overdueRows, overdueTotal,
+          grandBase, grandTotal, grandTotal2, grandDiff } = computeWeekPairDebt();
+  // Итоги плитки — общие: текущая неделя ПЛЮС просрочка (v132)
+  const totalBase = grandBase, total = grandTotal, total2 = grandTotal2, totalDiff = grandDiff;
   const overdueHint = overdueRows.length
-    ? `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(245,158,11,.35);color:#f59e0b;font-size:11px">⏰ Просрочено (${overdueRows.length}): <b style="font-family:var(--font-num)">${fmt(overdueTotal)}</b></div>`
+    ? `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(245,158,11,.35);color:#f59e0b;font-size:11px">⏰ из них просрочено (${overdueRows.length}): <b style="font-family:var(--font-num)">${fmt(overdueTotal)}</b></div>`
     : '';
+  if (!rows.length && !overdueRows.length) {
+    body.innerHTML = 'Сумм к отдаче сегодня нет.';
+    return;
+  }
   if (!rows.length) {
-    body.innerHTML = (overdueRows.length ? 'За эту неделю сумм к отдаче нет.' : 'Сумм к отдаче сегодня нет.') + overdueHint;
+    body.innerHTML = 'За эту неделю новых сумм нет — висит только просрочка.' + overdueHint;
     return;
   }
   const top = rows.slice(0, 3).map(r => {
@@ -4155,8 +4175,11 @@ function renderDebtOutTile() {
 function openDebtOutModal() {
   const box = document.getElementById('debt-out-body');
   if (box) {
-    const { rows, overdueRows, totalBase, total, total2, totalDiff,
-             overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff } = computeWeekPairDebt();
+    const { rows, overdueRows,
+             overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff,
+             grandBase, grandTotal, grandTotal2, grandDiff } = computeWeekPairDebt();
+    // Итоги окна — общие: текущая неделя ПЛЮС просрочка (v132)
+    const totalBase = grandBase, total = grandTotal, total2 = grandTotal2, totalDiff = grandDiff;
     const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
     const wk = weekMondayStr(currentDate);
     const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff);
@@ -4202,7 +4225,7 @@ function openDebtOutModal() {
         `<div class="week-debt-block">
           <div class="wds-head">
             <span>💸 Сумма к отдаче · ${formatDateShort(currentDate)}</span>
-            <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b></span>
+            <span class="wds-total">база: <b style="color:var(--muted-bright)">${fmt(totalBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(total)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(total2)}</b> · разница: <b style="color:var(--accent)">${fmt(totalDiff)}</b>${overdueRows.length ? ` <span style="font-size:10.5px;color:#f59e0b">(включая просрочку ${fmt(overdueTotal)})</span>` : ''}</span>
           </div>
           ${bodyRows}
           <div class="wds-foot">По каждой паре: база (до вычета процентов), сумма после 1-го %, после 2-го % и разница — ЗА ЭТУ НЕДЕЛЮ. «Число отдачи» — дата отдачи: приходы ПО эту дату считаются отданными и пропадают из блоков и итогов. Но приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Вернуть пару целиком (убрать дату) — кнопка ✕ рядом с датой или «🔍 Проверить пару». Долг с прошлых недель — отдельным блоком «⏰ Просрочено» ниже.</div>
