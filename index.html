@@ -1375,7 +1375,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v134</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v135</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1982,6 +1982,10 @@
       <div id="sync-not-connected">
         <button class="btn btn-primary" onclick="connectGDrive()" style="width:100%;margin-bottom:8px">
           🔗 Подключить Google Drive
+        </button>
+        <button class="btn btn-ghost" onclick="reconnectGDrive()" style="width:100%;margin-bottom:8px;font-size:11.5px"
+                title="Забыть прошлое разрешение и войти заново — если подключение перестало работать">
+          ↻ Подключить заново (спросить разрешение)
         </button>
       </div>
 
@@ -8350,6 +8354,12 @@ const GDRIVE_AUTOSYNC_KEY = 'gdrive_autosync_v1';
 // Разрешение Google дают один раз. Дальше токен продлевается молча,
 // и показывать окно согласия больше не за что.
 const GDRIVE_GRANTED_KEY = 'gdrive_granted_v1';
+/* Пометки последнего запроса токена (v135): просил ли человек лично и не
+   повторяли ли мы уже запрос с окном согласия. Без них программа запиралась:
+   помнила «разрешение было», продлевала молча, а когда молча перестало
+   выходить — окно согласия не показывала уже никогда. */
+let tokenAskInteractive = false;
+let tokenRetriedConsent = false;
 const GDRIVE_LAST_SYNC_KEY = 'gdrive_last_sync_v1';
 const GDRIVE_TOKEN_KEY = 'gdrive_token_v1';
 const GDRIVE_FOLDER_NAME = 'Расчётная_программа';
@@ -8474,10 +8484,21 @@ function initGoogleApis() {
         scope: GDRIVE_SCOPES,
         callback: (resp) => {
           if (resp.error) {
-            // Тихое продление не вышло — молчим: скажет тот, кто просил токен.
+            /* Молча продлить не вышло: доступ истёк или его отозвали.
+               Если человек нажал «Подключить» — показываем окно согласия
+               (один раз). Если это была фоновая синхронизация, просто снимаем
+               отметку о разрешении, чтобы следующий ручной клик спросил. */
+            try { localStorage.removeItem(GDRIVE_GRANTED_KEY); } catch (e) {}
+            if (tokenAskInteractive && !tokenRetriedConsent && tokenClient) {
+              tokenRetriedConsent = true;
+              try { tokenClient.requestAccessToken({ prompt: 'consent' }); return; }
+              catch (e) {}
+            }
+            tokenRetriedConsent = false;
             flushTokenWaiters(false);
             return;
           }
+          tokenRetriedConsent = false;
           accessToken = resp.access_token;
           tokenExpiresAt = Date.now() + (((resp.expires_in || 3600) - 300) * 1000);
           // Запоминаем токен (действует ~1 час), чтобы не входить заново при каждом открытии
@@ -8517,12 +8538,27 @@ function ensureToken(interactive) {
     const granted = localStorage.getItem(GDRIVE_GRANTED_KEY) === '1';
     tokenWaiters.push(resolve);
     if (tokenWaiters.length > 1) return;      // запрос уже в пути — просто ждём
+    tokenAskInteractive = !!interactive;
+    tokenRetriedConsent = false;
     try {
       tokenClient.requestAccessToken({ prompt: granted ? '' : 'consent' });
     } catch (e) {
       flushTokenWaiters(false);
     }
   });
+}
+
+/* Полный сброс доступа и вход заново (v135). Нужен, когда Google перестал
+   продлевать доступ: чистим токен и отметку о разрешении, чтобы окно согласия
+   точно показалось. Данные на Диске и в браузере это не трогает. */
+async function reconnectGDrive() {
+  try { localStorage.removeItem(GDRIVE_TOKEN_KEY); } catch (e) {}
+  try { localStorage.removeItem(GDRIVE_GRANTED_KEY); } catch (e) {}
+  accessToken = null; tokenExpiresAt = 0;
+  tokenRetriedConsent = false;
+  refreshSyncUI();
+  showToast('Разрешение сброшено — сейчас Google спросит заново');
+  await connectGDrive();
 }
 
 async function connectGDrive() {
@@ -8537,7 +8573,7 @@ async function connectGDrive() {
     localStorage.setItem(GDRIVE_GRANTED_KEY, '1');
     showToast('Подключено к Google Drive');
   } else {
-    showToast('Не получилось подключиться к Google', true);
+    showToast('Google не дал доступ. Проверь, что вошёл в нужный аккаунт, и нажми «Подключить» ещё раз', true);
   }
 }
 
