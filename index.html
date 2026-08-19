@@ -1452,7 +1452,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v143</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v145</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3701,6 +3701,48 @@ function render() {
   renderClientSelects();
 }
 
+/* Правка срока отдачи прямо из строки дня (v144).
+   Открывает календарь на скрытом поле; если браузер не умеет showPicker —
+   спрашивает дату строкой. Пустое значение снимает срок.
+   Меняет только `dueDate` — напоминание, в расчётах не участвует. */
+function editRowDue(type, i) {
+  const day = getDay(currentDate);
+  const r = day[type] && day[type][i];
+  if (!r) return;
+  const apply = (val) => {
+    r.dueDate = (val && String(val).trim()) ? String(val).trim() : null;
+    saveState();
+    render();
+    showToast(r.dueDate ? 'Срок: ' + formatDateShort(r.dueDate) : 'Срок снят');
+  };
+  let inp = document.getElementById('due-picker');
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type = 'date';
+    inp.id = 'due-picker';
+    inp.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none';
+    document.body.appendChild(inp);
+  }
+  inp.value = r.dueDate || currentDate;
+  inp.onchange = () => { apply(inp.value); inp.onchange = null; };
+  if (typeof inp.showPicker === 'function') {
+    try { inp.showPicker(); return; } catch (e) {}
+  }
+  const typed = prompt('Когда отдавать (ГГГГ-ММ-ДД, пусто — снять срок):', r.dueDate || '');
+  if (typed !== null) apply(typed);
+}
+
+/** Чип срока для строки дня — по нажатию открывается календарь, ✕ снимает срок. */
+function dueChipEditableHtml(r, type, i) {
+  if (r.dueDate) {
+    return dueChipHtml(r.dueDate).replace(
+        '<span class="chip',
+        `<span onclick="editRowDue('${type}',${i})" style="cursor:pointer" title="Нажмите — изменить срок" class="chip`)
+      + ` <span class="chip" onclick="editRowDue('${type}',${i});event.stopPropagation();" style="cursor:pointer;margin-left:2px" title="Изменить или снять срок">✕</span>`;
+  }
+  return ` <span class="chip" onclick="editRowDue('${type}',${i})" style="cursor:pointer" title="Указать, когда отдавать">📅 срок</span>`;
+}
+
 /* Чип «отдать до …» (v133). Только показ: dueDate — напоминание, в расчётах
    не участвует. Просроченный срок подсвечиваем красным, сегодняшний — жёлтым. */
 function dueChipHtml(dueDate, dayStr) {
@@ -3729,10 +3771,10 @@ function renderOutBody(day) {
         : '';
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}${dueChipHtml(r.dueDate)}${noteHtml}</td>
+        <td class="client-name">${escapeHtml(r.client)}${dueChipEditableHtml(r, 'out', i)}${noteHtml}</td>
         <td class="amount neg">${fmt(r.amount)}</td>
         <td><div class="row-actions">
-          <button class="icon-btn" onclick="editRow('out',${i})" title="Редактировать">✏️</button>
+          <button class="icon-btn" onclick="openQuickEntryEdit('out',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="deleteRow('out',${i})" title="Удалить">🗑</button>
         </div></td>
       </tr>`;
@@ -3833,11 +3875,11 @@ function renderInBody(day) {
       }
       return `
       <tr>
-        <td class="client-name">${clientHtml}${tagHtml}${dueChipHtml(r.dueDate)}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
+        <td class="client-name">${clientHtml}${tagHtml}${dueChipEditableHtml(r, 'in', i)}<div style="font-size:11px;color:var(--muted-bright);font-weight:400;margin-top:2px">${sumDisplay}</div>${pairRunHtml}${curatorHtml}${pairDebtHtml}${noteHtml}</td>
         <td class="pct">${pctDisplay}</td>
         <td class="amount pos">${totalDisplay}</td>
         <td><div class="row-actions">
-          <button class="icon-btn" onclick="editRow('in',${i})" title="Редактировать">✏️</button>
+          <button class="icon-btn" onclick="openQuickEntryEdit('in',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="trimPairSuffixInRow(${i})" title="Убрать метку или последний суффикс">✂️</button>
           <button class="icon-btn" onclick="deleteRow('in',${i})" title="Удалить">🗑</button>
         </div></td>
@@ -5814,9 +5856,44 @@ function addClientPair(name) {
    Поэтому расчёт от способа ввода не зависит. */
 let qeType = 'in';
 
+/* Правка записи идёт через ту же крупную форму, что и ввод (v145).
+   Раньше это была цепочка prompt-окон: сумма → %1 → %2 → %кур → примечание,
+   вслепую и без возможности вернуться. Теперь всё поля разом, с предпросмотром.
+   Расчёт не меняется: при сохранении суммы считаются той же формулой, что
+   и в addRow — процент от ИСХОДНОЙ суммы. */
+let qeEditing = null;      // { type, idx } или null, когда добавляем новое
+
 /** Открыть крупную форму: 'in' — приход, 'out' — получено на руки. */
 function openQuickEntry(type) {
+  qeEditing = null;
   qeSetType(type === 'out' ? 'out' : 'in');
+  document.getElementById('quick-entry-modal').classList.add('open');
+}
+
+/** Открыть ту же форму для правки существующей записи. */
+function openQuickEntryEdit(type, i) {
+  const day = getDay(currentDate);
+  const r = day[type] && day[type][i];
+  if (!r) return;
+  qeEditing = { type: type, idx: i };
+  qeType = type;
+  const g = (id) => document.getElementById(id);
+  // Подставляем значения записи в поля компактной формы — qeSetType их подхватит
+  const sel = g(type === 'in' ? 'in-client' : 'out-client');
+  if (sel && r.client) { sel.value = r.client; _lastClientSel[sel.id] = r.client; }
+  if (type === 'in') {
+    g('in-amount').value = (r.parts && r.parts.length > 1) ? r.parts.join('+') : String(r.amount || '');
+    g('in-pct').value    = (r.pct !== null && r.pct !== undefined) ? r.pct : '';
+    g('in-pct2').value   = (r.pct2 !== null && r.pct2 !== undefined) ? r.pct2 : '';
+    g('in-pctcur').value = (r.pctCur !== null && r.pctCur !== undefined) ? r.pctCur : '';
+    g('in-note').value   = r.note || '';
+    g('in-due').value    = r.dueDate || '';
+  } else {
+    g('out-amount').value = String(r.amount || '');
+    g('out-note').value   = r.note || '';
+    g('out-due').value    = r.dueDate || '';
+  }
+  qeSetType(type);
   document.getElementById('quick-entry-modal').classList.add('open');
 }
 
@@ -5833,7 +5910,16 @@ function qeSetType(type) {
   g('qe-pcts').style.display = isIn ? '' : 'none';
   const sub = g('qe-submit');
   sub.dataset.t = qeType;
-  sub.textContent = isIn ? 'Добавить приход' : 'Добавить выдачу';
+  const editing = !!qeEditing;
+  sub.textContent = editing ? '💾 Сохранить изменения' : (isIn ? 'Добавить приход' : 'Добавить выдачу');
+  if (editing) {
+    title.textContent = isIn ? '✏️ Правка прихода' : '✏️ Правка выдачи';
+  }
+  // В режиме правки вкладки не переключаем — иначе запись «перепрыгнет» тип
+  g('qe-tab-in').disabled = editing;
+  g('qe-tab-out').disabled = editing;
+  g('qe-tab-in').style.opacity = (editing && !isIn) ? '.35' : '';
+  g('qe-tab-out').style.opacity = (editing && isIn) ? '.35' : '';
   g('qe-amount-label').textContent = isIn ? 'Суммы — каждая своей строкой' : 'Сумма';
   // То, что уже набрано в компактной форме, раскладываем обратно по строкам
   const parsedRaw = parseSumString(g(isIn ? 'in-amount' : 'out-amount').value || '');
@@ -6102,9 +6188,60 @@ function qeOnInput() {
   }
 }
 
+/* Сохранить правку записи (v145). Формулы — те же, что в addRow: оба процента
+   считаются от ИСХОДНОЙ суммы. Ничего нового не изобретаем. */
+function qeSaveEdit() {
+  const g = (id) => document.getElementById(id);
+  const day = getDay(currentDate);
+  const list = day[qeEditing.type];
+  const r = list && list[qeEditing.idx];
+  if (!r) { qeEditing = null; closeModal('quick-entry-modal'); return; }
+
+  if (qeEditing.type === 'out') {
+    const amount = parseDecimal(g('out-amount').value);
+    if (isNaN(amount) || amount <= 0) { showToast('Введите сумму', true); return; }
+    r.client = g('out-client').value || r.client;
+    r.amount = amount;
+    r.note = g('out-note').value.trim();
+    r.dueDate = g('out-due').value || null;
+  } else {
+    const parsed = parseSumString(g('in-amount').value);
+    if (!parsed || parsed.sum <= 0) { showToast('Введите сумму', true); return; }
+    const p1 = parseDecimal(g('in-pct').value);
+    if (isNaN(p1) || p1 <= 0) { showToast('Введите первый процент', true); return; }
+    const p2raw = g('in-pct2').value;
+    let p2 = null;
+    if (String(p2raw).trim() !== '') {
+      p2 = parseDecimal(p2raw);
+      if (isNaN(p2) || p2 <= 0) { showToast('Неверный второй процент', true); return; }
+    }
+    const pc = parseDecimal(g('in-pctcur').value);
+    // Всё проверено — только теперь меняем запись
+    r.client = g('in-client').value || r.client;
+    r.amount = parsed.sum;
+    r.parts = parsed.parts.length > 1 ? parsed.parts : null;
+    r.pct = p1;
+    r.pct2 = p2;
+    r.pctCur = (isNaN(pc) || pc <= 0) ? null : pc;
+    r.total = r.amount * (1 - p1 / 100);
+    r.total2 = (p2 !== null) ? r.amount * (1 - p2 / 100) : null;
+    r.note = g('in-note').value.trim();
+    r.dueDate = g('in-due').value || null;
+    if (!isNaN(pc) && pc > 0) state.lastPctCur = pc;
+  }
+
+  qeEditing = null;
+  recalcCarryoversAfter(currentDate);
+  saveState();
+  render();
+  closeModal('quick-entry-modal');
+  showToast('Изменения сохранены');
+}
+
 /** Добавить запись. Проверки и запись — внутри addRow(), здесь их нет. */
 function qeSubmit() {
   qeOnInput();
+  if (qeEditing) { qeSaveEdit(); return; }
   const day = getDay(currentDate);
   const before = (day[qeType] || []).length;
   addRow(qeType);
@@ -6603,6 +6740,7 @@ function openClientsModal() {
 }
 function closeModal(id) {
   document.getElementById(id).classList.remove('open');
+  if (id === 'quick-entry-modal') qeEditing = null;   // вышли из правки (v145)
 }
 
 // ── ДОСКА (домашний экран) ───────────────────────────────────────────────────
