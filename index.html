@@ -1452,7 +1452,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v146</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v147</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3829,11 +3829,22 @@ function renderInBody(day) {
       let totalDisplay;
       if (hasP2) {
         const dealResult = r100(r.total) - r100(r.total2);
+        // Доля куратора по этой сделке и остаток себе — та же арифметика, что
+        // на плитках: куратору floor100(сумма × %кур), на руки — разница (v147).
+        const curOfRow = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
+          ? floor100((r.amount || 0) * r.pctCur / 100) : 0;
+        const handOfRow = dealResult - curOfRow;
         totalDisplay = `${fmtRounded(r.total)}` +
           `<div style="color:var(--expense);font-size:13px;font-weight:600;margin-top:3px">−${r.pct2}%: ${fmtRounded(r.total2)}</div>` +
           `<div style="border-top:1px dashed var(--border);margin-top:6px;padding-top:6px">` +
-            `<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Итог сделки</div>` +
-            `<div style="color:var(--accent3);font-size:14px;font-weight:700">${dealResult.toLocaleString('ru-RU')} ₽</div>` +
+            `<div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-bottom:2px">Итог сделки</div>` +
+            `<div style="color:var(--accent3);font-size:14px;font-weight:700">${fmt(dealResult)}</div>` +
+            (curOfRow
+              ? `<div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-top:5px">− куратору</div>` +
+                `<div style="color:#ffb74d;font-size:12.5px;font-weight:600">${fmt(curOfRow)}</div>`
+              : '') +
+            `<div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-top:5px">На руки</div>` +
+            `<div style="color:var(--accent);font-size:15px;font-weight:700">${fmt(handOfRow)}</div>` +
           `</div>`;
       } else if (hasP1) {
         totalDisplay = fmtRounded(r.total);
@@ -3848,8 +3859,8 @@ function renderInBody(day) {
       const pairRunHtml = '';
       const hasCur = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0);
       const curatorHtml = hasCur
-        ? `<div style="font-size:11px;color:#ffb74d;font-weight:600;margin-top:3px">К куратору ${r.pctCur}%: ${fmt(floor100(r.amount * r.pctCur / 100))}</div>`
-        : `<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:3px;font-style:italic">К куратору: % не задан</div>`;
+        ? `<div style="font-size:11px;color:#ffb74d;font-weight:600;margin-top:3px">Куратору ${r.pctCur}%: ${fmt(floor100(r.amount * r.pctCur / 100))}</div>`
+        : `<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:3px;font-style:italic">Куратору: % не задан</div>`;
       // Строку долга в дневном виде не показываем — гашение долга смотрим в аналитике.
       const pairDebtHtml = '';
       const noteHtml = (r.note && r.note.trim())
