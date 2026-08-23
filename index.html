@@ -688,10 +688,10 @@
   #abPrintContent table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
   /* Предпросмотр отчёта на телефоне: ужимаем, чтобы влезали все колонки (v139).
      На печати А4 размеры обычные — это правило только для экрана. */
-  @media screen and (max-width: 600px) {
-    #abPrintContent { padding: 10px 8px; }
-    #abPrintContent table { font-size: 10px; }
-    #abPrintContent th, #abPrintContent td { padding: 4px 5px !important; }
+  @media screen and (max-width: 760px) {
+    #abPrintContent { padding: 10px 6px; }
+    #abPrintContent table { font-size: 9.5px; table-layout: fixed; width: 100%; }
+    #abPrintContent th, #abPrintContent td { padding: 4px 3px !important; word-break: break-word; }
     #abPrintContent h1 { font-size: 15px; }
     #abPrintContent h2 { font-size: 12.5px; }
   }
@@ -1372,6 +1372,10 @@
           <div class="ic">👔</div><div class="t">Куратор ко мне</div>
           <div class="s" id="tileCuratorMineBody">—</div>
         </div>
+        <div class="board-tile" style="--tile-c:#818cf8" onclick="openPairReportPicker()">
+          <div class="ic">📑</div><div class="t">Отчёт по парам</div>
+          <div class="s">Для клиента: все приходы пары, проценты, выдано и остаток. Печать или PDF.</div>
+        </div>
         <div class="board-tile" style="--tile-c:#818cf8" onclick="printDayReport()">
           <div class="ic">🧾</div><div class="t">Отчёт за день</div>
           <div class="s">Один лист: итоги, приходы, выдачи, долги, куратор. Печать или PDF.</div>
@@ -1452,7 +1456,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v148</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v150</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1625,6 +1629,17 @@
     <b id="qb-balance">—</b>
   </div>
   <button class="qb-add" onclick="openQuickEntry('in')" title="Добавить приход или выдачу">＋</button>
+</div>
+
+<!-- ── ОТЧЁТ ПО ПАРАМ ── -->
+<div class="modal-overlay" id="pair-report-modal">
+  <div class="modal" style="max-width:560px">
+    <h2 style="color:#818cf8">📑 Отчёт по паре</h2>
+    <div id="pair-report-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('pair-report-modal')">Закрыть</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="hand-modal">
@@ -7792,6 +7807,104 @@ function printDayReport() {
 
   showAbPrintOverlay('Расчёт ' + formatDateShort(d),
     head + inBlock + outBlock + debtBlock + shareBlock + note);
+}
+
+
+/* ── ОТЧЁТ ПО ПАРАМ (v149) ───────────────────────────────────────────────────
+   Для клиента: все приходы пары построчно — сумма, процент, что причитается,
+   сколько уже выдано и что осталось. Печать или PDF.
+
+   Ничего не пересчитывает: суммы после процентов берутся из полей записи
+   (r.total / r.total2, округление r100 — как везде), выданность — из
+   `pairPaidCoverage`, той же карты, на которой стоят долги и куратор. */
+function pairReportRows(pair) {
+  const p = (pair || '').trim();
+  const rows = [];
+  if (!p) return rows;
+  const cover = pairPaidCoverage(currentDate, 'fifo');
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > currentDate) break;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() !== p) return;
+      const after1 = (r.pct !== null && r.pct !== undefined && r.pct > 0
+                      && r.total !== null && r.total !== undefined) ? r100(r.total) : (r.total || 0);
+      const after2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
+                      && r.total2 !== null && r.total2 !== undefined) ? r100(r.total2) : null;
+      const frac = isWeekday(d) ? (cover[p + '#' + d + '#' + idx] || 0) : 0;
+      const paid = r100(after1 * frac);
+      rows.push({ date: d, amount: r.amount || 0, parts: r.parts || null,
+                  pct: r.pct, pct2: r.pct2, after1: after1, after2: after2,
+                  paid: paid, left: after1 - paid, frac: frac, dueDate: r.dueDate || null });
+    });
+  }
+  return rows;
+}
+
+/** Таблица одной пары для отчёта. */
+function pairReportTableHtml(pair) {
+  const rows = pairReportRows(pair);
+  if (!rows.length) {
+    return `<h2>${escapeHtml(pair)}</h2><p class="bd">Приходов нет.</p>`;
+  }
+  const pf = (x) => (x === null || x === undefined) ? '—' : String(x).replace('.', ',') + '%';
+  const sum = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+  const body = rows.map(r => `<tr>
+      <td>${formatDateShort(r.date)}${r.dueDate ? '<br><span class="bd">отдать до ' + formatDateShort(r.dueDate) + '</span>' : ''}</td>
+      <td style="text-align:right">${fmt(r.amount)}${r.parts && r.parts.length > 1
+          ? '<br><span class="bd">' + r.parts.map(n => fmtRaw(n)).join(' + ') + '</span>' : ''}</td>
+      <td style="text-align:right">${pf(r.pct)}</td>
+      <td style="text-align:right">${fmt(r.after1)}</td>
+      <td style="text-align:right">${r.paid ? fmt(r.paid) : '—'}</td>
+      <td style="text-align:right"><b>${r.left > 0 ? fmt(r.left) : '—'}</b></td>
+    </tr>`).join('');
+  return `<h2>${escapeHtml(pair)}</h2>
+    <table>
+      <tr><th>Дата</th><th style="text-align:right">Сумма прихода</th><th style="text-align:right">%</th>
+          <th style="text-align:right">К отдаче</th><th style="text-align:right">Выдано</th>
+          <th style="text-align:right">Остаток</th></tr>
+      ${body}
+      <tr>
+        <td><b>Итого (${rows.length})</b></td>
+        <td style="text-align:right"><b>${fmt(sum('amount'))}</b></td>
+        <td></td>
+        <td style="text-align:right"><b>${fmt(sum('after1'))}</b></td>
+        <td style="text-align:right"><b>${fmt(sum('paid'))}</b></td>
+        <td style="text-align:right"><b>${fmt(sum('left'))}</b></td>
+      </tr>
+    </table>`;
+}
+
+/** Отчёт по одной паре или по всем сразу. */
+function printPairReport(pair) {
+  const all = !pair;
+  const list = all ? allClientPairs().filter(p => pairReportRows(p).length) : [pair];
+  if (!list.length) { showToast('Приходов не найдено', true); return; }
+  const title = all ? 'Отчёт по парам' : ('Отчёт · ' + pair);
+  const head = `<h1>${all ? 'Отчёт по всем парам' : 'Отчёт по паре «' + escapeHtml(pair) + '»'}</h1>
+    <p class="bd">По состоянию на ${formatDateLong(currentDate)}. «К отдаче» — сумма после первого процента;
+    «выдано» — сколько уже отдано на руки; «остаток» — что ещё причитается.</p>`;
+  const body = list.map(pairReportTableHtml).join('');
+  closeModal('pair-report-modal');
+  showAbPrintOverlay(title, head + body);
+}
+
+/** Окно выбора пары для отчёта. */
+function openPairReportPicker() {
+  const box = document.getElementById('pair-report-body');
+  if (!box) return;
+  const pairs = allClientPairs().filter(p => pairReportRows(p).length);
+  box.innerHTML = pairs.length
+    ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--font-ui)">
+         Нажмите пару — откроется её отчёт: все приходы, проценты, выдано и остаток.
+       </div>
+       <div class="qe-pairs">${pairs.map((p, i) =>
+          `<button class="qe-pair" onclick="printPairReport(${JSON.stringify(p).replace(/"/g, '&quot;')})">${escapeHtml(p)}</button>`
+        ).join('')}</div>
+       <button class="qe-add-sum" style="margin-top:12px" onclick="printPairReport(null)">📑 Отчёт по всем парам сразу</button>`
+    : '<div style="color:var(--muted);padding:8px 0">Приходов пока нет — отчитываться не о чем.</div>';
+  document.getElementById('pair-report-modal').classList.add('open');
 }
 
 // Окно предпросмотра: показывает отчёт с кнопками «Печать» и «Сохранить как PDF»
