@@ -1372,9 +1372,13 @@
           <div class="ic">👔</div><div class="t">Куратор ко мне</div>
           <div class="s" id="tileCuratorMineBody">—</div>
         </div>
-        <div class="board-tile" style="--tile-c:#818cf8" onclick="openPairReportPicker()">
-          <div class="ic">📑</div><div class="t">Отчёт по парам</div>
-          <div class="s">Для клиента: все приходы пары, проценты, выдано и остаток. Печать или PDF.</div>
+        <div class="board-tile" style="--tile-c:#818cf8" onclick="openPairReportPicker1()">
+          <div class="ic">📑</div><div class="t">Отчёт · 1-й %</div>
+          <div class="s">Для первой стороны пары: приходы, к отдаче по первому проценту, выдано и остаток.</div>
+        </div>
+        <div class="board-tile" style="--tile-c:#ffb74d" onclick="openPairReportPicker2()">
+          <div class="ic">📄</div><div class="t">Отчёт · 2-й %</div>
+          <div class="s">То же самое, но по второму проценту — для второй стороны пары.</div>
         </div>
         <div class="board-tile" style="--tile-c:#818cf8" onclick="printDayReport()">
           <div class="ic">🧾</div><div class="t">Отчёт за день</div>
@@ -1456,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v150</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v152</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1634,7 +1638,7 @@
 <!-- ── ОТЧЁТ ПО ПАРАМ ── -->
 <div class="modal-overlay" id="pair-report-modal">
   <div class="modal" style="max-width:560px">
-    <h2 style="color:#818cf8">📑 Отчёт по паре</h2>
+    <h2 style="color:#818cf8" id="pair-report-title">📑 Отчёт по паре</h2>
     <div id="pair-report-body"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('pair-report-modal')">Закрыть</button>
@@ -7817,13 +7821,16 @@ function printDayReport() {
    Ничего не пересчитывает: суммы после процентов берутся из полей записи
    (r.total / r.total2, округление r100 — как везде), выданность — из
    `pairPaidCoverage`, той же карты, на которой стоят долги и куратор. */
-function pairReportRows(pair) {
+function pairReportRows(pair, from, to) {
   const p = (pair || '').trim();
   const rows = [];
   if (!p) return rows;
   const cover = pairPaidCoverage(currentDate, 'fifo');
+  const lo = (from || '').trim(), hi = (to || '').trim();
   for (const d of Object.keys(state.days).sort()) {
     if (d > currentDate) break;
+    if (lo && d < lo) continue;          // выборка периода — только показ (v151)
+    if (hi && d > hi) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -7842,23 +7849,66 @@ function pairReportRows(pair) {
   return rows;
 }
 
+/** Выдачи пары по датам — когда и сколько реально отдано (v151). */
+function pairReportPayouts(pair, from, to) {
+  const p = (pair || '').trim();
+  const out = [];
+  if (!p) return out;
+  const lo = (from || '').trim(), hi = (to || '').trim();
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > currentDate) break;
+    if (lo && d < lo) continue;
+    if (hi && d > hi) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach(o => {
+      if ((o.client || '').trim() !== p) return;
+      out.push({ date: d, amount: o.amount || 0, note: o.note || '' });
+    });
+  }
+  return out;
+}
+
 /** Таблица одной пары для отчёта. */
-function pairReportTableHtml(pair) {
-  const rows = pairReportRows(pair);
+function pairReportTableHtml(pair, from, to, second) {
+  const rows = pairReportRows(pair, from, to);
+  const pays = pairReportPayouts(pair, from, to);
+  if (!rows.length && !pays.length) {
+    return `<h2>${escapeHtml(pair)}</h2><p class="bd">За выбранный период движения нет.</p>`;
+  }
   if (!rows.length) {
-    return `<h2>${escapeHtml(pair)}</h2><p class="bd">Приходов нет.</p>`;
+    return `<h2>${escapeHtml(pair)}</h2><p class="bd">Приходов за период нет.</p>`
+      + pairPayoutsTableHtml(pays);
   }
   const pf = (x) => (x === null || x === undefined) ? '—' : String(x).replace('.', ',') + '%';
-  const sum = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
-  const body = rows.map(r => `<tr>
+  /* second = отчёт для второй стороны пары (v152): та же таблица, но «к отдаче»
+     считается по ВТОРОМУ проценту. Суммы берём из готового поля after2
+     (r100(total2)) — расчёт не трогаем. Выданное делим в той же доле frac. */
+  const val = (r) => second ? r.after2 : r.after1;
+  const paidOf = (r) => {
+    const v = val(r);
+    if (v === null || v === undefined) return null;
+    return second ? r100(v * (r.frac || 0)) : r.paid;
+  };
+  const leftOf = (r) => {
+    const v = val(r);
+    if (v === null || v === undefined) return null;
+    const pd = paidOf(r) || 0;
+    return v - pd;
+  };
+  const sumBy = (fn) => rows.reduce((a, r) => a + (fn(r) || 0), 0);
+  const body = rows.map(r => {
+    const v = val(r), pd = paidOf(r), lf = leftOf(r);
+    return `<tr>
       <td>${formatDateShort(r.date)}${r.dueDate ? '<br><span class="bd">отдать до ' + formatDateShort(r.dueDate) + '</span>' : ''}</td>
       <td style="text-align:right">${fmt(r.amount)}${r.parts && r.parts.length > 1
           ? '<br><span class="bd">' + r.parts.map(n => fmtRaw(n)).join(' + ') + '</span>' : ''}</td>
-      <td style="text-align:right">${pf(r.pct)}</td>
-      <td style="text-align:right">${fmt(r.after1)}</td>
-      <td style="text-align:right">${r.paid ? fmt(r.paid) : '—'}</td>
-      <td style="text-align:right"><b>${r.left > 0 ? fmt(r.left) : '—'}</b></td>
-    </tr>`).join('');
+      <td style="text-align:right">${pf(second ? r.pct2 : r.pct)}</td>
+      <td style="text-align:right">${(v === null || v === undefined) ? '—' : fmt(v)}</td>
+      <td style="text-align:right">${pd ? fmt(pd) : '—'}</td>
+      <td style="text-align:right"><b>${(lf !== null && lf > 0) ? fmt(lf) : '—'}</b></td>
+    </tr>`;
+  }).join('');
   return `<h2>${escapeHtml(pair)}</h2>
     <table>
       <tr><th>Дата</th><th style="text-align:right">Сумма прихода</th><th style="text-align:right">%</th>
@@ -7867,43 +7917,101 @@ function pairReportTableHtml(pair) {
       ${body}
       <tr>
         <td><b>Итого (${rows.length})</b></td>
-        <td style="text-align:right"><b>${fmt(sum('amount'))}</b></td>
+        <td style="text-align:right"><b>${fmt(sumBy(r => r.amount))}</b></td>
         <td></td>
-        <td style="text-align:right"><b>${fmt(sum('after1'))}</b></td>
-        <td style="text-align:right"><b>${fmt(sum('paid'))}</b></td>
-        <td style="text-align:right"><b>${fmt(sum('left'))}</b></td>
+        <td style="text-align:right"><b>${fmt(sumBy(val))}</b></td>
+        <td style="text-align:right"><b>${fmt(sumBy(paidOf))}</b></td>
+        <td style="text-align:right"><b>${fmt(sumBy(leftOf))}</b></td>
       </tr>
+    </table>` + pairPayoutsTableHtml(pays);
+}
+
+/** Таблица выдач: когда и сколько отдали (v151). */
+function pairPayoutsTableHtml(pays) {
+  if (!pays || !pays.length) return '<p class="bd">Выдач за период не было.</p>';
+  const total = pays.reduce((a, x) => a + x.amount, 0);
+  return `<h3>Выдано на руки</h3>
+    <table>
+      <tr><th>Дата выдачи</th><th style="text-align:right">Сумма</th><th>Примечание</th></tr>
+      ${pays.map(x => `<tr>
+        <td>${formatDateShort(x.date)}</td>
+        <td style="text-align:right">${fmt(x.amount)}</td>
+        <td class="bd">${escapeHtml(x.note || '')}</td>
+      </tr>`).join('')}
+      <tr><td><b>Итого (${pays.length})</b></td>
+          <td style="text-align:right"><b>${fmt(total)}</b></td><td></td></tr>
     </table>`;
 }
 
 /** Отчёт по одной паре или по всем сразу. */
-function printPairReport(pair) {
+function printPairReport(pair, from, to, second) {
+  // Период берём из полей окна выбора, если явно не передали
+  const gv = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const lo = (from !== undefined) ? (from || '') : gv('pair-report-from');
+  const hi = (to !== undefined) ? (to || '') : gv('pair-report-to');
   const all = !pair;
-  const list = all ? allClientPairs().filter(p => pairReportRows(p).length) : [pair];
-  if (!list.length) { showToast('Приходов не найдено', true); return; }
-  const title = all ? 'Отчёт по парам' : ('Отчёт · ' + pair);
-  const head = `<h1>${all ? 'Отчёт по всем парам' : 'Отчёт по паре «' + escapeHtml(pair) + '»'}</h1>
-    <p class="bd">По состоянию на ${formatDateLong(currentDate)}. «К отдаче» — сумма после первого процента;
+  const list = all
+    ? allClientPairs().filter(p => pairReportRows(p, lo, hi).length || pairReportPayouts(p, lo, hi).length)
+    : [pair];
+  if (!list.length) { showToast('За этот период движения нет', true); return; }
+  const period = (lo || hi)
+    ? `Период: ${lo ? formatDateShort(lo) : 'с начала'} — ${hi ? formatDateShort(hi) : formatDateShort(currentDate)}.`
+    : `За всё время, по состоянию на ${formatDateLong(currentDate)}.`;
+  const which = second ? '2-й процент' : '1-й процент';
+  const title = (all ? 'Отчёт по парам' : ('Отчёт · ' + pair)) + ' · ' + which;
+  const head = `<h1>${all ? 'Отчёт по всем парам' : 'Отчёт по паре «' + escapeHtml(pair) + '»'}
+      <span style="font-size:.65em;color:#555">· ${which}</span></h1>
+    <p class="bd">${period} «К отдаче» — сумма после ${second ? 'ВТОРОГО' : 'первого'} процента;
     «выдано» — сколько уже отдано на руки; «остаток» — что ещё причитается.</p>`;
-  const body = list.map(pairReportTableHtml).join('');
+  const body = list.map(p => pairReportTableHtml(p, lo, hi, second)).join('');
   closeModal('pair-report-modal');
   showAbPrintOverlay(title, head + body);
 }
+
+let pairReportSecond = false;   // какой процент показывает окно выбора (v152)
+
+/** Окно выбора пары — отчёт по 1-му проценту. */
+function openPairReportPicker1() { pairReportSecond = false; openPairReportPicker(); }
+/** Окно выбора пары — отчёт по 2-му проценту (вторая сторона пары). */
+function openPairReportPicker2() { pairReportSecond = true;  openPairReportPicker(); }
 
 /** Окно выбора пары для отчёта. */
 function openPairReportPicker() {
   const box = document.getElementById('pair-report-body');
   if (!box) return;
-  const pairs = allClientPairs().filter(p => pairReportRows(p).length);
+  const pairs = allClientPairs().filter(p => pairReportRows(p).length || pairReportPayouts(p).length);
+  // Период не сбрасываем при переоткрытии — часто нужен тот же
+  const prevFrom = (document.getElementById('pair-report-from') || {}).value || '';
+  const prevTo = (document.getElementById('pair-report-to') || {}).value || '';
   box.innerHTML = pairs.length
-    ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--font-ui)">
-         Нажмите пару — откроется её отчёт: все приходы, проценты, выдано и остаток.
+    ? `<div class="qe-field" style="margin-bottom:12px">
+         <label>Период — можно оставить пустым, тогда за всё время</label>
+         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+           <div>
+             <div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-bottom:4px">с</div>
+             <input type="date" id="pair-report-from" class="qe-input qe-input-date" value="${prevFrom}">
+           </div>
+           <div>
+             <div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-bottom:4px">по</div>
+             <input type="date" id="pair-report-to" class="qe-input qe-input-date" value="${prevTo}">
+           </div>
+         </div>
+         <button class="qe-add-sum" style="margin-top:8px;padding:9px"
+                 onclick="document.getElementById('pair-report-from').value='';document.getElementById('pair-report-to').value='';">
+           Сбросить период
+         </button>
        </div>
-       <div class="qe-pairs">${pairs.map((p, i) =>
-          `<button class="qe-pair" onclick="printPairReport(${JSON.stringify(p).replace(/"/g, '&quot;')})">${escapeHtml(p)}</button>`
+       <div style="font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--font-ui)">
+         Нажмите пару — откроется её отчёт по <b style="color:${pairReportSecond ? '#ffb74d' : 'var(--accent)'}">${pairReportSecond ? 'второму' : 'первому'} проценту</b>:
+         приходы, выдано с датами и остаток.
+       </div>
+       <div class="qe-pairs">${pairs.map((p) =>
+          `<button class="qe-pair" onclick="printPairReport(${JSON.stringify(p).replace(/"/g, '&quot;')}, undefined, undefined, ${pairReportSecond})">${escapeHtml(p)}</button>`
         ).join('')}</div>
-       <button class="qe-add-sum" style="margin-top:12px" onclick="printPairReport(null)">📑 Отчёт по всем парам сразу</button>`
+       <button class="qe-add-sum" style="margin-top:12px" onclick="printPairReport(null, undefined, undefined, ${pairReportSecond})">📑 Отчёт по всем парам сразу</button>`
     : '<div style="color:var(--muted);padding:8px 0">Приходов пока нет — отчитываться не о чем.</div>';
+  const t = document.getElementById('pair-report-title');
+  if (t) t.textContent = pairReportSecond ? '📑 Отчёт по паре · 2-й процент' : '📑 Отчёт по паре · 1-й процент';
   document.getElementById('pair-report-modal').classList.add('open');
 }
 
