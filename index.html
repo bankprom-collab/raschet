@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v158</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v159</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3197,7 +3197,7 @@ function curatorRunningBalance(dayStr) {
 /** Начислено куратору за всё время до dayStr — по выданности на этот день. */
 function curatorAccruedTotal(dayStr) {
   let sum = 0;
-  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
+  const cover = pairPaidCoverage(dayStr);        // выданность — по всей истории (v159)
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (d < HAND_START_DATE) continue;
@@ -3239,8 +3239,12 @@ function curatorResetDate() {
 }
 
 function curatorSettlement(dayStr) {
-  // Считаем с HAND_START_DATE — той же даты, что и «На руки» (v129).
-  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
+  /* Выданность считаем по ВСЕЙ истории (v159). С границей выдача, погасившая
+     старый приход, «перескакивала» на свежий: у владельца приходы 21 авг
+     показывались выданными и по ним начислялся куратор, хотя денег по ним
+     не отдавали. Граница ниже отбирает, какие начисления идут в счёт, —
+     но на то, что чем погашено, она влиять не должна. */
+  const cover = pairPaidCoverage(dayStr);
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
@@ -3385,7 +3389,7 @@ function dealOfRow(r, frac) {
     здесь, и складывается со всеми остальными выданными. */
 function handOpenRows(dayStr) {
   const rows = [];
-  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
+  const cover = pairPaidCoverage(dayStr);        // выданность — по всей истории (v159)
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (d < HAND_START_DATE) continue;          // старая история в счёт не идёт
