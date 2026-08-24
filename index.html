@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v163</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v164</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1773,6 +1773,8 @@
   <div class="modal curator-mine-modal-body" style="max-width:820px">
     <h2 style="color:#ffb74d">👔 Куратор ко мне</h2>
     <div id="curator-mine-body"></div>
+    <input type="date" id="hand-start-input" onchange="setHandStart(this.value)"
+           style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none">
     <div class="modal-footer no-print">
       <button class="btn btn-primary" onclick="printCuratorMine()" style="background:#ffb74d;border-color:#ffb74d;color:#000;font-weight:700">🖨 Печать</button>
       <button class="btn btn-ghost" onclick="closeModal('curator-mine-modal')">Закрыть</button>
@@ -2359,7 +2361,16 @@ document.addEventListener('DOMContentLoaded', () => {
    14.08.2026: «зачем ты мне на руки пихаешь все подряд за старые числа».
    Объявлена ДО loadState() — как MIGRATION_VERSION, чтобы не попасть в
    мёртвую зону. Двигать только по прямой просьбе владельца. */
-const HAND_START_DATE = '2026-08-03';
+const HAND_START_DEFAULT = '2026-07-27';
+
+/* Дата начала счёта. Владелец 25.08.2026: «Надо брать все сделки, начиная
+   с конца июля. То, что было выдано, от них считай куратору деньги». Точку
+   он двигает сам — кнопка «изменить» в окне «Куратор ко мне», значение
+   лежит в state.handStart. Не константа: угадывать её за владельца больше
+   не будем, каждая догадка стоила пересчёта. */
+function handStart() {
+  return (state && state.handStart) ? state.handStart : HAND_START_DEFAULT;
+}
 
 const STORAGE_KEY = 'ledger_v1';
 
@@ -3197,7 +3208,7 @@ function curatorRunningBalance(dayStr) {
 /** Начислено куратору за всё время до dayStr — по выданности на этот день. */
 function curatorAccruedTotal(dayStr) {
   let sum = 0;
-  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // v163
+  const cover = pairPaidCoverage(dayStr);   // выданность — по всей истории
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
@@ -3205,9 +3216,10 @@ function curatorAccruedTotal(dayStr) {
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
       if (!(r.pctCur > 0)) return;
+      if (d < handStart()) return;              // до начала счёта — закрыто
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
       const frac = cover[key] || 0;
-      if (frac <= 0) return;
+      if (frac <= 0) return;                    // не выдано — не считается
       sum += floor100((r.amount || 0) * r.pctCur / 100 * frac);
     });
   }
@@ -3219,7 +3231,7 @@ function curatorPaidAll(dayStr) {
   let sum = 0;
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (d < HAND_START_DATE) continue;
+    if (d < handStart()) continue;
     const dd = state.days[d];
     if (dd && typeof dd.curatorPaid === 'number') sum += dd.curatorPaid;
   }
@@ -3247,7 +3259,7 @@ function curatorSettlement(dayStr) {
      но на то, что чем погашено, она влиять не должна. */
   /* Выданность — по всей истории, ровно как в блоке невыданных приходов
      (v162). Что владелец видит там невыданным, то и в счёт не идёт. */
-  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // v163
+  const cover = pairPaidCoverage(dayStr);   // выданность — по всей истории
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
@@ -3260,9 +3272,10 @@ function curatorSettlement(dayStr) {
     if (!isWeekday(d) || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
       if (!(r.pctCur > 0)) return;
+      if (d < handStart()) return;              // до начала счёта — закрыто
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
       const frac = cover[key] || 0;
-      if (frac <= 0) return;
+      if (frac <= 0) return;                    // не выдано — не считается
       const sum = floor100((r.amount || 0) * r.pctCur / 100 * frac);
       if (sum <= 0) return;
       accr.push({ date: d, idx: idx, pair: r.client || '—', amount: r.amount || 0,
@@ -3370,94 +3383,6 @@ function dealsWeeklyAccrued(dayStr) {
    ПРИХОДА, и старый приход, выданный сегодня, не попадал ни к куратору,
    ни в «На руки». Считать надо по дате ВЫДАЧИ — деньги отданы, значит сделка
    состоялась. Сумм не пересчитывает, только даты. */
-/* Доля каждого прихода, погашенная выдачами НАЧИНАЯ С sinceDate (v163).
-
-   Правило владельца дословно: «Сумма идёт в расчёт куратору после того, как
-   она выдана на руки. Пусть даже за июль». То есть в счёт попадает не то,
-   что пришло после 3 августа, а то, что ПОСЛЕ 3 августа выдано — какого бы
-   числа ни был сам приход.
-
-   Разноска та же, что в pairPaidCoverage: сперва адресные выдачи (forIn),
-   потом остальное от старых приходов к новым. Отличие одно: у каждой выдачи
-   смотрим дату и складываем в `since` только то, что отдано с sinceDate.
-   Приход, закрытый «числом отдачи» без реальной выдачи, считается выданным
-   в это самое число. */
-function paidSinceCoverage(dayStr, sinceDate) {
-  const day = dayStr || currentDate;
-  const byPair = {};
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > day) break;
-    const dd = state.days[d];
-    if (!dd) continue;
-    if (isWeekday(d) && Array.isArray(dd.in)) {
-      dd.in.forEach((r, idx) => {
-        const p = (r.client || '').trim();
-        if (!p) return;
-        (byPair[p] || (byPair[p] = { ins: [], pays: [] })).ins.push({
-          date: d, idx: idx, after1: calcInRowFinal(r), left: 0, since: 0, byDate: null
-        });
-      });
-    }
-    if (Array.isArray(dd.out)) {
-      dd.out.forEach(o => {
-        const p = (o.client || '').trim();
-        if (!p) return;
-        (byPair[p] || (byPair[p] = { ins: [], pays: [] })).pays.push({
-          date: d, amount: o.amount || 0, forIn: o.forIn || null
-        });
-      });
-    }
-  }
-
-  const cover = {};
-  const dOut = state.debtOutDates || {};
-  for (const p in byPair) {
-    const ins = byPair[p].ins, pays = byPair[p].pays;
-    const byOwn = {};
-    ins.forEach(x => {
-      byOwn[x.date + '#' + x.idx] = x;
-      x.left = x.after1 || 0;
-      // Закрыт «числом отдачи» — пул выдач на него не тратим (как в
-      // pairPaidCoverage), а датой выдачи считаем само это число.
-      const gd = dOut[weekMondayStr(x.date) + '::' + p];
-      if (gd && x.date <= gd) { x.byDate = gd; x.left = 0; }
-    });
-
-    const give = (inr, amount, date) => {
-      const take = Math.min(inr.left, amount);
-      if (take <= 0) return 0;
-      inr.left -= take;
-      if (!sinceDate || date >= sinceDate) inr.since += take;
-      return take;
-    };
-
-    pays.forEach(pay => {                      // адресные — в свой приход
-      if (!pay.forIn) return;
-      let rest = pay.amount;
-      const inr = byOwn[pay.forIn];
-      if (inr) rest -= give(inr, rest, pay.date);
-      pay.rest = rest;                         // избыток пойдёт в общий пул
-    });
-    pays.forEach(pay => {                      // остальное — от старых к новым
-      let rest = pay.forIn ? (pay.rest || 0) : pay.amount;
-      for (let i = 0; i < ins.length && rest > 0; i++) {
-        rest -= give(ins[i], rest, pay.date);
-      }
-    });
-
-    ins.forEach(x => {
-      const key = p + '#' + x.date + '#' + x.idx;
-      if (x.byDate) {
-        cover[key] = (!sinceDate || x.byDate >= sinceDate) ? 1 : 0;
-        return;
-      }
-      const a = x.after1 || 0;
-      cover[key] = (a > 0) ? Math.min(1, x.since / a) : 0;
-    });
-  }
-  return cover;
-}
-
 /* ── «НА РУКИ»: ИТОГ СДЕЛКИ МИНУС КУРАТОР ────────────────────────────────────
    Правило владельца, 14.08.2026, дословно: «не считай по неделям», «эта сумма
    должна суммироваться со всеми остальными суммами, которые были выданы
@@ -3489,13 +3414,14 @@ function dealOfRow(r, frac) {
     здесь, и складывается со всеми остальными выданными. */
 function handOpenRows(dayStr) {
   const rows = [];
-  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // v163
+  const cover = pairPaidCoverage(dayStr);   // выданность — по всей истории
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
+      if (d < handStart()) return;              // до начала счёта — закрыто
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
       const frac = cover[key] || 0;
       if (frac <= 0) return;                    // ещё не выдан — заработка нет
@@ -3517,13 +3443,13 @@ function handOpenRows(dayStr) {
    Нужна, когда владелец ждёт сумму на плитке, а её там нет. */
 function handExcludedRows(dayStr) {
   const rows = [];
-  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // как в счёте (v163)
+  const cover = pairPaidCoverage(dayStr);
   const inOpen = {};
   handOpenRows(dayStr).forEach(x => { inOpen[x.date + '#' + x.idx] = true; });
   const reset = curatorResetDate();
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (d < HAND_START_DATE) continue;               // старая история — не разбираем
+    if (d < handStart()) continue;               // старая история — не разбираем
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
@@ -5617,7 +5543,7 @@ function openCuratorMineModal() {
 
   const table = !rows.length
     ? `<div style="color:var(--muted);padding:8px 0">
-        С ${formatDateShort(HAND_START_DATE)} нет выданных на руки приходов с процентом куратора.
+        С ${formatDateShort(handStart())} нет выданных на руки приходов с процентом куратора.
       </div>`
     : (() => {
         // Долг после каждой операции: всё начисленное по эту строку включительно
@@ -5778,7 +5704,9 @@ function openCuratorMineModal() {
 
   box.innerHTML = `
     <div class="cm-head">
-      <div class="cm-period">Счёт с ${formatDateShort(HAND_START_DATE)} · по факту выдачи, без деления на недели</div>
+      <div class="cm-period">Счёт с ${formatDateShort(handStart())} · по факту выдачи, без деления на недели<button
+          class="btn btn-ghost no-print" onclick="askHandStart()"
+          style="font-size:11.5px;padding:7px 14px;margin-left:8px;border-color:#ffb74d;color:#ffb74d">изменить</button></div>
       <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
     </div>
     ${resetNote}
@@ -5788,6 +5716,32 @@ function openCuratorMineModal() {
   `;
   const m = document.getElementById('curator-mine-modal');
   if (m) m.classList.add('open');
+}
+
+/* Сменить дату начала счёта. Всё, что раньше неё, владелец считает закрытым:
+   ни куратору, ни «На руки» оттуда ничего не берётся. Двигает только он —
+   в коде эта дата больше не зашита. */
+function askHandStart() {
+  const inp = document.getElementById('hand-start-input');
+  if (!inp) return;
+  inp.value = handStart();
+  if (typeof inp.showPicker === 'function') {
+    try { inp.showPicker(); return; } catch (e) {}
+  }
+  inp.style.position = 'static';
+  inp.style.opacity = '1';
+  inp.style.width = 'auto';
+  inp.style.height = 'auto';
+  inp.style.pointerEvents = 'auto';
+  inp.focus();
+}
+
+function setHandStart(v) {
+  if (!v) return;
+  state.handStart = v;
+  saveState();
+  render();
+  openCuratorMineModal();
 }
 
 /** Подвести черту: закрыть всё начисленное по сегодня. */
