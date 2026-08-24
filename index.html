@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v161</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v163</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3197,8 +3197,7 @@ function curatorRunningBalance(dayStr) {
 /** Начислено куратору за всё время до dayStr — по выданности на этот день. */
 function curatorAccruedTotal(dayStr) {
   let sum = 0;
-  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);   // v161
-  const paidOn = incomePayDates(dayStr);
+  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // v163
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
@@ -3209,8 +3208,6 @@ function curatorAccruedTotal(dayStr) {
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
       const frac = cover[key] || 0;
       if (frac <= 0) return;
-      const pd = paidOn[key];
-      if (pd && pd < HAND_START_DATE) return;
       sum += floor100((r.amount || 0) * r.pctCur / 100 * frac);
     });
   }
@@ -3248,11 +3245,9 @@ function curatorSettlement(dayStr) {
      показывались выданными и по ним начислялся куратор, хотя денег по ним
      не отдавали. Граница ниже отбирает, какие начисления идут в счёт, —
      но на то, что чем погашено, она влиять не должна. */
-  /* Считаем внутри периода с HAND_START_DATE (v161): всё до этой даты владелец
-     закрыл, те приходы в гашении не участвуют — иначе они «съедают» свежие
-     выдачи, и сделки после 3 августа не попадают в счёт. */
-  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
-  const paidOn = incomePayDates(dayStr);
+  /* Выданность — по всей истории, ровно как в блоке невыданных приходов
+     (v162). Что владелец видит там невыданным, то и в счёт не идёт. */
+  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // v163
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
@@ -3268,9 +3263,6 @@ function curatorSettlement(dayStr) {
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
       const frac = cover[key] || 0;
       if (frac <= 0) return;
-      // В счёт идёт то, что выдано начиная с HAND_START_DATE — по дате ВЫДАЧИ
-      const pd = paidOn[key];
-      if (pd && pd < HAND_START_DATE) return;
       const sum = floor100((r.amount || 0) * r.pctCur / 100 * frac);
       if (sum <= 0) return;
       accr.push({ date: d, idx: idx, pair: r.client || '—', amount: r.amount || 0,
@@ -3378,7 +3370,19 @@ function dealsWeeklyAccrued(dayStr) {
    ПРИХОДА, и старый приход, выданный сегодня, не попадал ни к куратору,
    ни в «На руки». Считать надо по дате ВЫДАЧИ — деньги отданы, значит сделка
    состоялась. Сумм не пересчитывает, только даты. */
-function incomePayDates(dayStr) {
+/* Доля каждого прихода, погашенная выдачами НАЧИНАЯ С sinceDate (v163).
+
+   Правило владельца дословно: «Сумма идёт в расчёт куратору после того, как
+   она выдана на руки. Пусть даже за июль». То есть в счёт попадает не то,
+   что пришло после 3 августа, а то, что ПОСЛЕ 3 августа выдано — какого бы
+   числа ни был сам приход.
+
+   Разноска та же, что в pairPaidCoverage: сперва адресные выдачи (forIn),
+   потом остальное от старых приходов к новым. Отличие одно: у каждой выдачи
+   смотрим дату и складываем в `since` только то, что отдано с sinceDate.
+   Приход, закрытый «числом отдачи» без реальной выдачи, считается выданным
+   в это самое число. */
+function paidSinceCoverage(dayStr, sinceDate) {
   const day = dayStr || currentDate;
   const byPair = {};
   for (const d of Object.keys(state.days).sort()) {
@@ -3389,8 +3393,8 @@ function incomePayDates(dayStr) {
       dd.in.forEach((r, idx) => {
         const p = (r.client || '').trim();
         if (!p) return;
-        (byPair[p] = byPair[p] || { ins: [], pays: [] }).ins.push({
-          key: p + '#' + d + '#' + idx, own: d + '#' + idx, left: calcInRowFinal(r)
+        (byPair[p] || (byPair[p] = { ins: [], pays: [] })).ins.push({
+          date: d, idx: idx, after1: calcInRowFinal(r), left: 0, since: 0, byDate: null
         });
       });
     }
@@ -3398,46 +3402,60 @@ function incomePayDates(dayStr) {
       dd.out.forEach(o => {
         const p = (o.client || '').trim();
         if (!p) return;
-        (byPair[p] = byPair[p] || { ins: [], pays: [] }).pays.push({
+        (byPair[p] || (byPair[p] = { ins: [], pays: [] })).pays.push({
           date: d, amount: o.amount || 0, forIn: o.forIn || null
         });
       });
     }
   }
-  const out = {};
-  const mark = (inr, date) => {
-    if (!out[inr.key] || out[inr.key] < date) out[inr.key] = date;   // последняя порция
-  };
+
+  const cover = {};
+  const dOut = state.debtOutDates || {};
   for (const p in byPair) {
-    const { ins, pays } = byPair[p];
+    const ins = byPair[p].ins, pays = byPair[p].pays;
     const byOwn = {};
-    ins.forEach(x => { byOwn[x.own] = x; });
-    // адресные выдачи
-    pays.forEach(pay => {
-      if (!pay.forIn) return;
-      const inr = byOwn[pay.forIn];
-      let rest = pay.amount;
-      if (inr && inr.left > 0) {
-        const take = Math.min(inr.left, rest);
-        inr.left -= take; rest -= take;
-        if (take > 0) mark(inr, pay.date);
-      }
-      pay.rest = rest;
+    ins.forEach(x => {
+      byOwn[x.date + '#' + x.idx] = x;
+      x.left = x.after1 || 0;
+      // Закрыт «числом отдачи» — пул выдач на него не тратим (как в
+      // pairPaidCoverage), а датой выдачи считаем само это число.
+      const gd = dOut[weekMondayStr(x.date) + '::' + p];
+      if (gd && x.date <= gd) { x.byDate = gd; x.left = 0; }
     });
-    // остальное — от старых приходов к новым
-    pays.forEach(pay => {
+
+    const give = (inr, amount, date) => {
+      const take = Math.min(inr.left, amount);
+      if (take <= 0) return 0;
+      inr.left -= take;
+      if (!sinceDate || date >= sinceDate) inr.since += take;
+      return take;
+    };
+
+    pays.forEach(pay => {                      // адресные — в свой приход
+      if (!pay.forIn) return;
+      let rest = pay.amount;
+      const inr = byOwn[pay.forIn];
+      if (inr) rest -= give(inr, rest, pay.date);
+      pay.rest = rest;                         // избыток пойдёт в общий пул
+    });
+    pays.forEach(pay => {                      // остальное — от старых к новым
       let rest = pay.forIn ? (pay.rest || 0) : pay.amount;
-      if (rest <= 0) return;
-      for (const inr of ins) {
-        if (rest <= 0) break;
-        if (inr.left <= 0) continue;
-        const take = Math.min(inr.left, rest);
-        inr.left -= take; rest -= take;
-        if (take > 0) mark(inr, pay.date);
+      for (let i = 0; i < ins.length && rest > 0; i++) {
+        rest -= give(ins[i], rest, pay.date);
       }
+    });
+
+    ins.forEach(x => {
+      const key = p + '#' + x.date + '#' + x.idx;
+      if (x.byDate) {
+        cover[key] = (!sinceDate || x.byDate >= sinceDate) ? 1 : 0;
+        return;
+      }
+      const a = x.after1 || 0;
+      cover[key] = (a > 0) ? Math.min(1, x.since / a) : 0;
     });
   }
-  return out;
+  return cover;
 }
 
 /* ── «НА РУКИ»: ИТОГ СДЕЛКИ МИНУС КУРАТОР ────────────────────────────────────
@@ -3471,8 +3489,7 @@ function dealOfRow(r, frac) {
     здесь, и складывается со всеми остальными выданными. */
 function handOpenRows(dayStr) {
   const rows = [];
-  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);   // v161
-  const paidOn = incomePayDates(dayStr);
+  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // v163
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
@@ -3482,8 +3499,6 @@ function handOpenRows(dayStr) {
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
       const frac = cover[key] || 0;
       if (frac <= 0) return;                    // ещё не выдан — заработка нет
-      const pd = paidOn[key];
-      if (pd && pd < HAND_START_DATE) return;   // выдано до начала счёта
       const deal = dealOfRow(r, frac);
       const cur = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
         ? floor100((r.amount || 0) * r.pctCur / 100 * frac) : 0;
@@ -3502,7 +3517,7 @@ function handOpenRows(dayStr) {
    Нужна, когда владелец ждёт сумму на плитке, а её там нет. */
 function handExcludedRows(dayStr) {
   const rows = [];
-  const cover = pairPaidCoverage(dayStr);
+  const cover = paidSinceCoverage(dayStr, HAND_START_DATE);   // как в счёте (v163)
   const inOpen = {};
   handOpenRows(dayStr).forEach(x => { inOpen[x.date + '#' + x.idx] = true; });
   const reset = curatorResetDate();
