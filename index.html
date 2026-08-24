@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v153</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v154</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -9200,7 +9200,7 @@ function refreshSyncUI() {
     let why;
     if (!getClientId())        why = '⚠ Не задан Client ID — впишите его в поле ниже';
     else if (!googleReady)     why = '⚠ Google не загрузился — проверьте интернет и обновите страницу';
-    else if (lastTokenError)   why = '⚠ Google отказал: ' + lastTokenError;
+    else if (lastTokenError)   why = '⚠ ' + googleErrorHint(lastTokenError);
     else                       why = 'Не подключено — нажмите «Подключить Google Drive»';
     st.textContent = why;
     st.style.color = why.startsWith('⚠') ? '#ffb74d' : '';
@@ -9332,6 +9332,26 @@ async function reconnectGDrive() {
   await connectGDrive();
 }
 
+/* Перевод типовых ответов Google на человеческий (v154). Владелец увидел
+   «Ошибка 401: invalid_client» и не понял, что делать — а значит, Client ID
+   в программе указывает на клиента, которого в Google Cloud больше нет. */
+function googleErrorHint(err) {
+  const e = String(err || '').toLowerCase();
+  if (e.indexOf('invalid_client') > -1 || e.indexOf('not found') > -1) {
+    return 'Google не нашёл такой Client ID — скорее всего его удалили в Google Cloud или он вписан с опечаткой. Нужно создать новый и вставить в поле выше.';
+  }
+  if (e.indexOf('access_denied') > -1) {
+    return 'Доступ не выдан: либо вы закрыли окно Google, либо аккаунт не в списке разрешённых у приложения.';
+  }
+  if (e.indexOf('redirect_uri') > -1 || e.indexOf('origin') > -1) {
+    return 'Адрес программы не разрешён в настройках Client ID. Добавьте https://bankprom-collab.github.io в «Разрешённые источники JavaScript».';
+  }
+  if (e.indexOf('expired') > -1 || e.indexOf('invalid_grant') > -1) {
+    return 'Доступ истёк. Нажмите «Подключить заново» и войдите в Google ещё раз.';
+  }
+  return 'Google отказал: ' + err;
+}
+
 let _connectTries = 0;
 async function connectGDrive() {
   // Без Client ID подключаться не к чему — раньше программа молча крутилась
@@ -9364,7 +9384,7 @@ async function connectGDrive() {
     showToast('Подключено к Google Drive');
   } else {
     showToast(lastTokenError
-      ? 'Google отказал: ' + lastTokenError
+      ? googleErrorHint(lastTokenError)
       : 'Google не дал доступ. Проверьте, что вошли в нужный аккаунт, и нажмите «Подключить» ещё раз', true);
   }
 }
