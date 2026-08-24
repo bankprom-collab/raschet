@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v164</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v165</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5194,6 +5194,82 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
 //     раскладывался на реальные целые приходы (напр. два прихода от 8 июл).
 // Возвращает карту `пара#дата#idx → доля выдано 0..1`. Итоговый остаток пары
 // от порядка не зависит — меняется лишь то, какие приходы считаются невыданными.
+/* Чем именно погашен каждый приход (v165). Та же разноска, что в
+   pairPaidCoverage: сперва адресные выдачи (forIn), потом от старых приходов
+   к новым. Отличие одно — запоминаем каждую порцию: дата выдачи, сколько
+   с неё ушло в этот приход, была ли привязка.
+
+   Нужно для ответа на вопрос владельца «эта сумма ещё не выдана, почему она
+   считается?»: в окне «Куратор ко мне» строка раскрывается и показывает,
+   какими выдачами набралась доля. Расчёт этим не пользуется — только показ. */
+function incomeCoverParts(dayStr) {
+  const day = dayStr || currentDate;
+  const byPair = {};
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > day) break;
+    const dd = state.days[d];
+    if (!dd) continue;
+    if (isWeekday(d) && Array.isArray(dd.in)) {
+      dd.in.forEach((r, idx) => {
+        const p = (r.client || '').trim();
+        if (!p) return;
+        (byPair[p] || (byPair[p] = { ins: [], pays: [] })).ins.push({
+          date: d, idx: idx, after1: calcInRowFinal(r), left: 0, parts: [], byDate: null
+        });
+      });
+    }
+    if (Array.isArray(dd.out)) {
+      dd.out.forEach(o => {
+        const p = (o.client || '').trim();
+        if (!p) return;
+        (byPair[p] || (byPair[p] = { ins: [], pays: [] })).pays.push({
+          date: d, amount: o.amount || 0, forIn: o.forIn || null
+        });
+      });
+    }
+  }
+
+  const out = {};
+  const dOut = state.debtOutDates || {};
+  for (const p in byPair) {
+    const ins = byPair[p].ins, pays = byPair[p].pays;
+    const byOwn = {};
+    ins.forEach(x => {
+      byOwn[x.date + '#' + x.idx] = x;
+      x.left = x.after1 || 0;
+      const gd = dOut[weekMondayStr(x.date) + '::' + p];
+      if (gd && x.date <= gd) { x.byDate = gd; x.left = 0; }   // закрыт числом отдачи
+    });
+
+    const give = (inr, amount, pay, aimed) => {
+      const take = Math.min(inr.left, amount);
+      if (take <= 0) return 0;
+      inr.left -= take;
+      inr.parts.push({ date: pay.date, amount: take, aimed: !!aimed });
+      return take;
+    };
+
+    pays.forEach(pay => {
+      if (!pay.forIn) return;
+      let rest = pay.amount;
+      const inr = byOwn[pay.forIn];
+      if (inr) rest -= give(inr, rest, pay, true);
+      pay.rest = rest;
+    });
+    pays.forEach(pay => {
+      let rest = pay.forIn ? (pay.rest || 0) : pay.amount;
+      for (let i = 0; i < ins.length && rest > 0; i++) rest -= give(ins[i], rest, pay, false);
+    });
+
+    ins.forEach(x => {
+      out[p + '#' + x.date + '#' + x.idx] = {
+        after1: x.after1 || 0, left: x.left, parts: x.parts, byDate: x.byDate
+      };
+    });
+  }
+  return out;
+}
+
 function pairPaidCoverage(dayStr, order, startDate) {
   const allDays = Object.keys(state.days).sort();
   const byPair = {};
@@ -5554,6 +5630,7 @@ function openCuratorMineModal() {
           payByDate[x.date] = (payByDate[x.date] || 0) + x.amount;
         });
         const payDates = Object.keys(payByDate).sort();
+        const COVER = incomeCoverParts(currentDate);   // чем погашен каждый приход (v165)
         let acc = 0;
         const trs = rows.map((r, i) => {
           const partial = (r.frac !== undefined && r.frac < 0.999)
@@ -5569,14 +5646,18 @@ function openCuratorMineModal() {
           const paidHere = payByDate[r.date];
           const payChip = (lastOfDay && paidHere)
             ? `<div style="color:var(--muted);font-size:10px;font-weight:400">отдано ${fmt(paidHere)}</div>` : '';
+          const cov = COVER[r.pair + '#' + r.date + '#' + r.idx];
           return `
-          <tr>
+          <tr onclick="cmToggleCover(${i})" style="cursor:pointer">
             <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
             <td>${escapeHtml(r.pair)}${partial}${partPaid}${doneChip}</td>
             <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
             <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
             <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
             <td style="text-align:right;font-family:var(--font-num);font-weight:${lastOfDay ? '700' : '400'};color:${due > 0 ? '#ffb74d' : 'var(--muted)'}">${fmt(due)}${payChip}</td>
+          </tr>
+          <tr id="cmcov-${i}" class="cm-cover-row no-print" style="display:none">
+            <td colspan="6">${coverExplainHtml(cov)}</td>
           </tr>
         `;
         }).join('');
@@ -5716,6 +5797,39 @@ function openCuratorMineModal() {
   `;
   const m = document.getElementById('curator-mine-modal');
   if (m) m.classList.add('open');
+}
+
+/* Раскрыть/свернуть разбор строки в окне «Куратор ко мне». */
+function cmToggleCover(i) {
+  const el = document.getElementById('cmcov-' + i);
+  if (!el) return;
+  el.style.display = (el.style.display === 'none') ? '' : 'none';
+}
+
+/* Из чего сложилась доля «выдано N %» — человеческим языком. */
+function coverExplainHtml(cov) {
+  // max-width — чтобы на телефоне разбор не растягивал таблицу вширь
+  const wrap = (inner) => `<div style="font-size:11.5px;line-height:1.6;color:var(--muted);
+    padding:8px 10px;background:rgba(255,183,77,.06);border-radius:8px;
+    max-width:min(100%, calc(100vw - 72px));white-space:normal;
+    position:sticky;left:0">${inner}</div>`;
+  if (!cov) return wrap('Разбор недоступен — приход не найден.');
+  if (cov.byDate) {
+    return wrap(`Закрыт <b style="color:#ffb74d">числом отдачи ${formatDateShort(cov.byDate)}</b>
+      — деньгами не выдавался. Число отдачи ставится вручную и считается выдачей.`);
+  }
+  if (!cov.parts.length) {
+    return wrap('Выдач по этому приходу нет — в счёт он не идёт.');
+  }
+  const lines = cov.parts.map(x => `<div>${formatDateShort(x.date)} — <b
+    style="font-family:var(--font-num);color:#ffb74d">${fmt(x.amount)}</b>${
+    x.aimed ? ' <span style="font-size:10.5px">(привязана к этому приходу)</span>' : ''}</div>`).join('');
+  const left = cov.left > 0
+    ? `<div style="margin-top:6px">Ещё не выдано: <b style="font-family:var(--font-num)">${fmt(cov.left)}</b> из ${fmt(cov.after1)}</div>`
+    : '<div style="margin-top:6px">Выдан полностью.</div>';
+  return wrap(`<div style="margin-bottom:4px">Выдано этими деньгами:</div>${lines}${left}
+    <div style="margin-top:6px;font-size:10.5px">Выдачи гасят приходы от старых к новым.
+    Чтобы деньги ушли в нужный приход — при вводе выдачи нажми его день в списке «Ещё не выдано».</div>`);
 }
 
 /* Сменить дату начала счёта. Всё, что раньше неё, владелец считает закрытым:
