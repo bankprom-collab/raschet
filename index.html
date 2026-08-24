@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v159</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v161</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3197,17 +3197,21 @@ function curatorRunningBalance(dayStr) {
 /** Начислено куратору за всё время до dayStr — по выданности на этот день. */
 function curatorAccruedTotal(dayStr) {
   let sum = 0;
-  const cover = pairPaidCoverage(dayStr);        // выданность — по всей истории (v159)
+  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);   // v161
+  const paidOn = incomePayDates(dayStr);
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (d < HAND_START_DATE) continue;
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
       if (!(r.pctCur > 0)) return;
-      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
-      if (frac > 0) sum += floor100((r.amount || 0) * r.pctCur / 100 * frac);
+      const key = (r.client || '').trim() + '#' + d + '#' + idx;
+      const frac = cover[key] || 0;
+      if (frac <= 0) return;
+      const pd = paidOn[key];
+      if (pd && pd < HAND_START_DATE) return;
+      sum += floor100((r.amount || 0) * r.pctCur / 100 * frac);
     });
   }
   return sum;
@@ -3244,12 +3248,15 @@ function curatorSettlement(dayStr) {
      показывались выданными и по ним начислялся куратор, хотя денег по ним
      не отдавали. Граница ниже отбирает, какие начисления идут в счёт, —
      но на то, что чем погашено, она влиять не должна. */
-  const cover = pairPaidCoverage(dayStr);
+  /* Считаем внутри периода с HAND_START_DATE (v161): всё до этой даты владелец
+     закрыл, те приходы в гашении не участвуют — иначе они «съедают» свежие
+     выдачи, и сделки после 3 августа не попадают в счёт. */
+  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);
+  const paidOn = incomePayDates(dayStr);
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (d < HAND_START_DATE) continue;
     const dd = state.days[d];
     if (!dd) continue;
     if (typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
@@ -3258,8 +3265,12 @@ function curatorSettlement(dayStr) {
     if (!isWeekday(d) || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
       if (!(r.pctCur > 0)) return;
-      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+      const key = (r.client || '').trim() + '#' + d + '#' + idx;
+      const frac = cover[key] || 0;
       if (frac <= 0) return;
+      // В счёт идёт то, что выдано начиная с HAND_START_DATE — по дате ВЫДАЧИ
+      const pd = paidOn[key];
+      if (pd && pd < HAND_START_DATE) return;
       const sum = floor100((r.amount || 0) * r.pctCur / 100 * frac);
       if (sum <= 0) return;
       accr.push({ date: d, idx: idx, pair: r.client || '—', amount: r.amount || 0,
@@ -3358,6 +3369,77 @@ function dealsWeeklyAccrued(dayStr) {
   return sum;
 }
 
+/* Когда приход был реально выдан (v160).
+   Разносит выдачи по приходам ТЕМ ЖЕ порядком, что и `pairPaidCoverage`
+   (сперва адресные `forIn`, потом общий пул от старых приходов к новым),
+   и запоминает дату последней порции, закрывшей приход.
+
+   Нужно для границы счёта: раньше `HAND_START_DATE` отсекала приходы по дате
+   ПРИХОДА, и старый приход, выданный сегодня, не попадал ни к куратору,
+   ни в «На руки». Считать надо по дате ВЫДАЧИ — деньги отданы, значит сделка
+   состоялась. Сумм не пересчитывает, только даты. */
+function incomePayDates(dayStr) {
+  const day = dayStr || currentDate;
+  const byPair = {};
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > day) break;
+    const dd = state.days[d];
+    if (!dd) continue;
+    if (isWeekday(d) && Array.isArray(dd.in)) {
+      dd.in.forEach((r, idx) => {
+        const p = (r.client || '').trim();
+        if (!p) return;
+        (byPair[p] = byPair[p] || { ins: [], pays: [] }).ins.push({
+          key: p + '#' + d + '#' + idx, own: d + '#' + idx, left: calcInRowFinal(r)
+        });
+      });
+    }
+    if (Array.isArray(dd.out)) {
+      dd.out.forEach(o => {
+        const p = (o.client || '').trim();
+        if (!p) return;
+        (byPair[p] = byPair[p] || { ins: [], pays: [] }).pays.push({
+          date: d, amount: o.amount || 0, forIn: o.forIn || null
+        });
+      });
+    }
+  }
+  const out = {};
+  const mark = (inr, date) => {
+    if (!out[inr.key] || out[inr.key] < date) out[inr.key] = date;   // последняя порция
+  };
+  for (const p in byPair) {
+    const { ins, pays } = byPair[p];
+    const byOwn = {};
+    ins.forEach(x => { byOwn[x.own] = x; });
+    // адресные выдачи
+    pays.forEach(pay => {
+      if (!pay.forIn) return;
+      const inr = byOwn[pay.forIn];
+      let rest = pay.amount;
+      if (inr && inr.left > 0) {
+        const take = Math.min(inr.left, rest);
+        inr.left -= take; rest -= take;
+        if (take > 0) mark(inr, pay.date);
+      }
+      pay.rest = rest;
+    });
+    // остальное — от старых приходов к новым
+    pays.forEach(pay => {
+      let rest = pay.forIn ? (pay.rest || 0) : pay.amount;
+      if (rest <= 0) return;
+      for (const inr of ins) {
+        if (rest <= 0) break;
+        if (inr.left <= 0) continue;
+        const take = Math.min(inr.left, rest);
+        inr.left -= take; rest -= take;
+        if (take > 0) mark(inr, pay.date);
+      }
+    });
+  }
+  return out;
+}
+
 /* ── «НА РУКИ»: ИТОГ СДЕЛКИ МИНУС КУРАТОР ────────────────────────────────────
    Правило владельца, 14.08.2026, дословно: «не считай по неделям», «эта сумма
    должна суммироваться со всеми остальными суммами, которые были выданы
@@ -3389,16 +3471,19 @@ function dealOfRow(r, frac) {
     здесь, и складывается со всеми остальными выданными. */
 function handOpenRows(dayStr) {
   const rows = [];
-  const cover = pairPaidCoverage(dayStr);        // выданность — по всей истории (v159)
+  const cover = pairPaidCoverage(dayStr, undefined, HAND_START_DATE);   // v161
+  const paidOn = incomePayDates(dayStr);
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (d < HAND_START_DATE) continue;          // старая история в счёт не идёт
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
-      const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
+      const key = (r.client || '').trim() + '#' + d + '#' + idx;
+      const frac = cover[key] || 0;
       if (frac <= 0) return;                    // ещё не выдан — заработка нет
+      const pd = paidOn[key];
+      if (pd && pd < HAND_START_DATE) return;   // выдано до начала счёта
       const deal = dealOfRow(r, frac);
       const cur = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
         ? floor100((r.amount || 0) * r.pctCur / 100 * frac) : 0;
