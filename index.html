@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v152</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v153</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3777,6 +3777,87 @@ function dueChipHtml(dueDate, dayStr) {
     + `📅 ${label}${when}${(late || now) ? ' · ' + formatDateShort(d) : ''}</span>`;
 }
 
+/* Из чего сложилась выдача (v153).
+   Разносит выдачи пары по её приходам ТЕМ ЖЕ порядком, что и
+   `pairPaidCoverage`: сперва адресные (поле forIn), затем общий пул от старых
+   приходов к новым. Ничего не пересчитывает — только показывает, какие
+   приходы закрыты этой выдачей и по какому проценту.
+   Возвращает карту `дата#номер выдачи → [{ inDate, amount, pct, after1, take }]`. */
+function pairPayoutAllocation(pair, dayStr) {
+  const p = (pair || '').trim();
+  const res = {};
+  if (!p) return res;
+  const day = dayStr || currentDate;
+  const ins = [], pays = [];
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > day) break;
+    const dd = state.days[d];
+    if (!dd) continue;
+    if (isWeekday(d) && Array.isArray(dd.in)) {
+      dd.in.forEach((r, idx) => {
+        if ((r.client || '').trim() !== p) return;
+        ins.push({ key: d + '#' + idx, date: d, amount: r.amount || 0,
+                   pct: r.pct, after1: calcInRowFinal(r), left: calcInRowFinal(r) });
+      });
+    }
+    if (Array.isArray(dd.out)) {
+      dd.out.forEach((o, oi) => {
+        if ((o.client || '').trim() !== p) return;
+        pays.push({ key: d + '#' + oi, date: d, amount: o.amount || 0, forIn: o.forIn || null });
+      });
+    }
+  }
+  const byKey = {};
+  ins.forEach(x => { byKey[x.key] = x; });
+  const add = (payKey, inr, take) => {
+    if (take <= 0) return;
+    (res[payKey] = res[payKey] || []).push({
+      inDate: inr.date, amount: inr.amount, pct: inr.pct, after1: inr.after1, take: take
+    });
+  };
+  // 1) адресные выдачи гасят свой приход
+  pays.forEach(pay => {
+    if (!pay.forIn) return;
+    const inr = byKey[pay.forIn];
+    let rest = pay.amount;
+    if (inr) {
+      const take = Math.min(inr.left, rest);
+      inr.left -= take; rest -= take;
+      add(pay.key, inr, take);
+    }
+    pay.rest = rest;                   // излишек уйдёт в общий проход
+  });
+  // 2) остальное — от старых приходов к новым
+  pays.forEach(pay => {
+    let rest = (pay.forIn ? (pay.rest || 0) : pay.amount);
+    if (rest <= 0) return;
+    for (const inr of ins) {
+      if (rest <= 0) break;
+      if (inr.left <= 0) continue;
+      const take = Math.min(inr.left, rest);
+      inr.left -= take; rest -= take;
+      add(pay.key, inr, take);
+    }
+  });
+  return res;
+}
+
+/** Подпись под суммой выдачи: из каких приходов она сложилась. */
+function payoutPartsHtml(pair, dayStr, payIdx) {
+  const alloc = pairPayoutAllocation(pair, dayStr);
+  const list = alloc[dayStr + '#' + payIdx];
+  if (!list || !list.length) return '';
+  const pf = (x) => (x === null || x === undefined) ? '' : ' −' + String(x).replace('.', ',') + '%';
+  return `<div style="font-size:10.5px;color:var(--muted);font-weight:400;margin-top:3px;line-height:1.5;font-family:var(--font-ui)">`
+    + list.map(x => {
+        const whole = Math.abs(x.take - x.after1) < 0.5;
+        return `за ${formatDateShort(x.inDate)}: <span style="font-family:var(--font-num);color:var(--muted-bright)">${fmt(x.amount)}</span>`
+          + `${pf(x.pct)} → <span style="font-family:var(--font-num);color:var(--muted-bright)">${fmt(x.after1)}</span>`
+          + (whole ? '' : ` <span style="color:#ff8a4a">(часть ${fmt(x.take)})</span>`);
+      }).join('<br>')
+    + `</div>`;
+}
+
 function renderOutBody(day) {
   const tbody = document.getElementById('out-body');
   if (!day.out.length) {
@@ -3791,7 +3872,7 @@ function renderOutBody(day) {
       return `
       <tr>
         <td class="client-name">${escapeHtml(r.client)}${dueChipEditableHtml(r, 'out', i)}${noteHtml}</td>
-        <td class="amount neg">${fmt(r.amount)}</td>
+        <td class="amount neg">${fmt(r.amount)}${payoutPartsHtml(r.client, currentDate, i)}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="openQuickEntryEdit('out',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="deleteRow('out',${i})" title="Удалить">🗑</button>
