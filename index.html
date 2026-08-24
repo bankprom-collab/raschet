@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v156</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v158</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3777,94 +3777,6 @@ function dueChipHtml(dueDate, dayStr) {
     + `📅 ${label}${when}${(late || now) ? ' · ' + formatDateShort(d) : ''}</span>`;
 }
 
-/* Из чего сложилась выдача (v153).
-   Разносит выдачи пары по её приходам ТЕМ ЖЕ порядком, что и
-   `pairPaidCoverage`: сперва адресные (поле forIn), затем общий пул от старых
-   приходов к новым. Ничего не пересчитывает — только показывает, какие
-   приходы закрыты этой выдачей и по какому проценту.
-   Возвращает карту `дата#номер выдачи → [{ inDate, amount, pct, after1, take }]`. */
-function pairPayoutAllocation(pair, dayStr) {
-  const p = (pair || '').trim();
-  const res = {};
-  if (!p) return res;
-  const day = dayStr || currentDate;
-  const ins = [], pays = [];
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > day) break;
-    const dd = state.days[d];
-    if (!dd) continue;
-    if (isWeekday(d) && Array.isArray(dd.in)) {
-      dd.in.forEach((r, idx) => {
-        if ((r.client || '').trim() !== p) return;
-        ins.push({ key: d + '#' + idx, date: d, amount: r.amount || 0,
-                   pct: r.pct, after1: calcInRowFinal(r), left: calcInRowFinal(r) });
-      });
-    }
-    if (Array.isArray(dd.out)) {
-      dd.out.forEach((o, oi) => {
-        if ((o.client || '').trim() !== p) return;
-        pays.push({ key: d + '#' + oi, date: d, amount: o.amount || 0, forIn: o.forIn || null });
-      });
-    }
-  }
-  const byKey = {};
-  ins.forEach(x => { byKey[x.key] = x; });
-  const add = (payKey, inr, take) => {
-    if (take <= 0) return;
-    (res[payKey] = res[payKey] || []).push({
-      inDate: inr.date, amount: inr.amount, pct: inr.pct, after1: inr.after1, take: take
-    });
-  };
-  // 1) адресные выдачи гасят свой приход
-  pays.forEach(pay => {
-    if (!pay.forIn) return;
-    const inr = byKey[pay.forIn];
-    let rest = pay.amount;
-    if (inr) {
-      const take = Math.min(inr.left, rest);
-      inr.left -= take; rest -= take;
-      add(pay.key, inr, take);
-    }
-    pay.rest = rest;                   // излишек уйдёт в общий проход
-  });
-  // 2) остальное — от старых приходов к новым
-  pays.forEach(pay => {
-    let rest = (pay.forIn ? (pay.rest || 0) : pay.amount);
-    if (rest <= 0) return;
-    for (const inr of ins) {
-      if (rest <= 0) break;
-      if (inr.left <= 0) continue;
-      const take = Math.min(inr.left, rest);
-      inr.left -= take; rest -= take;
-      add(pay.key, inr, take);
-    }
-  });
-  return res;
-}
-
-/** Подпись под суммой выдачи: из каких приходов она сложилась. */
-function payoutPartsHtml(pair, dayStr, payIdx) {
-  const alloc = pairPayoutAllocation(pair, dayStr);
-  const list = alloc[dayStr + '#' + payIdx];
-  if (!list || !list.length) return '';
-  /* Из какой базы получилась ИМЕННО эта сумма (v156). Если выдача закрыла
-     приход не целиком, показываем не всю базу прихода, а её долю: она и даёт
-     выданную часть после процента. Обратная пропорция, расчёт не трогаем. */
-  const pf = (x) => (x === null || x === undefined) ? '' : ' −' + String(x).replace('.', ',') + '%';
-  const parts = list.map(x => {
-    const whole = Math.abs(x.take - x.after1) < 0.5;
-    // База считается ОТ выданной суммы: доля от округлённого after1 давала
-    // расхождение в десятки рублей. take / (1 − %) сходится точно.
-    const baseOfTake = (whole || !(x.pct > 0)) ? x.amount : (x.take / (1 - x.pct / 100));
-    return `<span style="font-family:var(--font-num);color:var(--muted-bright)">${fmt(baseOfTake)}</span>${pf(x.pct)}`
-      // Остаток прихода тут не пишем — он считается отдельно, в задолженности
-      + (whole ? '' : ` <span style="color:#ff8a4a">(часть)</span>`);
-  });
-  return `<div style="font-size:10.5px;color:var(--muted);font-weight:400;margin-top:2px;line-height:1.4;font-family:var(--font-ui)">`
-    + 'из ' + parts.join(' · ')
-    + `</div>`;
-}
-
 function renderOutBody(day) {
   const tbody = document.getElementById('out-body');
   if (!day.out.length) {
@@ -3879,7 +3791,7 @@ function renderOutBody(day) {
       return `
       <tr>
         <td class="client-name">${escapeHtml(r.client)}${dueChipEditableHtml(r, 'out', i)}${noteHtml}</td>
-        <td class="amount neg">${fmt(r.amount)}${payoutPartsHtml(r.client, currentDate, i)}</td>
+        <td class="amount neg">${fmt(r.amount)}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="openQuickEntryEdit('out',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="deleteRow('out',${i})" title="Удалить">🗑</button>
@@ -6118,7 +6030,8 @@ function pairUnpaidRows(pair, dayStr) {
         ? r100(r.total) : (r.total || 0);
       const left = (frac <= 0.0005) ? after1 : r100(after1 * unpaidPart);
       if (left <= 0) return;
-      rows.push({ date: d, idx: idx, left: left, full: after1, partial: frac > 0.0005 });
+      rows.push({ date: d, idx: idx, left: left, full: after1, partial: frac > 0.0005,
+                  amount: r.amount || 0, pct: r.pct });
     });
   }
   return rows;
@@ -6151,8 +6064,16 @@ function qeRenderUnpaid() {
       ? `<span class="chip" title="Выдан частично, остаток ${fmt(r.left)} из ${fmt(r.full)}">часть</span>`
       : '';
     const on = (qeAimedIn === r.date + '#' + r.idx);
+    /* Из какой базы получился этот остаток (v157). Для частично выданного
+       прихода считаем базу ОТ остатка: left / (1 − %) — сходится точно,
+       округление до сотен не мешает. Расчёт не трогаем, это подпись. */
+    const baseOfLeft = (r.partial && r.pct > 0) ? (r.left / (1 - r.pct / 100)) : r.amount;
+    const pctLabel = (r.pct !== null && r.pct !== undefined && r.pct > 0)
+      ? ' −' + String(r.pct).replace('.', ',') + '%' : '';
+    const from = `<div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-top:2px">`
+      + `из <span style="font-family:var(--font-num);color:var(--muted-bright)">${fmt(baseOfLeft)}</span>${pctLabel}</div>`;
     return `<button type="button" class="qe-unpaid-row${on ? ' on' : ''}" onclick="qePickUnpaid(${i})">
-        <span class="d">${on ? '✓ ' : ''}${formatDateShort(r.date)}${chip}</span>
+        <span class="d">${on ? '✓ ' : ''}${formatDateShort(r.date)}${chip}${from}</span>
         <span class="s">${fmt(r.left)}</span>
       </button>`;
   }).join('')
