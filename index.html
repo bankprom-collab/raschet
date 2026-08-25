@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v171</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v172</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3875,6 +3875,10 @@ function renderInBody(day) {
   const tbody = document.getElementById('in-body');
   // Нарастающий итог по каждому тегу на момент текущего дня
   const tagTotals = computeTagRunningTotals(currentDate);
+  /* Выданность строк этого дня — чтобы подпись «− куратору / на руки»
+     не обещала того, чего в счёте нет (v172). */
+  const COVER = pairPaidCoverage(currentDate, undefined, undefined, true);
+  const inCount = currentDate >= handStart();
   if (!day.in.length) {
     tbody.innerHTML = '<tr class="empty-row"><td colspan="4">Приходов сегодня не было.<br>'
       + '<span style="color:var(--accent);cursor:pointer;font-family:var(--font-ui)" onclick="openQuickEntry(\'in\')">Добавить приход</span></td></tr>';
@@ -3905,11 +3909,24 @@ function renderInBody(day) {
       let totalDisplay;
       if (hasP2) {
         const dealResult = r100(r.total) - r100(r.total2);
-        // Доля куратора по этой сделке и остаток себе — та же арифметика, что
-        // на плитках: куратору floor100(сумма × %кур), на руки — разница (v147).
-        const curOfRow = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
+        /* Считаем по выданной доле — ровно как плитки (v172). Приход раньше
+           даты начала счёта закрыт: у него ни куратора, ни «на руки» нет.
+           Невыданная часть подписана как ожидание, а не как начисление —
+           иначе строка обещает деньги, которых в счёте нет. */
+        const frac = inCount ? (COVER[(r.client || '').trim() + '#' + currentDate + '#' + i] || 0) : 0;
+        const curFull = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
           ? floor100((r.amount || 0) * r.pctCur / 100) : 0;
-        const handOfRow = dealResult - curOfRow;
+        const curOfRow = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
+          ? floor100((r.amount || 0) * r.pctCur / 100 * frac) : 0;
+        const handOfRow = r100(dealResult * frac) - curOfRow;
+        const waiting = inCount && frac < 0.9995;
+        const waitNote = waiting
+          ? `<div style="font-family:var(--font-ui);font-size:9px;color:var(--muted);
+               text-align:right;margin-top:2px">${frac > 0.0005
+                 ? 'выдано ' + Math.round(frac * 100) + '% — остальное после выдачи'
+                 : 'в счёт пойдёт после выдачи: ' + fmt(dealResult - curFull)}</div>`
+          : (inCount ? '' : `<div style="font-family:var(--font-ui);font-size:9px;color:var(--muted);
+               text-align:right;margin-top:2px">до начала счёта — не участвует</div>`);
         totalDisplay = `${fmtRounded(r.total)}` +
           `<div style="color:var(--expense);font-size:13px;font-weight:600;margin-top:3px">−${r.pct2}%: ${fmtRounded(r.total2)}</div>` +
           // Подпись и сумма в одну строку — блок был вдвое выше и растягивал
@@ -3925,10 +3942,13 @@ function renderInBody(day) {
                   `<b style="color:#ffb74d;font-size:11.5px;font-weight:600">${fmt(curOfRow)}</b>` +
                 `</div>`
               : '') +
-            `<div style="display:flex;justify-content:flex-end;align-items:baseline;gap:6px">` +
-              `<span style="font-family:var(--font-ui);font-size:9.5px;color:var(--muted)">на руки</span>` +
-              `<b style="color:var(--accent);font-size:13px;font-weight:700">${fmt(handOfRow)}</b>` +
-            `</div>` +
+            (handOfRow
+              ? `<div style="display:flex;justify-content:flex-end;align-items:baseline;gap:6px">` +
+                  `<span style="font-family:var(--font-ui);font-size:9.5px;color:var(--muted)">на руки</span>` +
+                  `<b style="color:var(--accent);font-size:13px;font-weight:700">${fmt(handOfRow)}</b>` +
+                `</div>`
+              : '') +
+            waitNote +
           `</div>`;
       } else if (hasP1) {
         totalDisplay = fmtRounded(r.total);
