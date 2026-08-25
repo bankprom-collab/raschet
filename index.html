@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v176</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v177</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2526,6 +2526,16 @@ function migrateState(s) {
         day.carryoverManual = Math.abs(prevBalance - curCo) > 1;
       }
     }
+  }
+
+  /* Дата начала счёта — 31 июля, названа владельцем 25.08.2026 дословно
+     и не раз. В его данных она успела съехать на 6 июля (нажал подсказку
+     «начать с самой ранней даты»), и счёт заполнился июльскими сделками,
+     которых там быть не должно. Возвращаем один раз, дальше он двигает её
+     сам кнопкой «сменить дату». */
+  if (!s._handStartFixed) {
+    s.handStart = HAND_START_DEFAULT;
+    s._handStartFixed = true;
   }
 
   s._migrationVersion = MIGRATION_VERSION;
@@ -5931,10 +5941,11 @@ function curatorPendingHtml(dayStr) {
       <div style="font-size:11.5px;color:var(--muted)">
         <b style="color:var(--muted-bright)">Раньше ${formatDateShort(handStart())}: ${P.before.length}</b>
         — в счёт не идут, эти дни закрыты. Куратору по ним было бы ${fmt(sum(P.before))}.
-        ${P.before.length ? `Самый ранний — ${formatDateShort(P.before[0].date)}.` : ''}
-        <button class="btn btn-ghost no-print" onclick="setHandStart('${P.before[0].date}')"
-          style="font-size:10.5px;padding:3px 9px;margin-left:4px;border-color:#ffb74d;color:#ffb74d"
-          title="Начать счёт с этого дня">начать с ${formatDateShort(P.before[0].date)}</button>
+        ${handStart() !== HAND_START_DEFAULT
+          ? `<button class="btn btn-ghost no-print" onclick="setHandStart('${HAND_START_DEFAULT}')"
+              style="font-size:10.5px;padding:3px 9px;margin-left:4px;border-color:#ffb74d;color:#ffb74d"
+              title="Вернуть дату начала счёта">вернуть ${formatDateShort(HAND_START_DEFAULT)}</button>`
+          : ''}
       </div>
     </div>` : '';
   const afterBlock = P.after.length ? `
@@ -5977,6 +5988,63 @@ function unlinkedPayouts(dayStr) {
     });
   }
   return out;
+}
+
+/* Разнести очевидные выдачи (v177): те, чья сумма ТОЧНО равна невыданному
+   остатку ровно одного прихода пары. Двусмысленные не трогаем — их владелец
+   разносит руками.
+
+   Зачем. У владельца 24 таких выдачи; первая же, 5 августа на 1 052 100,
+   в точности равна остатку прихода 31 июля (1 213 466,4 − 13,3 %). Проставлять
+   такие привязки вручную по одной — работа на вечер, а ошибиться легко. */
+function autoLinkExactPayouts() {
+  const start = handStart();
+  const done = [];
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > currentDate) break;
+    if (d < start) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach(o => {
+      if (o.forIn) return;
+      const pair = (o.client || '').trim();
+      if (!pair) return;
+      const amt = o.amount || 0;
+      if (amt <= 0) return;
+      // остатки считаем заново на каждой выдаче — предыдущие уже закрыли своё
+      const hits = pairUnpaidRows(pair, d).filter(r => Math.abs(r.left - amt) < 0.5);
+      if (hits.length !== 1) return;               // неоднозначно — руками
+      o.forIn = hits[0].date + '#' + hits[0].idx;
+      done.push({ pay: d, pair: pair, amount: amt, inDate: hits[0].date });
+    });
+  }
+  return done;
+}
+
+function askAutoLink() {
+  const preview = [];
+  const snapshot = JSON.stringify(state.days);
+  const done = autoLinkExactPayouts();
+  if (!done.length) {
+    state.days = JSON.parse(snapshot);
+    alert('Точных совпадений не нашлось.\n\nПривязываются только выдачи, сумма которых '
+      + 'в точности равна невыданному остатку одного прихода. Остальные — вручную.');
+    return;
+  }
+  const list = done.slice(0, 12).map(x =>
+    formatDateShort(x.pay) + ' · ' + x.pair + ' · ' + fmt(x.amount) + '  →  приход ' + formatDateShort(x.inDate)
+  ).join('\n');
+  state.days = JSON.parse(snapshot);               // показали — теперь спрашиваем
+  if (!confirm('Разнести ' + done.length + ' выдач(и), где сумма точно совпала '
+      + 'с остатком одного прихода?\n\n' + list
+      + (done.length > 12 ? '\n…и ещё ' + (done.length - 12) : '')
+      + '\n\nОстальные останутся в списке — их указывать вручную.')) return;
+  const applied = autoLinkExactPayouts();
+  recalcCarryoversAfter(currentDate);
+  saveState();
+  render();
+  openCuratorMineModal();
+  showToast('Разнесено выдач: ' + applied.length);
 }
 
 /* Открыть выдачу, чтобы указать её приход. */
@@ -6027,6 +6095,9 @@ function unlinkedPayoutsHtml(dayStr) {
           border-color:#ff8a4a;color:#ff8a4a">сменить дату</button>
         <div style="margin-top:3px">Пока приход не указан, эти деньги ни одну сделку
         не закрывают — ни куратору, ни на руки.</div>
+        <button class="btn btn-ghost no-print" onclick="askAutoLink()"
+          style="font-size:11px;padding:6px 12px;margin-top:6px;border-color:#ff8a4a;color:#ff8a4a"
+          title="Привязать те выдачи, где сумма точно совпадает с остатком одного прихода">разнести совпадающие</button>
       </div>
       <div style="${scroll}margin-top:4px">${rows}</div>
     </div>`;
