@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v174</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v175</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5903,8 +5903,9 @@ function unlinkedPayouts(dayStr) {
       const pair = (o.client || '').trim();
       if (!pair) return;
       // Гасить нечего — выдача авансом, разносить нечего
-      if (!pairUnpaidRows(pair, d).length) return;
-      out.push({ date: d, idx: i, pair: pair, amount: o.amount || 0 });
+      const unpaid = pairUnpaidRows(pair, d);
+      if (!unpaid.length) return;
+      out.push({ date: d, idx: i, pair: pair, amount: o.amount || 0, unpaid: unpaid });
     });
   }
   return out;
@@ -5925,23 +5926,35 @@ function unlinkedPayoutsHtml(dayStr) {
   /* Длинный список прокручивается внутри плашки: 24 строки во весь рост
      закрывали собой таблицу счёта — владелец назвал это портянкой (v173). */
   const scroll = (list.length > 5) ? 'max-height:38vh;overflow-y:auto;' : '';
-  const rows = list.map(x => `
+  /* Под каждой выдачей — приходы, которые она может закрыть: владелец просил
+     видеть сумму прихода, «от которой всё считается для куратора» (v175).
+     Показываем самый ранний: с него он и разносит. */
+  const rows = list.map(x => {
+    const first = x.unpaid[0];
+    const hint = first
+      ? `<div style="font-size:10.5px;color:var(--muted-bright);font-family:var(--font-ui);margin-top:2px">
+           за приход ${formatDateShort(first.date)} · <span style="font-family:var(--font-num)">${fmt(first.amount)}</span>
+           <span style="color:var(--muted)">(не выдано ${fmt(first.left)})</span>${
+           x.unpaid.length > 1 ? ` <span style="color:var(--muted)">· и ещё ${x.unpaid.length - 1}</span>` : ''}</div>`
+      : '';
+    return `
     <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;
                 padding:6px 0;border-top:1px solid rgba(255,138,74,.18)">
-      <span style="font-size:12px">${formatDateShort(x.date)} · ${escapeHtml(x.pair)}</span>
+      <span style="font-size:12px">${formatDateShort(x.date)} · ${escapeHtml(x.pair)}${hint}</span>
       <span style="display:flex;align-items:center;gap:8px">
         <b style="font-family:var(--font-num);font-size:12.5px">${fmt(x.amount)}</b>
         <button class="btn btn-ghost no-print" onclick="fixPayoutLink('${x.date}',${x.idx})"
           style="font-size:11px;padding:5px 11px;border-color:#ff8a4a;color:#ff8a4a">указать приход</button>
       </span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `
     <div class="no-print" style="margin:10px 0 4px;padding:10px 12px;border-radius:10px;
          background:rgba(255,138,74,.10);border:1px solid rgba(255,138,74,.35)">
       <div style="font-size:12px;line-height:1.5">
         <b style="color:#ff8a4a">Выдачи без указания прихода: ${list.length}</b> на
         <b style="font-family:var(--font-num)">${fmt(total)}</b> —
-        считаем с ${formatDateShort(handStart())}.<button class="btn btn-ghost no-print"
+        считаем с <b style="color:#ff8a4a">${formatDateShort(handStart())}</b>.<button class="btn btn-ghost no-print"
           onclick="askHandStart()" style="font-size:10.5px;padding:3px 9px;margin-left:6px;
           border-color:#ff8a4a;color:#ff8a4a">сменить дату</button>
         <div style="margin-top:3px">Пока приход не указан, эти деньги ни одну сделку
