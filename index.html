@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v170</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v171</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -6339,8 +6339,13 @@ function pairUnpaidRows(pair, dayStr) {
      ошибкой. Деньги без указанного прихода висят отдельным списком
      (unlinkedPayouts) и ждут, когда их разнесут. */
   const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
+  const start = handStart();
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
+    /* Счёт идёт с этой даты, всё раньше владелец закрыл (v171). Такие приходы
+       не должны попадаться ни в списке «Ещё не выдано», ни при разноске старых
+       выдач: привязать к ним нечего, а путаницы от них много. */
+    if (d < start) continue;
     if (!isWeekday(d)) continue;            // в базе участвуют только будни
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
