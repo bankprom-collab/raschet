@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v179</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v180</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5630,7 +5630,8 @@ function openHandModal() {
     ? `<div style="color:var(--muted);font-size:11px;padding:8px 0 0">Показаны последние ${rows.length}. Раньше было ещё ${hidden} — они уже вошли в итог выше.</div>`
     : '';
 
-  box.innerHTML = head + body + more + handExcludedBlockHtml(ledgerDay()) +
+  box.innerHTML = head + unlinkedPayoutsHtml(ledgerDay()) + body + more
+    + handExcludedBlockHtml(ledgerDay()) + curatorPendingHtml(ledgerDay()) +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
      <div class="hm-note">Здесь все сделки, выданные на руки, начиная с 3 августа 2026 — без деления на недели. Всё, что было раньше, в счёт не входит. По каждой: итог сделки минус доля куратора; если процента куратора нет, вся сделка идёт на руки. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
@@ -5903,9 +5904,7 @@ function openCuratorMineModal() {
       <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
     </div>
     ${resetNote}
-    ${unlinkedPayoutsHtml(ledgerDay())}
     ${table}
-    ${curatorPendingHtml(ledgerDay())}
     ${archBlock}
     ${payBlock}
   `;
