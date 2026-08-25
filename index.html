@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v177</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v178</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2369,6 +2369,18 @@ const HAND_START_DEFAULT = '2026-07-31';
    лежит в state.handStart. 25.08.2026 назвал точное число: «начинай считать
    с 31 июля». Не константа: угадывать её за владельца больше
    не будем, каждая догадка стоила пересчёта. */
+/* Дата, на которую ведётся счёт куратора и «На руки» (v178).
+
+   Не открытый день, а последний день с данными, если он позже. Владелец
+   листает дни, но счёт для него один — текущий: приход 31 июля закрывает
+   выдача 3 августа, и на дне 31 июля счёт показывал ноль, хотя деньги отданы
+   и привязка стоит. */
+function ledgerDay() {
+  const days = Object.keys(state.days || {}).sort();
+  const last = days.length ? days[days.length - 1] : null;
+  return (last && last > currentDate) ? last : currentDate;
+}
+
 function handStart() {
   return (state && state.handStart) ? state.handStart : HAND_START_DEFAULT;
 }
@@ -3494,7 +3506,7 @@ function handTotals(dayStr) {
 // Кнопка «Отдана»: записывает, что часть или вся накопленная сумма куратора
 // отдана. Отданное вычитается из нарастающего итога «КУРАТОР КО МНЕ».
 function markCuratorPaid() {
-  const balance = curatorDebt(currentDate);
+  const balance = curatorDebt(ledgerDay());
   if (balance <= 0) {
     alert('Накопленная сумма куратора уже нулевая — отдавать нечего.');
     return;
@@ -3885,9 +3897,13 @@ function renderInBody(day) {
   const tbody = document.getElementById('in-body');
   // Нарастающий итог по каждому тегу на момент текущего дня
   const tagTotals = computeTagRunningTotals(currentDate);
-  /* Выданность строк этого дня — чтобы подпись «− куратору / на руки»
-     не обещала того, чего в счёте нет (v172). */
-  const COVER = pairPaidCoverage(currentDate, undefined, undefined, true);
+  /* Выданность строк этого дня. Считаем по ВСЕЙ истории, а не по открытому
+     дню (v178): приход 31 июля закрывает выдача 3 августа, и на дне 31 июля
+     она в будущем — подпись писала «после выдачи», хотя деньги отданы
+     и привязка стоит. */
+  const covDay = (Object.keys(state.days).sort().slice(-1)[0] || currentDate);
+  const COVER = pairPaidCoverage(covDay > currentDate ? covDay : currentDate,
+                                 undefined, undefined, true);
   const inCount = currentDate >= handStart();
   if (!day.in.length) {
     tbody.innerHTML = '<tr class="empty-row"><td colspan="4">Приходов сегодня не было.<br>'
@@ -5512,7 +5528,7 @@ function collectCuratorMineRows(dayStr) {
 function renderHandTile() {
   const body = document.getElementById('tileHandBody');
   if (!body) return;
-  const hw = handTotals(currentDate);
+  const hw = handTotals(ledgerDay());
   if (!hw.deals && !hw.curator) {
     body.innerHTML = 'Выданных сделок пока нет.';
     return;
@@ -5558,8 +5574,8 @@ function handExcludedBlockHtml(dayStr) {
 function openHandModal() {
   const box = document.getElementById('hand-modal-body');
   if (!box) return;
-  const hw = handTotals(currentDate);
-  const all = handOpenRows(currentDate);
+  const hw = handTotals(ledgerDay());
+  const all = handOpenRows(ledgerDay());
   const LIMIT = 40;
   const rows = all.slice(-LIMIT).reverse();
   const hidden = all.length - rows.length;
@@ -5575,12 +5591,12 @@ function openHandModal() {
   if (!rows.length) {
     box.innerHTML = head
       + '<div style="color:var(--muted);padding:8px 0">Выданных сделок пока нет — пока приход не выдан на руки, считать нечего.</div>'
-      + handExcludedBlockHtml(currentDate);
+      + handExcludedBlockHtml(ledgerDay());
     document.getElementById('hand-modal').classList.add('open');
     return;
   }
 
-  const COVER = incomeCoverParts(currentDate, true);   // когда выданы (v167)
+  const COVER = incomeCoverParts(ledgerDay(), true);   // когда выданы
   const body = rows.map(r => {
     const pcts = [r.pct ? pf(r.pct) + '%' : '', r.pct2 ? pf(r.pct2) + '%' : ''].filter(Boolean).join(' / ') || '—';
     const curLine = r.curator
@@ -5615,7 +5631,7 @@ function openHandModal() {
     ? `<div style="color:var(--muted);font-size:11px;padding:8px 0 0">Показаны последние ${rows.length}. Раньше было ещё ${hidden} — они уже вошли в итог выше.</div>`
     : '';
 
-  box.innerHTML = head + body + more + handExcludedBlockHtml(currentDate) +
+  box.innerHTML = head + body + more + handExcludedBlockHtml(ledgerDay()) +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
      <div class="hm-note">Здесь все сделки, выданные на руки, начиная с 3 августа 2026 — без деления на недели. Всё, что было раньше, в счёт не входит. По каждой: итог сделки минус доля куратора; если процента куратора нет, вся сделка идёт на руки. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
@@ -5629,8 +5645,8 @@ function renderCuratorTile() {
   /* Плитка показывает ТОЛЬКО непогашенное. Начисление, закрытое выдачей,
      уходит отсюда совсем — оно живёт в архиве внутри окна. Владельцу нужна
      одна картина: сколько он должен куратору сегодня, а не вся история. */
-  const SET = curatorSettlement(currentDate);
-  const debt = curatorDebt(currentDate);
+  const SET = curatorSettlement(ledgerDay());
+  const debt = curatorDebt(ledgerDay());
 
   if (debt <= 0 && !SET.open.length) {
     body.innerHTML = SET.ahead > 0
@@ -5725,7 +5741,7 @@ function openCuratorMineModal() {
           payByDate[x.date] = (payByDate[x.date] || 0) + x.amount;
         });
         const payDates = Object.keys(payByDate).sort();
-        const COVER = incomeCoverParts(currentDate, true);   // чем погашен каждый приход
+        const COVER = incomeCoverParts(ledgerDay(), true);   // чем погашен каждый приход
         let acc = 0;
         const trs = rows.map((r, i) => {
           const partial = (r.frac !== undefined && r.frac < 0.999)
@@ -5888,9 +5904,9 @@ function openCuratorMineModal() {
       <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
     </div>
     ${resetNote}
-    ${unlinkedPayoutsHtml(currentDate)}
+    ${unlinkedPayoutsHtml(ledgerDay())}
     ${table}
-    ${curatorPendingHtml(currentDate)}
+    ${curatorPendingHtml(ledgerDay())}
     ${archBlock}
     ${payBlock}
   `;
@@ -6308,7 +6324,7 @@ function renderSummary(day) {
   document.getElementById('s-in').textContent = fmt(inT);
   document.getElementById('s-balance').textContent = fmt(balance);
   const curEl = document.getElementById('s-curator');
-  if (curEl) curEl.textContent = fmt(curatorDebt(currentDate));
+  if (curEl) curEl.textContent = fmt(curatorDebt(ledgerDay()));
   const curPaidLine = document.getElementById('curator-paid-line');
   if (curPaidLine) {
     const paidToday = day.curatorPaid || 0;
@@ -6324,7 +6340,7 @@ function renderSummary(day) {
   // Блок «ИТОГ СДЕЛОК / − КУРАТОРУ / = НА РУКИ» — недельный нарастающий итог
   // (пн–пт) со ВСЕХ приходов недели. Отсюда же берёт плитка «НА РУКИ» —
   // источник один, суммы обязаны совпадать.
-  const hw = handTotals(currentDate);
+  const hw = handTotals(ledgerDay());
   const dealsEl = document.getElementById('deals-total');
   if (dealsEl) dealsEl.textContent = fmt(hw.deals);
   const dealsCurEl = document.getElementById('deals-curator');
