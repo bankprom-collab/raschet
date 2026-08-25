@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v178</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v179</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3275,21 +3275,20 @@ function curatorResetDate() {
 }
 
 function curatorSettlement(dayStr) {
-  /* Выданность считаем по ВСЕЙ истории (v159). С границей выдача, погасившая
-     старый приход, «перескакивала» на свежий: у владельца приходы 21 авг
-     показывались выданными и по ним начислялся куратор, хотя денег по ним
-     не отдавали. Граница ниже отбирает, какие начисления идут в счёт, —
-     но на то, что чем погашено, она влиять не должна. */
-  /* Выданность — по всей истории, ровно как в блоке невыданных приходов
-     (v162). Что владелец видит там невыданным, то и в счёт не идёт. */
-  const cover = pairPaidCoverage(dayStr, undefined, undefined, true);   // только настоящие выдачи
+  /* Приход закрывают только выдачи, привязанные владельцем (realOnly). */
+  const cover = pairPaidCoverage(dayStr, undefined, undefined, true);
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     const dd = state.days[d];
     if (!dd) continue;
-    if (typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
+    /* Выплаты куратору — тоже только с даты начала счёта (v179). Начисления
+       отбирались по ней, а выплаты брались за всю историю: июльские выплаты
+       за уже закрытый период гасили сделку 31 июля, она уходила в архив,
+       и счёт показывал «нет выданных на руки приходов» при живом долге
+       12 100. Период считается целиком — и приходы, и выплаты. */
+    if (d >= handStart() && typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
       pays.push({ date: d, amount: dd.curatorPaid });
     }
     if (!isWeekday(d) || !Array.isArray(dd.in)) continue;
