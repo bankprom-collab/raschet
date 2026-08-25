@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v172</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v174</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5922,6 +5922,9 @@ function unlinkedPayoutsHtml(dayStr) {
   const list = unlinkedPayouts(dayStr);
   if (!list.length) return '';
   const total = list.reduce((a, x) => a + x.amount, 0);
+  /* Длинный список прокручивается внутри плашки: 24 строки во весь рост
+     закрывали собой таблицу счёта — владелец назвал это портянкой (v173). */
+  const scroll = (list.length > 5) ? 'max-height:38vh;overflow-y:auto;' : '';
   const rows = list.map(x => `
     <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;
                 padding:6px 0;border-top:1px solid rgba(255,138,74,.18)">
@@ -5937,11 +5940,14 @@ function unlinkedPayoutsHtml(dayStr) {
          background:rgba(255,138,74,.10);border:1px solid rgba(255,138,74,.35)">
       <div style="font-size:12px;line-height:1.5">
         <b style="color:#ff8a4a">Выдачи без указания прихода: ${list.length}</b> на
-        <b style="font-family:var(--font-num)">${fmt(total)}</b>.
-        Пока приход не указан, эти деньги ни одну сделку не закрывают —
-        ни куратору, ни на руки. Нажмите «указать приход» и выберите день.
+        <b style="font-family:var(--font-num)">${fmt(total)}</b> —
+        считаем с ${formatDateShort(handStart())}.<button class="btn btn-ghost no-print"
+          onclick="askHandStart()" style="font-size:10.5px;padding:3px 9px;margin-left:6px;
+          border-color:#ff8a4a;color:#ff8a4a">сменить дату</button>
+        <div style="margin-top:3px">Пока приход не указан, эти деньги ни одну сделку
+        не закрывают — ни куратору, ни на руки.</div>
       </div>
-      ${rows}
+      <div style="${scroll}margin-top:4px">${rows}</div>
     </div>`;
 }
 
@@ -6407,7 +6413,9 @@ function qeRenderUnpaid() {
   /* Показываем ВСЕ приходы, а не последние 12 (v170): владелец разносит
      выдачи начиная с 31 июля, и приход, к которому надо привязать, часто
      давний. Длинный список прокручивается внутри своего блока. */
-  const shown = qeUnpaid.slice().reverse();   // свежие сверху
+  /* Старые сверху (v174): владелец разносит выдачи с 31 июля и дальше по
+     возрастанию — приход, который ему нужен, должен быть первым, а не внизу. */
+  const shown = qeUnpaid.slice();
   const total = qeUnpaid.reduce((s, x) => s + x.left, 0);
   box.style.maxHeight = (qeUnpaid.length > 6) ? '46vh' : '';
   box.style.overflowY = (qeUnpaid.length > 6) ? 'auto' : '';
