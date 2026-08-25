@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v165</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v166</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1672,7 +1672,7 @@
     </div>
     <!-- Невыданные приходы выбранной пары: нажал на день — сумма подставилась -->
     <div class="qe-field" id="qe-unpaid-field" style="display:none">
-      <label id="qe-unpaid-label">Ещё не выдано — нажми день, чтобы подставить сумму</label>
+      <label id="qe-unpaid-label">За какой приход выдаём? Нажми день — сумма подставится</label>
       <div id="qe-unpaid"></div>
     </div>
     <div class="qe-field">
@@ -2361,12 +2361,13 @@ document.addEventListener('DOMContentLoaded', () => {
    14.08.2026: «зачем ты мне на руки пихаешь все подряд за старые числа».
    Объявлена ДО loadState() — как MIGRATION_VERSION, чтобы не попасть в
    мёртвую зону. Двигать только по прямой просьбе владельца. */
-const HAND_START_DEFAULT = '2026-07-27';
+const HAND_START_DEFAULT = '2026-07-31';
 
 /* Дата начала счёта. Владелец 25.08.2026: «Надо брать все сделки, начиная
    с конца июля. То, что было выдано, от них считай куратору деньги». Точку
    он двигает сам — кнопка «изменить» в окне «Куратор ко мне», значение
-   лежит в state.handStart. Не константа: угадывать её за владельца больше
+   лежит в state.handStart. 25.08.2026 назвал точное число: «начинай считать
+   с 31 июля». Не константа: угадывать её за владельца больше
    не будем, каждая догадка стоила пересчёта. */
 function handStart() {
   return (state && state.handStart) ? state.handStart : HAND_START_DEFAULT;
@@ -3208,7 +3209,7 @@ function curatorRunningBalance(dayStr) {
 /** Начислено куратору за всё время до dayStr — по выданности на этот день. */
 function curatorAccruedTotal(dayStr) {
   let sum = 0;
-  const cover = pairPaidCoverage(dayStr);   // выданность — по всей истории
+  const cover = pairPaidCoverage(dayStr, undefined, undefined, true);   // только настоящие выдачи
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
@@ -3259,7 +3260,7 @@ function curatorSettlement(dayStr) {
      но на то, что чем погашено, она влиять не должна. */
   /* Выданность — по всей истории, ровно как в блоке невыданных приходов
      (v162). Что владелец видит там невыданным, то и в счёт не идёт. */
-  const cover = pairPaidCoverage(dayStr);   // выданность — по всей истории
+  const cover = pairPaidCoverage(dayStr, undefined, undefined, true);   // только настоящие выдачи
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
@@ -3414,7 +3415,7 @@ function dealOfRow(r, frac) {
     здесь, и складывается со всеми остальными выданными. */
 function handOpenRows(dayStr) {
   const rows = [];
-  const cover = pairPaidCoverage(dayStr);   // выданность — по всей истории
+  const cover = pairPaidCoverage(dayStr, undefined, undefined, true);   // только настоящие выдачи
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (!isWeekday(d)) continue;
@@ -3443,7 +3444,7 @@ function handOpenRows(dayStr) {
    Нужна, когда владелец ждёт сумму на плитке, а её там нет. */
 function handExcludedRows(dayStr) {
   const rows = [];
-  const cover = pairPaidCoverage(dayStr);
+  const cover = pairPaidCoverage(dayStr, undefined, undefined, true);
   const inOpen = {};
   handOpenRows(dayStr).forEach(x => { inOpen[x.date + '#' + x.idx] = true; });
   const reset = curatorResetDate();
@@ -5202,7 +5203,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
    Нужно для ответа на вопрос владельца «эта сумма ещё не выдана, почему она
    считается?»: в окне «Куратор ко мне» строка раскрывается и показывает,
    какими выдачами набралась доля. Расчёт этим не пользуется — только показ. */
-function incomeCoverParts(dayStr) {
+function incomeCoverParts(dayStr, realOnly) {
   const day = dayStr || currentDate;
   const byPair = {};
   for (const d of Object.keys(state.days).sort()) {
@@ -5238,7 +5239,9 @@ function incomeCoverParts(dayStr) {
       byOwn[x.date + '#' + x.idx] = x;
       x.left = x.after1 || 0;
       const gd = dOut[weekMondayStr(x.date) + '::' + p];
-      if (gd && x.date <= gd) { x.byDate = gd; x.left = 0; }   // закрыт числом отдачи
+      // Число отдачи запоминаем всегда — чтобы объяснить строку владельцу.
+      // Но гасить приход в режиме realOnly оно не может: денег не было.
+      if (gd && x.date <= gd) { x.byDate = gd; if (!realOnly) x.left = 0; }
     });
 
     const give = (inr, amount, pay, aimed) => {
@@ -5270,7 +5273,7 @@ function incomeCoverParts(dayStr) {
   return out;
 }
 
-function pairPaidCoverage(dayStr, order, startDate) {
+function pairPaidCoverage(dayStr, order, startDate, realOnly) {
   const allDays = Object.keys(state.days).sort();
   const byPair = {};
   for (const d of allDays) {
@@ -5328,9 +5331,11 @@ function pairPaidCoverage(dayStr, order, startDate) {
       // «Число отдачи» недели этого прихода: приход ПО дату отдачи включительно
       // считается ОТДАННЫМ (frac = 1), даже если реальной выдачи по нему нет.
       // Пул выдач на него НЕ тратим — реальные выдачи идут на остальные приходы.
-      // Благодаря этому куратор и «Итог сделок» учитывают приходы, закрытые
-      // «числом отдачи», так же как закрытые настоящей выдачей.
-      const gd = dOut[weekMondayStr(inr.date) + '::' + p];
+      // Нужно задолженности по парам: там число отдачи закрывает неделю.
+      // realOnly — режим для куратора и «На руки». Владелец 25.08.2026:
+      // «куратор считается с настоящих выдач». Число отдачи денег не двигало,
+      // поэтому в этом режиме приход гасится только реальными выдачами.
+      const gd = realOnly ? null : dOut[weekMondayStr(inr.date) + '::' + p];
       if (gd && inr.date <= gd) {
         cover[p + '#' + inr.date + '#' + inr.idx] = 1;
         return;
@@ -5630,7 +5635,7 @@ function openCuratorMineModal() {
           payByDate[x.date] = (payByDate[x.date] || 0) + x.amount;
         });
         const payDates = Object.keys(payByDate).sort();
-        const COVER = incomeCoverParts(currentDate);   // чем погашен каждый приход (v165)
+        const COVER = incomeCoverParts(currentDate, true);   // чем погашен каждый приход
         let acc = 0;
         const trs = rows.map((r, i) => {
           const partial = (r.frac !== undefined && r.frac < 0.999)
@@ -6211,6 +6216,7 @@ function pairUnpaidRows(pair, dayStr) {
 
 let qeUnpaid = [];      // список под кнопками — что сейчас показано
 let qeAimedIn = null;   // «дата#номер» прихода, за который идёт эта выдача
+let qeSubmitting = false;   // ввод идёт из крупной формы — приход там уже спросили
 
 /** Показать невыданные приходы выбранной пары. Только для выдачи. */
 function qeRenderUnpaid() {
@@ -6253,7 +6259,7 @@ function qeRenderUnpaid() {
     + `<div class="qe-unpaid-all"><span>Не выдано всего</span><b>${fmt(total)}</b></div>`
     + (qeAimedIn
         ? '<div style="font-size:10.5px;color:var(--accent);margin-top:6px;line-height:1.4">Выдача зачтётся именно за отмеченный день. Нажмите на него ещё раз, чтобы снять привязку.</div>'
-        : '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;line-height:1.4">Без отметки деньги пойдут на самый ранний невыданный приход.</div>');
+        : '<div style="font-size:10.5px;color:var(--expense);margin-top:6px;line-height:1.4">Отметьте приход, за который выдаёте, — без этого выдача не сохранится.</div>');
 }
 
 /** Нажали на день — подставили его невыданный остаток в поле суммы. */
@@ -6489,9 +6495,24 @@ function qeSaveEdit() {
 function qeSubmit() {
   qeOnInput();
   if (qeEditing) { qeSaveEdit(); return; }
+  /* Владелец 25.08.2026: «надо спрашивать, по какому приходу». Раньше выдача
+     без отметки уходила на самый ранний долг пары, и деньги оказывались не
+     там, где он их видел. Есть невыданные приходы — приход обязателен. */
+  if (qeType === 'out' && !qeAimedIn && qeUnpaid && qeUnpaid.length) {
+    const field = document.getElementById('qe-unpaid-field');
+    if (field) {
+      field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      field.style.transition = 'box-shadow .2s';
+      field.style.boxShadow = '0 0 0 2px var(--expense)';
+      setTimeout(() => { field.style.boxShadow = ''; }, 1600);
+    }
+    showToast('Укажите приход, за который выдаёте — нажмите день в списке');
+    return;
+  }
   const day = getDay(currentDate);
   const before = (day[qeType] || []).length;
-  addRow(qeType);
+  qeSubmitting = true;
+  try { addRow(qeType); } finally { qeSubmitting = false; }
   // addRow сам ругается и ничего не пишет, если поля не заполнены —
   // тогда модалку не закрываем, чтобы было что поправить.
   if ((getDay(currentDate)[qeType] || []).length <= before) return;
@@ -6798,6 +6819,20 @@ function addRow(type) {
     const client = document.getElementById('out-client').value;
     const amount = parseDecimal(document.getElementById('out-amount').value);
     if (!client || isNaN(amount) || amount <= 0) { showToast('Заполните поля', true); return; }
+    /* Владелец 25.08.2026: «надо спрашивать, по какому приходу». В компактной
+       форме приход указать негде — переносим ввод в крупную вместе с суммой,
+       там есть список невыданных приходов. Если гасить нечего, пишем сразу. */
+    if (!qeSubmitting && pairUnpaidRows(client, currentDate).length) {
+      const amt = amount;
+      openQuickEntry('out');
+      qeSums = [fmtExact(amt)];
+      qeRenderSumRows();
+      qeSyncSums();
+      qeRenderUnpaid();
+      document.getElementById('out-amount').value = '';
+      showToast('Укажите, за какой приход эта выдача');
+      return;
+    }
     const outNote = document.getElementById('out-note').value.trim();
     // Храним точное число (без округления). note — свободный текст, в расчётах не участвует.
     // dueDate — когда эти деньги надо отдать. Напоминание, в расчётах не участвует (v133).
