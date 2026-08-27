@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v189</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v191</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2712,7 +2712,6 @@ function defaultState() {
   };
 }
 function saveState() {
-  _realCoverCache = { day: null, map: null };   // данные изменились — пересчитать
   // Раз в день, перед первым сохранением — резервная копия прежнего состояния
   if (_backupCheckedFor !== todayStr()) {
     try { autoBackup(localStorage.getItem(STORAGE_KEY)); } catch (e) { console.warn('autoBackup:', e); }
@@ -2877,43 +2876,6 @@ function computeTagRunningTotals(dayStr) {
 // и выдачи из более ранних недель полностью игнорируются (для «Вейс(рук)-Рынок»
 // не передавай, он переносит от самого начала истории; для остальных пар
 // передавай PAIR_CARRY_START_DATE).
-/* Реальная выданность приходов (только привязанные выдачи), с кэшем на день:
-   расчёт долга зовёт её для каждой пары, а считается она по всей истории. */
-let _realCoverCache = { day: null, map: null };
-function realCover(dayStr) {
-  if (_realCoverCache.day === dayStr && _realCoverCache.map) return _realCoverCache.map;
-  const map = pairPaidCoverage(dayStr, undefined, undefined, true);
-  _realCoverCache = { day: dayStr, map: map };
-  return map;
-}
-
-/* Сколько по паре реально НЕ выдано (v186). Владелец: «если не отдано,
-   то сумма присутствует в отчёте» — ни ручная коррекция, ни число отдачи
-   не могут опустить долг ниже этой величины.
-   week === null — считаем за все недели строго ДО beforeWeek. */
-function pairUnpaidAmount(pair, dayStr, week, beforeWeek) {
-  /* ВАЖНО: здесь обычное покрытие, а не realOnly (v188). В счёте куратора
-     приход закрывает только привязанная выдача, но в ДОЛГЕ по парам деньги
-     есть деньги: у владельца выдачи почти все без привязки, и realOnly
-     объявил их несуществующими — «Просрочено» раздулось до 36 821 500,
-     причём в раскрытии стояло «всё выдано». */
-  const cov = pairPaidCoverage(dayStr, 'fifo');
-  let left = 0;
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > dayStr) break;
-    const w = weekMondayStr(d);
-    if (week !== null && w !== week) continue;
-    if (beforeWeek && w >= beforeWeek) continue;
-    const dd = state.days[d];
-    if (!dd || !isWeekday(d) || !Array.isArray(dd.in)) continue;
-    dd.in.forEach((r, idx) => {
-      if ((r.client || '').trim() !== pair) return;
-      left += (calcInRowFinal(r) || 0) * (1 - (cov[pair + '#' + d + '#' + idx] || 0));
-    });
-  }
-  return left > 50 ? r100(left) : 0;
-}
-
 function pairWeekDebt(dayStr, pairName, startWeek) {
   const pair = (pairName || '').trim();
   if (!pair) return { accrued: 0, accrued2: 0, accruedBase: 0, has2: false, received: 0, remaining: 0, remaining2: 0, remainingBase: 0, pct1: null, pct2: null };
@@ -2941,28 +2903,7 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
     let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
     for (const d of allDays) {
       if (weekMondayStr(d) !== wk) continue;
-      /* «Число отдачи» закрывает приход только в той части, что реально
-         выдана (v182). Владелец 25.08.2026: «если сумма не отдана, значит
-         она остаётся в отчёте» — приход Мухтар-Ленин 21 августа пропадал
-         из просрочки целиком, хотя денег по нему не выдавали.
-         Выдачи этих дней отдельно не вычитаем: они уже учтены в доле frac. */
-      if (applyGd && d <= gd) {
-        const ddg = state.days[d];
-        if (ddg && isWeekday(d) && Array.isArray(ddg.in)) {
-          const cov = realCover(dayStr);
-          ddg.in.forEach((r, idx) => {
-            if ((r.client || '').trim() !== pair) return;
-            const frac = cov[pair + '#' + d + '#' + idx] || 0;
-            const left = 1 - frac;
-            if (left <= 0.0005) return;
-            accBase += (r.amount || 0) * left;
-            acc1 += calcInRowFinal(r) * left;
-            if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
-            if (hasSecondPct(r)) { acc2 += r100(r.total2) * left; has2 = true; pct2 = r.pct2; }
-          });
-        }
-        continue;
-      }
+      if (applyGd && d <= gd) continue;   // приходы/выдачи ПО дату отдачи — отданы
       const dd = state.days[d];
       if (!dd) continue;
       if (isWeekday(d) && Array.isArray(dd.in)) {
@@ -3014,11 +2955,9 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
     }
     // Прошлая неделя: ручная коррекция заменяет её итог в переносе.
     if (ov && ov.v1 !== null && ov.v1 !== undefined) {
-      const unpaidWk = pairUnpaidAmount(pair, dayStr, wk, null);   // v186
-      const ovV1 = Math.max(ov.v1 || 0, unpaidWk);
-      if (ovV1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
+      if (ov.v1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
       else {
-        cGross1 = ovV1; cNet1 = ovV1;
+        cGross1 = ov.v1; cNet1 = ov.v1;
         cGross2 = (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0;
         cGrossBase = grossBase;   // база — то, что накоплено; коррекция v1 не отменяет уже пришедших сумм
         if (cGross2 > 0) has2 = true;
@@ -3063,23 +3002,7 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
     let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
     for (const d of allDays) {
       if (weekMondayStr(d) !== wk) continue;
-      if (applyGd && d <= gd) {                 // см. комментарий в pairWeekDebt (v182)
-        const ddg = state.days[d];
-        if (ddg && isWeekday(d) && Array.isArray(ddg.in)) {
-          const cov = realCover(dayStr);
-          ddg.in.forEach((r, idx) => {
-            if ((r.client || '').trim() !== pair) return;
-            const frac = cov[pair + '#' + d + '#' + idx] || 0;
-            const left = 1 - frac;
-            if (left <= 0.0005) return;
-            accBase += (r.amount || 0) * left;
-            acc1 += calcInRowFinal(r) * left;
-            if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
-            if (hasSecondPct(r)) { acc2 += r100(r.total2) * left; has2 = true; pct2 = r.pct2; }
-          });
-        }
-        continue;
-      }
+      if (applyGd && d <= gd) continue;   // приходы/выдачи ПО дату отдачи — отданы
       const dd = state.days[d];
       if (!dd) continue;
       if (isWeekday(d) && Array.isArray(dd.in)) {
@@ -3108,11 +3031,8 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
       // Ручная коррекция этой недели — как раньше, единой суммой; просрочку
       // ручной ввод не трогает (чтобы не спорить с ручным числом).
       if (ov && ov.v1 !== null && ov.v1 !== undefined) {
-        /* Ручная коррекция текущей недели не стирает просрочку целиком (v186):
-           то, что реально не выдано за прошлые недели, остаётся в отчёте. */
-        const unpaidBefore = pairUnpaidAmount(pair, dayStr, null, targetWeek);
         return {
-          overdue: { base: unpaidBefore, v1: unpaidBefore, v2: 0, has2: false, pct1, pct2 },
+          overdue: { base: 0, v1: 0, v2: 0, has2: false, pct1, pct2 },
           current: {
             base: grossBase, v1: ov.v1,
             v2: (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0,
@@ -3134,29 +3054,16 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
       const currentBaseV = currentNet1 > 0 ? r100(accBase * currentFrac) : 0;
       const currentV2 = (has2 && currentNet1 > 0) ? r100(acc2 * currentFrac) : 0;
 
-      /* Нижняя граница просрочки — то, что реально не выдано за прошлые
-         недели (v186). Иначе выдача этой недели, привязанная к своему приходу,
-         гасила просрочку «сверху», и невыданное пропадало из отчёта. */
-      const unpaidBefore = pairUnpaidAmount(pair, dayStr, null, targetWeek);
-      const ovNet1 = Math.max(overdueNet1, unpaidBefore);
-      const ovFrac = inG1 > 0 ? Math.min(1, ovNet1 / inG1) : 0;
       return {
-        overdue: {
-          base: ovNet1 > 0 ? r100(inGB * ovFrac) : 0,
-          v1: ovNet1,
-          v2: (has2 && ovNet1 > 0) ? r100(inG2 * ovFrac) : 0,
-          has2: has2 && ovNet1 > 0, pct1, pct2
-        },
+        overdue: { base: overdueBaseV, v1: overdueNet1, v2: overdueV2, has2: has2 && overdueV2 > 0, pct1, pct2 },
         current: { base: currentBaseV, v1: currentNet1, v2: currentV2, has2: has2 && currentV2 > 0, pct1, pct2 }
       };
     }
     // Прошлая неделя — копим ТОЧНО как в pairWeekDebt (не менять!).
     if (ov && ov.v1 !== null && ov.v1 !== undefined) {
-      const unpaidWk = pairUnpaidAmount(pair, dayStr, wk, null);   // v186
-      const ovV1 = Math.max(ov.v1 || 0, unpaidWk);
-      if (ovV1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
+      if (ov.v1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
       else {
-        cGross1 = ovV1; cNet1 = ovV1;
+        cGross1 = ov.v1; cNet1 = ov.v1;
         cGross2 = (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0;
         cGrossBase = grossBase;
         if (cGross2 > 0) has2 = true;
@@ -5401,6 +5308,20 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
       <span><b>${anyPct2 ? fmt(sumAll2) : '—'}</b></span>
       <span><b>${anyPct2 ? fmt(sumAll1 - sumAll2) : '—'}</b></span>
     </div>
+    ${(() => {
+      /* Итог движка бывает больше суммы показанных приходов: в него входит
+         перенос с более ранних недель, приходы которых в этот список
+         не попали (v190). Владелец видел «по списку 585 400» и рядом
+         «невыдано 1 160 200» и справедливо спрашивал, откуда разница. */
+      const diff = r100(netAfter1 - sumAll1);
+      if (diff <= 50) return '';
+      return `<div class="wds-break-all" style="color:var(--muted)">
+        <span style="font-family:var(--font-ui);font-size:10.5px">+ перенос с более ранних недель:</span>
+        <span></span><span></span>
+        <span><b>${fmt(diff)}</b></span>
+        <span></span><span></span>
+      </div>`;
+    })()}
     <div class="wds-break-net">
       <span>Итого невыдано:</span>
       <span><b>${fmt(netBase)}</b></span>
