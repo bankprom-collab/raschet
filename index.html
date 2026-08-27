@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v188</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v189</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4813,7 +4813,10 @@ function diagnosePair() {
       if (!dd) continue;
       const w = weekMondayStr(d);
       const b = byWeek[w] || (byWeek[w] = { in: 0, inCnt: 0, out: 0, unpaid: 0 });
-      const cov = realCover(currentDate);
+      /* То же покрытие, что в расчёте долга (v189). С realCover получалось
+         «выдано 3 032 800 · не выдано 1 384 400» в одной строке: там считались
+         только привязанные выдачи, а долг — по всем. */
+      const cov = pairPaidCoverage(currentDate, 'fifo');
       if (isWeekday(d) && Array.isArray(dd.in)) {
         dd.in.forEach((r, idx) => {
           if ((r.client || '').trim() !== p) return;
@@ -4828,17 +4831,31 @@ function diagnosePair() {
     }
     const ws = Object.keys(byWeek).filter(w => byWeek[w].inCnt || byWeek[w].out).sort();
     if (!ws.length) return '   — записей по этой паре нет вообще —';
+    /* Итог по паре: пришло / выдано / разница. Владелец 27.08.2026 не мог
+       понять, почему приход 1 600 411,3 не в долге, — по паре было выдано
+       на 185 500 БОЛЬШЕ, чем пришло, и долгу взяться неоткуда. */
+    const totIn = ws.reduce((a, w) => a + byWeek[w].in, 0);
+    const totOut = ws.reduce((a, w) => a + byWeek[w].out, 0);
+    const diff = totIn - totOut;
+    const itog = '\n   ─────\n'
+      + '   ВСЕГО пришло (после 1-го %): ' + fmt(totIn) + '\n'
+      + '   ВСЕГО выдано: ' + fmt(totOut) + '\n'
+      + (diff > 50
+          ? '   → не выдано: ' + fmt(diff)
+          : (diff < -50
+              ? '   → ПЕРЕПЛАТА: выдано на ' + fmt(-diff) + ' больше, чем пришло.\n'
+                + '     Долга по паре нет. Проверьте: лишняя выдача или потерянный приход?'
+              : '   → выдано ровно столько, сколько пришло — долга нет'));
     return ws.map(w => {
       const b = byWeek[w];
       const gd = (state.debtOutDates || {})[w + '::' + p];
       const ov = (state.weekDebtOverrides || {})[w + '::' + p];
-      const split = pairWeekDebtSplit(currentDate, p, PAIR_CARRY_START_DATE);
       return '   неделя ' + w + ': приходов ' + b.inCnt + ' на ' + fmt(b.in)
         + ' · выдано ' + fmt(b.out)
         + ' · не выдано ' + fmt(b.unpaid)
         + (gd ? '\n      ⚠ число отдачи: ' + gd : '')
         + (ov ? '\n      ⚠ ручная коррекция: ' + JSON.stringify(ov) : '');
-    }).join('\n');
+    }).join('\n') + itog;
   })();
   const splitAll = pairWeekDebtSplit(currentDate, p, PAIR_CARRY_START_DATE);
 
