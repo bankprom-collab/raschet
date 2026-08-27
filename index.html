@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v184</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v187</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2887,6 +2887,28 @@ function realCover(dayStr) {
   return map;
 }
 
+/* Сколько по паре реально НЕ выдано (v186). Владелец: «если не отдано,
+   то сумма присутствует в отчёте» — ни ручная коррекция, ни число отдачи
+   не могут опустить долг ниже этой величины.
+   week === null — считаем за все недели строго ДО beforeWeek. */
+function pairUnpaidAmount(pair, dayStr, week, beforeWeek) {
+  const cov = realCover(dayStr);
+  let left = 0;
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    const w = weekMondayStr(d);
+    if (week !== null && w !== week) continue;
+    if (beforeWeek && w >= beforeWeek) continue;
+    const dd = state.days[d];
+    if (!dd || !isWeekday(d) || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() !== pair) return;
+      left += (calcInRowFinal(r) || 0) * (1 - (cov[pair + '#' + d + '#' + idx] || 0));
+    });
+  }
+  return left > 50 ? r100(left) : 0;
+}
+
 function pairWeekDebt(dayStr, pairName, startWeek) {
   const pair = (pairName || '').trim();
   if (!pair) return { accrued: 0, accrued2: 0, accruedBase: 0, has2: false, received: 0, remaining: 0, remaining2: 0, remainingBase: 0, pct1: null, pct2: null };
@@ -2987,9 +3009,11 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
     }
     // Прошлая неделя: ручная коррекция заменяет её итог в переносе.
     if (ov && ov.v1 !== null && ov.v1 !== undefined) {
-      if (ov.v1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
+      const unpaidWk = pairUnpaidAmount(pair, dayStr, wk, null);   // v186
+      const ovV1 = Math.max(ov.v1 || 0, unpaidWk);
+      if (ovV1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
       else {
-        cGross1 = ov.v1; cNet1 = ov.v1;
+        cGross1 = ovV1; cNet1 = ovV1;
         cGross2 = (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0;
         cGrossBase = grossBase;   // база — то, что накоплено; коррекция v1 не отменяет уже пришедших сумм
         if (cGross2 > 0) has2 = true;
@@ -3079,8 +3103,11 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
       // Ручная коррекция этой недели — как раньше, единой суммой; просрочку
       // ручной ввод не трогает (чтобы не спорить с ручным числом).
       if (ov && ov.v1 !== null && ov.v1 !== undefined) {
+        /* Ручная коррекция текущей недели не стирает просрочку целиком (v186):
+           то, что реально не выдано за прошлые недели, остаётся в отчёте. */
+        const unpaidBefore = pairUnpaidAmount(pair, dayStr, null, targetWeek);
         return {
-          overdue: { base: 0, v1: 0, v2: 0, has2: false, pct1, pct2 },
+          overdue: { base: unpaidBefore, v1: unpaidBefore, v2: 0, has2: false, pct1, pct2 },
           current: {
             base: grossBase, v1: ov.v1,
             v2: (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0,
@@ -3102,16 +3129,29 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
       const currentBaseV = currentNet1 > 0 ? r100(accBase * currentFrac) : 0;
       const currentV2 = (has2 && currentNet1 > 0) ? r100(acc2 * currentFrac) : 0;
 
+      /* Нижняя граница просрочки — то, что реально не выдано за прошлые
+         недели (v186). Иначе выдача этой недели, привязанная к своему приходу,
+         гасила просрочку «сверху», и невыданное пропадало из отчёта. */
+      const unpaidBefore = pairUnpaidAmount(pair, dayStr, null, targetWeek);
+      const ovNet1 = Math.max(overdueNet1, unpaidBefore);
+      const ovFrac = inG1 > 0 ? ovNet1 / inG1 : 0;
       return {
-        overdue: { base: overdueBaseV, v1: overdueNet1, v2: overdueV2, has2: has2 && overdueV2 > 0, pct1, pct2 },
+        overdue: {
+          base: (ovNet1 > overdueNet1) ? ovNet1 : overdueBaseV,
+          v1: ovNet1,
+          v2: (has2 && ovNet1 > 0) ? r100(inG2 * Math.min(1, ovFrac)) : overdueV2,
+          has2: has2 && (ovNet1 > 0), pct1, pct2
+        },
         current: { base: currentBaseV, v1: currentNet1, v2: currentV2, has2: has2 && currentV2 > 0, pct1, pct2 }
       };
     }
     // Прошлая неделя — копим ТОЧНО как в pairWeekDebt (не менять!).
     if (ov && ov.v1 !== null && ov.v1 !== undefined) {
-      if (ov.v1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
+      const unpaidWk = pairUnpaidAmount(pair, dayStr, wk, null);   // v186
+      const ovV1 = Math.max(ov.v1 || 0, unpaidWk);
+      if (ovV1 <= 0) { cGross1 = 0; cGross2 = 0; cGrossBase = 0; cNet1 = 0; }
       else {
-        cGross1 = ov.v1; cNet1 = ov.v1;
+        cGross1 = ovV1; cNet1 = ovV1;
         cGross2 = (ov.v2 !== null && ov.v2 !== undefined) ? ov.v2 : 0;
         cGrossBase = grossBase;
         if (cGross2 > 0) has2 = true;
@@ -4756,6 +4796,47 @@ function diagnosePair() {
     if (rem <= 0) return '⚠ Выдано (out) за неделю (' + fmt(received) + ') ≥ начислено (' + fmt(a.v1) + ') → остаток ≤ 0, пара не показывается.';
     return '⚠ Пара НЕ в итоговых rows, хотя rem=' + fmt(rem) + '. Странно — проверь ручные коррекции или отладь computeWeekPairDebt.';
   })();
+  /* История по всем неделям (v185). Прежняя диагностика смотрела только
+     текущую неделю и на вопрос «где приход 21 августа» отвечала «нет записей
+     прихода» — он лежал в прошлой неделе. Теперь видно каждую неделю: приходы,
+     выдачи, число отдачи, ручную коррекцию и что из этого даёт долг. */
+  const weeksReport = (() => {
+    const byWeek = {};
+    for (const d of Object.keys(state.days).sort()) {
+      if (d > currentDate) break;
+      const dd = state.days[d];
+      if (!dd) continue;
+      const w = weekMondayStr(d);
+      const b = byWeek[w] || (byWeek[w] = { in: 0, inCnt: 0, out: 0, unpaid: 0 });
+      const cov = realCover(currentDate);
+      if (isWeekday(d) && Array.isArray(dd.in)) {
+        dd.in.forEach((r, idx) => {
+          if ((r.client || '').trim() !== p) return;
+          b.in += calcInRowFinal(r) || 0;
+          b.inCnt++;
+          b.unpaid += (calcInRowFinal(r) || 0) * (1 - (cov[p + '#' + d + '#' + idx] || 0));
+        });
+      }
+      if (Array.isArray(dd.out)) {
+        dd.out.forEach(o => { if ((o.client || '').trim() === p) b.out += (o.amount || 0); });
+      }
+    }
+    const ws = Object.keys(byWeek).filter(w => byWeek[w].inCnt || byWeek[w].out).sort();
+    if (!ws.length) return '   — записей по этой паре нет вообще —';
+    return ws.map(w => {
+      const b = byWeek[w];
+      const gd = (state.debtOutDates || {})[w + '::' + p];
+      const ov = (state.weekDebtOverrides || {})[w + '::' + p];
+      const split = pairWeekDebtSplit(currentDate, p, PAIR_CARRY_START_DATE);
+      return '   неделя ' + w + ': приходов ' + b.inCnt + ' на ' + fmt(b.in)
+        + ' · выдано ' + fmt(b.out)
+        + ' · не выдано ' + fmt(b.unpaid)
+        + (gd ? '\n      ⚠ число отдачи: ' + gd : '')
+        + (ov ? '\n      ⚠ ручная коррекция: ' + JSON.stringify(ov) : '');
+    }).join('\n');
+  })();
+  const splitAll = pairWeekDebtSplit(currentDate, p, PAIR_CARRY_START_DATE);
+
   const report =
     `🔍 ДИАГНОСТИКА: «${p}»\n` +
     `Сегодня в программе: ${currentDate} (${dowRu[isFriChk]})\n` +
@@ -4766,6 +4847,10 @@ function diagnosePair() {
     `Выдано за неделю (pairWeekReceived): ${fmt(received)}\n` +
     `Остаток (rem = round100(v1 − выдано)): ${fmt(rem)}\n` +
     `Ручная коррекция ✏️: ${override ? JSON.stringify(override) : '— нет —'}\n\n` +
+    `ПО ВСЕМ НЕДЕЛЯМ:\n${weeksReport}\n\n` +
+    `Расчёт долга (pairWeekDebtSplit):\n` +
+    `   просрочка: v1=${fmt(splitAll.overdue.v1)}, база=${fmt(splitAll.overdue.base || 0)}\n` +
+    `   эта неделя: v1=${fmt(splitAll.current.v1)}, база=${fmt(splitAll.current.base || 0)}\n\n` +
     `${conclusion}`;
   /* Системный alert обрезает длинный текст на телефоне — владелец видел
      только первые строки и не мог прочитать главное (v184). Показываем
