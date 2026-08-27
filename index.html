@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v180</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v183</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2712,6 +2712,7 @@ function defaultState() {
   };
 }
 function saveState() {
+  _realCoverCache = { day: null, map: null };   // данные изменились — пересчитать
   // Раз в день, перед первым сохранением — резервная копия прежнего состояния
   if (_backupCheckedFor !== todayStr()) {
     try { autoBackup(localStorage.getItem(STORAGE_KEY)); } catch (e) { console.warn('autoBackup:', e); }
@@ -2876,6 +2877,16 @@ function computeTagRunningTotals(dayStr) {
 // и выдачи из более ранних недель полностью игнорируются (для «Вейс(рук)-Рынок»
 // не передавай, он переносит от самого начала истории; для остальных пар
 // передавай PAIR_CARRY_START_DATE).
+/* Реальная выданность приходов (только привязанные выдачи), с кэшем на день:
+   расчёт долга зовёт её для каждой пары, а считается она по всей истории. */
+let _realCoverCache = { day: null, map: null };
+function realCover(dayStr) {
+  if (_realCoverCache.day === dayStr && _realCoverCache.map) return _realCoverCache.map;
+  const map = pairPaidCoverage(dayStr, undefined, undefined, true);
+  _realCoverCache = { day: dayStr, map: map };
+  return map;
+}
+
 function pairWeekDebt(dayStr, pairName, startWeek) {
   const pair = (pairName || '').trim();
   if (!pair) return { accrued: 0, accrued2: 0, accruedBase: 0, has2: false, received: 0, remaining: 0, remaining2: 0, remainingBase: 0, pct1: null, pct2: null };
@@ -2903,7 +2914,28 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
     let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
     for (const d of allDays) {
       if (weekMondayStr(d) !== wk) continue;
-      if (applyGd && d <= gd) continue;   // приходы/выдачи ПО дату отдачи включительно — отданы
+      /* «Число отдачи» закрывает приход только в той части, что реально
+         выдана (v182). Владелец 25.08.2026: «если сумма не отдана, значит
+         она остаётся в отчёте» — приход Мухтар-Ленин 21 августа пропадал
+         из просрочки целиком, хотя денег по нему не выдавали.
+         Выдачи этих дней отдельно не вычитаем: они уже учтены в доле frac. */
+      if (applyGd && d <= gd) {
+        const ddg = state.days[d];
+        if (ddg && isWeekday(d) && Array.isArray(ddg.in)) {
+          const cov = realCover(dayStr);
+          ddg.in.forEach((r, idx) => {
+            if ((r.client || '').trim() !== pair) return;
+            const frac = cov[pair + '#' + d + '#' + idx] || 0;
+            const left = 1 - frac;
+            if (left <= 0.0005) return;
+            accBase += (r.amount || 0) * left;
+            acc1 += calcInRowFinal(r) * left;
+            if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
+            if (hasSecondPct(r)) { acc2 += r100(r.total2) * left; has2 = true; pct2 = r.pct2; }
+          });
+        }
+        continue;
+      }
       const dd = state.days[d];
       if (!dd) continue;
       if (isWeekday(d) && Array.isArray(dd.in)) {
@@ -3002,7 +3034,23 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
     let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
     for (const d of allDays) {
       if (weekMondayStr(d) !== wk) continue;
-      if (applyGd && d <= gd) continue;
+      if (applyGd && d <= gd) {                 // см. комментарий в pairWeekDebt (v182)
+        const ddg = state.days[d];
+        if (ddg && isWeekday(d) && Array.isArray(ddg.in)) {
+          const cov = realCover(dayStr);
+          ddg.in.forEach((r, idx) => {
+            if ((r.client || '').trim() !== pair) return;
+            const frac = cov[pair + '#' + d + '#' + idx] || 0;
+            const left = 1 - frac;
+            if (left <= 0.0005) return;
+            accBase += (r.amount || 0) * left;
+            acc1 += calcInRowFinal(r) * left;
+            if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
+            if (hasSecondPct(r)) { acc2 += r100(r.total2) * left; has2 = true; pct2 = r.pct2; }
+          });
+        }
+        continue;
+      }
       const dd = state.days[d];
       if (!dd) continue;
       if (isWeekday(d) && Array.isArray(dd.in)) {
