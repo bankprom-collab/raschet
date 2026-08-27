@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v187</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v188</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2892,7 +2892,12 @@ function realCover(dayStr) {
    не могут опустить долг ниже этой величины.
    week === null — считаем за все недели строго ДО beforeWeek. */
 function pairUnpaidAmount(pair, dayStr, week, beforeWeek) {
-  const cov = realCover(dayStr);
+  /* ВАЖНО: здесь обычное покрытие, а не realOnly (v188). В счёте куратора
+     приход закрывает только привязанная выдача, но в ДОЛГЕ по парам деньги
+     есть деньги: у владельца выдачи почти все без привязки, и realOnly
+     объявил их несуществующими — «Просрочено» раздулось до 36 821 500,
+     причём в раскрытии стояло «всё выдано». */
+  const cov = pairPaidCoverage(dayStr, 'fifo');
   let left = 0;
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
@@ -3134,13 +3139,13 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
          гасила просрочку «сверху», и невыданное пропадало из отчёта. */
       const unpaidBefore = pairUnpaidAmount(pair, dayStr, null, targetWeek);
       const ovNet1 = Math.max(overdueNet1, unpaidBefore);
-      const ovFrac = inG1 > 0 ? ovNet1 / inG1 : 0;
+      const ovFrac = inG1 > 0 ? Math.min(1, ovNet1 / inG1) : 0;
       return {
         overdue: {
-          base: (ovNet1 > overdueNet1) ? ovNet1 : overdueBaseV,
+          base: ovNet1 > 0 ? r100(inGB * ovFrac) : 0,
           v1: ovNet1,
-          v2: (has2 && ovNet1 > 0) ? r100(inG2 * Math.min(1, ovFrac)) : overdueV2,
-          has2: has2 && (ovNet1 > 0), pct1, pct2
+          v2: (has2 && ovNet1 > 0) ? r100(inG2 * ovFrac) : 0,
+          has2: has2 && ovNet1 > 0, pct1, pct2
         },
         current: { base: currentBaseV, v1: currentNet1, v2: currentV2, has2: has2 && currentV2 > 0, pct1, pct2 }
       };
