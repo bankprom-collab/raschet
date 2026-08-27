@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v191</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v193</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2876,6 +2876,50 @@ function computeTagRunningTotals(dayStr) {
 // и выдачи из более ранних недель полностью игнорируются (для «Вейс(рук)-Рынок»
 // не передавай, он переносит от самого начала истории; для остальных пар
 // передавай PAIR_CARRY_START_DATE).
+/* Долг пары как СУММА НЕВЫДАННЫХ ПРИХОДОВ (v193).
+
+   Раньше долг считался агрегатами по неделям: сумма приходов недели минус
+   сумма выдач, с переносом остатка вперёд. Список «Раскрыть базу» при этом
+   строился по каждому приходу через pairPaidCoverage — и числа расходились.
+   У владельца: в списке приход 1 600 411,3 → 1 384 400, а в шапке пары
+   «база 723 400 · 625 000». Он спросил, откуда 723 400, и был прав.
+
+   Теперь оба места считают одинаково: берём каждый приход, смотрим его
+   выданность (с учётом привязок forIn) и складываем невыданные части.
+   Приход старше текущей недели идёт в «Просрочено», приход этой недели —
+   в «Задолженность за неделю».
+
+   «Число отдачи» и ручная коррекция применяются поверх, как раньше. */
+function pairDebtByIncomes(dayStr, pair, weekStart) {
+  const cover = pairPaidCoverage(dayStr, 'fifo');
+  const dOut = state.debtOutDates || {};
+  const cur = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
+  const ovd = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (!isWeekday(d)) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    const wk = weekMondayStr(d);
+    const gd = dOut[wk + '::' + pair];
+    if (gd && d <= gd) continue;                 // закрыт числом отдачи
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() !== pair) return;
+      const left = 1 - (cover[pair + '#' + d + '#' + idx] || 0);
+      if (left <= 0.0005) return;
+      const box = (wk >= weekStart) ? cur : ovd;
+      box.base += (r.amount || 0) * left;
+      box.v1 += (calcInRowFinal(r) || 0) * left;
+      if (r.pct !== null && r.pct !== undefined && r.pct > 0) box.pct1 = r.pct;
+      if (hasSecondPct(r)) { box.v2 += r100(r.total2) * left; box.has2 = true; box.pct2 = r.pct2; }
+    });
+  }
+  [cur, ovd].forEach(b => {
+    b.base = r100(b.base); b.v1 = r100(b.v1); b.v2 = b.has2 ? r100(b.v2) : 0;
+  });
+  return { current: cur, overdue: ovd };
+}
+
 function pairWeekDebt(dayStr, pairName, startWeek) {
   const pair = (pairName || '').trim();
   if (!pair) return { accrued: 0, accrued2: 0, accruedBase: 0, has2: false, received: 0, remaining: 0, remaining2: 0, remainingBase: 0, pct1: null, pct2: null };
@@ -4198,7 +4242,10 @@ function computeWeekPairDebt() {
       // Та же формула, что у Рынка (с ограничением по стартовой неделе —
       // старую историю до 29.06.2026 не трогаем), но разложенная на
       // «просрочено» и «эта неделя» через pairWeekDebtSplit.
-      const split = pairWeekDebtSplit(currentDate, p, PAIR_CARRY_START_DATE);
+      /* v193: долг = сумма невыданных приходов, тем же покрытием, что
+         и список «Раскрыть базу». Ручная коррекция ниже по-прежнему
+         перекрывает расчёт. */
+      const split = pairDebtByIncomes(currentDate, p, thisWeek);
       if (split.current.v1 > 0) {
         rows.push({
           name: p, base: split.current.base || 0, v1: split.current.v1,
@@ -4766,6 +4813,40 @@ function diagnosePair() {
   })();
   const splitAll = pairWeekDebtSplit(currentDate, p, PAIR_CARRY_START_DATE);
 
+  /* Все выдачи пары построчно (v192). Когда по паре выдано больше, чем пришло,
+     долга не будет ни при каком расчёте — надо найти лишнюю запись. Владелец
+     ищет её глазами, значит список должен быть перед ним. */
+  const allPayouts = (() => {
+    const rows = [];
+    for (const d of Object.keys(state.days).sort()) {
+      if (d > currentDate) break;
+      const dd = state.days[d];
+      if (!dd || !Array.isArray(dd.out)) continue;
+      dd.out.forEach(o => {
+        if ((o.client || '').trim() !== p) return;
+        rows.push('   ' + d + ': ' + fmt(o.amount || 0)
+          + (o.forIn ? '  → за приход ' + o.forIn.split('#')[0] : '  → приход не указан')
+          + (o.note ? '  (' + o.note + ')' : ''));
+      });
+    }
+    return rows.length ? rows.join('\n') : '   — выдач по этой паре нет —';
+  })();
+
+  const allIncomes = (() => {
+    const rows = [];
+    for (const d of Object.keys(state.days).sort()) {
+      if (d > currentDate) break;
+      const dd = state.days[d];
+      if (!dd || !isWeekday(d) || !Array.isArray(dd.in)) continue;
+      dd.in.forEach(r => {
+        if ((r.client || '').trim() !== p) return;
+        rows.push('   ' + d + ': ' + fmt(r.amount || 0)
+          + ' −' + (r.pct !== null && r.pct !== undefined ? r.pct : '?') + '% = ' + fmt(calcInRowFinal(r)));
+      });
+    }
+    return rows.length ? rows.join('\n') : '   — приходов по этой паре нет —';
+  })();
+
   const report =
     `🔍 ДИАГНОСТИКА: «${p}»\n` +
     `Сегодня в программе: ${currentDate} (${dowRu[isFriChk]})\n` +
@@ -4776,6 +4857,8 @@ function diagnosePair() {
     `Выдано за неделю (pairWeekReceived): ${fmt(received)}\n` +
     `Остаток (rem = round100(v1 − выдано)): ${fmt(rem)}\n` +
     `Ручная коррекция ✏️: ${override ? JSON.stringify(override) : '— нет —'}\n\n` +
+    `ВСЕ ПРИХОДЫ ПАРЫ:\n${allIncomes}\n\n` +
+    `ВСЕ ВЫДАЧИ ПАРЫ:\n${allPayouts}\n\n` +
     `ПО ВСЕМ НЕДЕЛЯМ:\n${weeksReport}\n\n` +
     `Расчёт долга (pairWeekDebtSplit):\n` +
     `   просрочка: v1=${fmt(splitAll.overdue.v1)}, база=${fmt(splitAll.overdue.base || 0)}\n` +
