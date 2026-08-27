@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v193</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v194</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2891,7 +2891,12 @@ function computeTagRunningTotals(dayStr) {
 
    «Число отдачи» и ручная коррекция применяются поверх, как раньше. */
 function pairDebtByIncomes(dayStr, pair, weekStart) {
-  const cover = pairPaidCoverage(dayStr, 'fifo');
+  /* realOnly (v194): приход закрывает только выдача, привязанная к нему.
+     Владелец 28.08.2026: «722 500 в расчётах больше не учитывается, у нас
+     только сумма 1 600 411,3, она не выдана — её и оставь». Ровно то же
+     правило, что в форме выдачи и в счёте куратора: пока выдачу не подтянули
+     к приходу, приход считается невыданным. */
+  const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
   const dOut = state.debtOutDates || {};
   const cur = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
   const ovd = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
@@ -5309,7 +5314,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
   // Показываем ВСЕ приходы пары, а не только невыданные: владельцу нужно
   // видеть, из чего сложилась сумма целиком. Выданные приглушены и помечены —
   // в остаток они не входят, но и не исчезают из глаз.
-  const cover = pairPaidCoverage(currentDate, 'fifo');
+  const cover = pairPaidCoverage(currentDate, 'fifo', undefined, true);   // v194
   const allRows = [];
   inRows.forEach(r => {
     const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля выдано
