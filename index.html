@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v194</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v195</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2898,10 +2898,12 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
      к приходу, приход считается невыданным. */
   const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
   const dOut = state.debtOutDates || {};
+  const start = handStart();   // v195: июнь и июль до этой даты закрыты
   const cur = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
   const ovd = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
+    if (d < start) continue;   // владелец 28.08.2026: «мне нужны только августовские»
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
@@ -5232,9 +5234,11 @@ function collectPairBaseBreakdown(pair, scope) {
   else if (carryAllPairs) startWeek = PAIR_CARRY_START_DATE;
   else startWeek = targetWeek;              // старая логика: только текущая неделя
   const inRows = [], outRows = [];
+  const start = handStart();   // v195: старая история в разбор не идёт
   Object.keys(state.days).sort().forEach(d => {
     const wk = weekMondayStr(d);
     if (wk > targetWeek) return;
+    if (d < start) return;
     if (startWeek && wk < startWeek) return;
     if (scope === 'current' && wk !== targetWeek) return;
     if (scope === 'overdue' && wk >= targetWeek) return;
