@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v201</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v203</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2903,7 +2903,7 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
   const ovd = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (d < start) continue;   // владелец 28.08.2026: «мне нужны только августовские»
+    if (start && d < start) continue;   // владелец 28.08.2026: «мне нужны только августовские»
     if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
@@ -5251,7 +5251,7 @@ function collectPairBaseBreakdown(pair, scope) {
   else if (carryAllPairs) startWeek = PAIR_CARRY_START_DATE;
   else startWeek = targetWeek;              // старая логика: только текущая неделя
   const inRows = [], outRows = [];
-  const start = handStart();   // v195: старая история в разбор не идёт
+  const start = allHistory ? '' : handStart();   // v195; allHistory — вся история (v203)
   Object.keys(state.days).sort().forEach(d => {
     const wk = weekMondayStr(d);
     if (wk > targetWeek) return;
@@ -6173,12 +6173,12 @@ function curatorPendingHtml(dayStr) {
 /* Выдачи, у которых не указан приход (v169). Такие деньги ни один приход
    не закрывают: ни куратора по нему, ни доли на руки. Владелец должен видеть
    их списком и разнести — иначе счёт молча недосчитывает сделки. */
-function unlinkedPayouts(dayStr) {
+function unlinkedPayouts(dayStr, allHistory) {
   const out = [];
-  const start = handStart();
+  const start = allHistory ? '' : handStart();   // v203
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (d < start) continue;
+    if (start && d < start) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.out)) continue;
     dd.out.forEach((o, i) => {
@@ -6186,7 +6186,7 @@ function unlinkedPayouts(dayStr) {
       const pair = (o.client || '').trim();
       if (!pair) return;
       // Гасить нечего — выдача авансом, разносить нечего
-      const unpaid = pairUnpaidRows(pair, d);
+      const unpaid = pairUnpaidRows(pair, d, allHistory);
       if (!unpaid.length) return;
       out.push({ date: d, idx: i, pair: pair, amount: o.amount || 0, unpaid: unpaid });
     });
@@ -6202,11 +6202,13 @@ function unlinkedPayouts(dayStr) {
    в точности равна остатку прихода 31 июля (1 213 466,4 − 13,3 %). Проставлять
    такие привязки вручную по одной — работа на вечер, а ошибиться легко. */
 function autoLinkExactPayouts() {
-  const start = handStart();
+  /* По ВСЕЙ истории (v203). Ограничение датой начала счёта не давало
+     привязать июльские выдачи: приход 1 июля закрыт выдачей 17 июля,
+     а в отчёте числился невыданным — у старых записей нет forIn, они
+     вводились до того, как привязка стала обязательной. */
   const done = [];
   for (const d of Object.keys(state.days).sort()) {
     if (d > currentDate) break;
-    if (d < start) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.out)) continue;
     dd.out.forEach(o => {
@@ -6216,7 +6218,7 @@ function autoLinkExactPayouts() {
       const amt = o.amount || 0;
       if (amt <= 0) return;
       // остатки считаем заново на каждой выдаче — предыдущие уже закрыли своё
-      const hits = pairUnpaidRows(pair, d).filter(r => Math.abs(r.left - amt) < 0.5);
+      const hits = pairUnpaidRows(pair, d, true).filter(r => Math.abs(r.left - amt) < 0.5);
       if (hits.length !== 1) return;               // неоднозначно — руками
       o.forIn = hits[0].date + '#' + hits[0].idx;
       done.push({ pay: d, pair: pair, amount: amt, inDate: hits[0].date });
@@ -6261,7 +6263,22 @@ function fixPayoutLink(date, idx) {
 
 function unlinkedPayoutsHtml(dayStr) {
   const list = unlinkedPayouts(dayStr);
-  if (!list.length) return '';
+  if (!list.length) {
+    /* В периоде всё разнесено, но в старой истории могли остаться выдачи
+       без привязки (v203): приход 1 июля закрыт выдачей 17 июля, а в отчёте
+       числился невыданным. Показываем одну строку с кнопкой, а не портянку. */
+    const old = unlinkedPayouts(dayStr, true);
+    if (!old.length) return '';
+    return `<div class="no-print" style="margin:10px 0 4px;padding:9px 12px;border-radius:10px;
+        background:rgba(255,138,74,.08);border:1px solid rgba(255,138,74,.25);font-size:11.5px;
+        line-height:1.5;color:var(--muted-bright)">
+        В старых записях есть выдачи без указанного прихода: <b>${old.length}</b> на
+        <b style="font-family:var(--font-num)">${fmt(old.reduce((a, x) => a + x.amount, 0))}</b>.
+        Из-за них закрытые приходы числятся невыданными в отчётах.
+        <button class="btn btn-ghost no-print" onclick="askAutoLink()"
+          style="font-size:11px;padding:5px 11px;margin-left:6px;border-color:#ff8a4a;color:#ff8a4a">разнести совпадающие</button>
+      </div>`;
+  }
   const total = list.reduce((a, x) => a + x.amount, 0);
   /* Длинный список прокручивается внутри плашки: 24 строки во весь рост
      закрывали собой таблицу счёта — владелец назвал это портянкой (v173). */
@@ -6711,7 +6728,7 @@ function qeSetType(type) {
    после 1-го % (`r100(r.total)`) — те же данные, на которых стоит «Раскрыть
    базу». Порядок 'fifo', как там же: выдачи гасят старые приходы первыми,
    поэтому невыданными остаются свежие. Это показ, не расчёт. */
-function pairUnpaidRows(pair, dayStr) {
+function pairUnpaidRows(pair, dayStr, allHistory) {
   const p = (pair || '').trim();
   const rows = [];
   if (!p) return rows;
@@ -6721,13 +6738,13 @@ function pairUnpaidRows(pair, dayStr) {
      ошибкой. Деньги без указанного прихода висят отдельным списком
      (unlinkedPayouts) и ждут, когда их разнесут. */
   const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
-  const start = handStart();
+  /* Счёт идёт с даты начала, всё раньше владелец закрыл (v171) — такие приходы
+     в списке «Ещё не выдано» не показываем. allHistory снимает это ограничение
+     (v203): нужно разноске старых выдач, чтобы привязать июльские записи. */
+  const start = allHistory ? '' : handStart();
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    /* Счёт идёт с этой даты, всё раньше владелец закрыл (v171). Такие приходы
-       не должны попадаться ни в списке «Ещё не выдано», ни при разноске старых
-       выдач: привязать к ним нечего, а путаницы от них много. */
-    if (d < start) continue;
+    if (start && d < start) continue;
     if (!isWeekday(d)) continue;            // в базе участвуют только будни
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
