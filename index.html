@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v197</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v199</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2912,13 +2912,25 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
     if (gd && d <= gd) continue;                 // закрыт числом отдачи
     dd.in.forEach((r, idx) => {
       if ((r.client || '').trim() !== pair) return;
-      const left = 1 - (cover[pair + '#' + d + '#' + idx] || 0);
+      const frac = cover[pair + '#' + d + '#' + idx] || 0;
+      const left = 1 - frac;
       if (left <= 0.0005) return;
       const box = (wk >= weekStart) ? cur : ovd;
+      const after1 = calcInRowFinal(r) || 0;
+      const paid = after1 * frac;               // фактически выданное по приходу
       box.base += (r.amount || 0) * left;
-      box.v1 += (calcInRowFinal(r) || 0) * left;
+      box.v1 += after1 - paid;
       if (r.pct !== null && r.pct !== undefined && r.pct > 0) box.pct1 = r.pct;
-      if (hasSecondPct(r)) { box.v2 += r100(r.total2) * left; box.has2 = true; box.pct2 = r.pct2; }
+      /* Остаток по 2-му проценту — «к отдаче по 2-му» МИНУС та же выданная
+         сумма, а не доля от неё (v198). Владелец 05.09.2026: «вместо 507 500
+         стоит 518 600, везде должна быть одинаковая логика». Приход 1 171 200
+         (13,5% / 15,5%), выдано 482 200: 989 700 − 482 200 = 507 500, а доля
+         давала r100(989 700 × 0,524) = 518 600. Так же считают оба отчёта
+         по паре (v197). */
+      if (hasSecondPct(r)) {
+        box.v2 += Math.max(0, r100(r.total2) - paid);
+        box.has2 = true; box.pct2 = r.pct2;
+      }
     });
   }
   [cur, ovd].forEach(b => {
@@ -3003,7 +3015,8 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
         accrued: gross1, accrued2: gross2, accruedBase: grossBase, has2,
         received: rec, pct1, pct2,
         remaining: net1,
-        remaining2: (has2 && net1 > 0) ? r100(gross2 * frac) : 0,
+        // v199: остаток по 2-му % — вычитанием выданного, а не долей
+        remaining2: (has2 && net1 > 0) ? Math.max(0, r100(gross2) - (gross1 - net1)) : 0,
         remainingBase: net1 > 0 ? r100(grossBase * frac) : 0
       };
     }
@@ -3026,7 +3039,8 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
   const fracC = cGross1 > 0 ? Math.max(0, cNet1 / cGross1) : 0;
   return { accrued: cGross1, accrued2: cGross2, accruedBase: cGrossBase, has2,
            received: 0, pct1, pct2,
-           remaining: cNet1, remaining2: (has2 && cNet1 > 0) ? r100(cGross2 * fracC) : 0,
+           remaining: cNet1,
+           remaining2: (has2 && cNet1 > 0) ? Math.max(0, r100(cGross2) - (cGross1 - cNet1)) : 0,   // v199
            remainingBase: cNet1 > 0 ? r100(cGrossBase * fracC) : 0 };
 }
 // Тот же расчёт, что pairWeekDebt, но раскладывает итог на две части ровно в
@@ -3101,12 +3115,14 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
       const overdueNet1 = Math.max(0, inN1 - recForOverdue);
       const overdueFrac = inG1 > 0 ? overdueNet1 / inG1 : 0;
       const overdueBaseV = overdueNet1 > 0 ? r100(inGB * overdueFrac) : 0;
-      const overdueV2 = (has2 && overdueNet1 > 0) ? r100(inG2 * overdueFrac) : 0;
+      const overdueV2 = (has2 && overdueNet1 > 0)
+        ? Math.max(0, r100(inG2) - (inG1 - overdueNet1)) : 0;   // v199
 
       const currentNet1 = Math.max(0, acc1 - recForCurrent);
       const currentFrac = acc1 > 0 ? currentNet1 / acc1 : 0;
       const currentBaseV = currentNet1 > 0 ? r100(accBase * currentFrac) : 0;
-      const currentV2 = (has2 && currentNet1 > 0) ? r100(acc2 * currentFrac) : 0;
+      const currentV2 = (has2 && currentNet1 > 0)
+        ? Math.max(0, r100(acc2) - (acc1 - currentNet1)) : 0;   // v199
 
       return {
         overdue: { base: overdueBaseV, v1: overdueNet1, v2: overdueV2, has2: has2 && overdueV2 > 0, pct1, pct2 },
@@ -4196,7 +4212,7 @@ function pairRemainingAfterGivenDate(dayStr, pairName, afterDate) {
   const remaining = r100(net);
   if (remaining <= 0) return null;
   const frac = acc1 > 0 ? Math.max(0, net / acc1) : 0;
-  const v2 = (has2 && net > 0) ? r100(acc2 * frac) : null;
+  const v2 = (has2 && net > 0) ? Math.max(0, r100(acc2) - rec) : null;   // v199
   return {
     name: pair,
     base: r100(accBase * frac),
@@ -4281,7 +4297,8 @@ function computeWeekPairDebt() {
     const rem = Math.max(0, r100(a.v1 - received));
     if (rem <= 0) return;
     const frac = a.v1 > 0 ? rem / a.v1 : 0;
-    const v2 = (a.has2 && a.v2 !== null && a.v2 !== undefined) ? r100(a.v2 * frac) : null;
+    const v2 = (a.has2 && a.v2 !== null && a.v2 !== undefined)
+      ? Math.max(0, r100(a.v2) - received) : null;   // v199
     rows.push({ name: p, base: r100((a.base || 0) * frac),
                 v1: rem, v2, has2: a.has2 && v2 !== null,
                 pct1: a.pct1, pct2: a.pct2, carry: false });
@@ -4434,7 +4451,7 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
       </div>
       <details class="wds-break-details" open>
         <summary>📋 Раскрыть базу: только неотданные приходы</summary>
-        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'overdue', true)}
+        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, 'overdue', true)}
       </details>
     </div>`;
   }).join('');
@@ -4549,7 +4566,7 @@ function renderWeekDebtSummary() {
       </div>
       <details class="wds-break-details">
         <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
-        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current')}
+        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, 'current')}
       </details>
     </div>`;
   }).join('');
@@ -4674,7 +4691,7 @@ function openDebtOutModal() {
           </div>
           <details class="wds-break-details">
             <summary>📋 Раскрыть базу: только неотданные приходы</summary>
-            ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1 }, 'current', true)}
+            ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, 'current', true)}
           </details>
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
@@ -5292,10 +5309,11 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
     return `<div class="wds-break-empty">Приходов этой пары за ${scope === 'current' ? 'эту неделю' : scope === 'overdue' ? 'просроченные недели' : 'активный период'} нет.</div>`;
   }
   // Невыданный остаток (после 1-го %) и остаток базы — из движка расчёта.
-  let netAfter1, netBase;
+  let netAfter1, netBase, netAfter2 = null;
   if (remain && (remain.v1 !== null && remain.v1 !== undefined)) {
     netAfter1 = remain.v1;
     netBase = (remain.base !== null && remain.base !== undefined) ? remain.base : 0;
+    netAfter2 = (remain.v2 !== null && remain.v2 !== undefined) ? remain.v2 : null;   // v199
   } else {
     const isRynok = p === 'Вейс(рук)-Рынок';
     const carryAllPairs = weekMondayStr(currentDate) >= PAIR_CARRY_START_DATE;
@@ -5422,8 +5440,8 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
       <span><b>${fmt(netBase)}</b></span>
       <span></span>
       <span><b>${fmt(netAfter1)}</b></span>
-      <span></span>
-      <span></span>
+      <span><b>${(netAfter2 !== null && netAfter2 > 0) ? fmt(netAfter2) : ''}</b></span>
+      <span><b>${(netAfter2 !== null && netAfter2 > 0) ? fmt(netAfter1 - netAfter2) : ''}</b></span>
     </div>
   </div>`;
 }
