@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v196</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v197</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -8663,12 +8663,19 @@ function pairReportTableHtml(pair, from, to, second) {
   const pf = (x) => (x === null || x === undefined) ? '—' : String(x).replace('.', ',') + '%';
   /* second = отчёт для второй стороны пары (v152): та же таблица, но «к отдаче»
      считается по ВТОРОМУ проценту. Суммы берём из готового поля after2
-     (r100(total2)) — расчёт не трогаем. Выданное делим в той же доле frac. */
+     (r100(total2)) — расчёт не трогаем.
+
+     ⚠️ «Выдано» — фактическая сумма выдачи, ОДНА И ТА ЖЕ в обоих отчётах
+     (v197). Раньше во втором отчёте она пересчитывалась пропорционально
+     (`r100(after2 × frac)`): приход 1 171 200 · 13,5% / 15,5%, выдача
+     482 200 — первый отчёт показывал 482 200, второй 471 100. Владелец
+     01–02.09.2026: «выдано должно стоять то же 482 200, сумма от этого
+     не меняется, тем более что выдано на руки указано правильно». */
   const val = (r) => second ? r.after2 : r.after1;
   const paidOf = (r) => {
     const v = val(r);
     if (v === null || v === undefined) return null;
-    return second ? r100(v * (r.frac || 0)) : r.paid;
+    return r.paid;
   };
   const leftOf = (r) => {
     const v = val(r);
