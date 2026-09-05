@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v200</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v201</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -6742,7 +6742,7 @@ function pairUnpaidRows(pair, dayStr) {
       const left = (frac <= 0.0005) ? after1 : r100(after1 * unpaidPart);
       if (left <= 0) return;
       rows.push({ date: d, idx: idx, left: left, full: after1, partial: frac > 0.0005,
-                  amount: r.amount || 0, pct: r.pct });
+                  amount: r.amount || 0, pct: r.pct, dueDate: r.dueDate || null });   // v201
     });
   }
   return rows;
@@ -6787,8 +6787,18 @@ function qeRenderUnpaid() {
     const baseOfLeft = (r.partial && r.pct > 0) ? (r.left / (1 - r.pct / 100)) : r.amount;
     const pctLabel = (r.pct !== null && r.pct !== undefined && r.pct > 0)
       ? ' −' + String(r.pct).replace('.', ',') + '%' : '';
+    /* Срок отдачи в списке (v201). Владелец: «бывает, что тот, который пришёл
+       позже, выдаётся раньше» — значит выбирать приход надо по сроку, а не
+       по дате прихода, и срок должен быть перед глазами. */
+    const overdue = r.dueDate && r.dueDate < currentDate;
+    const dueToday = r.dueDate && r.dueDate === currentDate;
+    const dueLabel = r.dueDate
+      ? `<span style="font-family:var(--font-ui);font-size:10px;margin-left:6px;color:${
+          overdue ? 'var(--expense)' : dueToday ? '#ffb74d' : 'var(--muted-bright)'}">${
+          overdue ? 'просрочен ' : dueToday ? 'отдать сегодня ' : 'до '}${formatDateShort(r.dueDate)}</span>`
+      : '';
     const from = `<div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-top:2px">`
-      + `из <span style="font-family:var(--font-num);color:var(--muted-bright)">${fmt(baseOfLeft)}</span>${pctLabel}</div>`;
+      + `из <span style="font-family:var(--font-num);color:var(--muted-bright)">${fmt(baseOfLeft)}</span>${pctLabel}${dueLabel}</div>`;
     return `<button type="button" class="qe-unpaid-row${on ? ' on' : ''}" onclick="qePickUnpaid(${i})">
         <span class="d">${on ? '✓ ' : ''}${formatDateShort(r.date)}${chip}${from}</span>
         <span class="s">${fmt(r.left)}</span>
