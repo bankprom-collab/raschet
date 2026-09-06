@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v201</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v205</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2381,6 +2381,15 @@ function ledgerDay() {
   return (last && last > currentDate) ? last : currentDate;
 }
 
+/* Дата начала счёта для конкретной пары (v205). Владелец 06.09.2026:
+   «считай Вейс(рук)-Рынок с 3-го августа». У остальных пар — общая дата
+   (handStart), у этой своя, потому что более ранние сделки по ней закрыты. */
+function pairStart(pair) {
+  const p = (pair || '').trim();
+  const map = (state && state.pairStart) || {};
+  return (p && map[p]) ? map[p] : handStart();
+}
+
 function handStart() {
   return (state && state.handStart) ? state.handStart : HAND_START_DEFAULT;
 }
@@ -2548,6 +2557,14 @@ function migrateState(s) {
   if (!s._handStartFixed) {
     s.handStart = HAND_START_DEFAULT;
     s._handStartFixed = true;
+  }
+  /* Своя дата начала счёта у пары (v205). Владелец 06.09.2026 назвал её
+     для Вейс(рук)-Рынок: 3 августа. Ставим один раз, дальше значение живёт
+     в данных и меняется только по его слову. */
+  if (!s.pairStart || typeof s.pairStart !== 'object') s.pairStart = {};
+  if (!s._pairStartFixed) {
+    s.pairStart['Вейс(рук)-Рынок'] = '2026-08-03';
+    s._pairStartFixed = true;
   }
 
   s._migrationVersion = MIGRATION_VERSION;
@@ -2898,7 +2915,7 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
      к приходу, приход считается невыданным. */
   const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
   const dOut = state.debtOutDates || {};
-  const start = handStart();   // v195: июнь и июль до этой даты закрыты
+  const start = pairStart(pair);   // v205: у пары может быть своя дата
   const cur = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
   const ovd = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
   for (const d of Object.keys(state.days).sort()) {
@@ -4304,9 +4321,13 @@ function computeWeekPairDebt() {
                 pct1: a.pct1, pct2: a.pct2, carry: false });
   });
 
-  // Вейс(рук)-Рынок — тот же перенос, тоже разложенный на просрочку и эту неделю.
+  /* Вейс(рук)-Рынок считается ТАК ЖЕ, как остальные пары (v204).
+     Раньше здесь был старый агрегатный расчёт по неделям (pairWeekDebtSplit),
+     и цифры расходились с отчётом: в шапке «−11%: 1 768 100 · −14%: 1 545 100»,
+     а в отчёте по строкам 1 875 100 и 1 778 100. Владелец 06.09.2026:
+     «посмотри, почему не бьются эти цифры». */
   {
-    const split = pairWeekDebtSplit(currentDate, 'Вейс(рук)-Рынок');
+    const split = pairDebtByIncomes(currentDate, 'Вейс(рук)-Рынок', thisWeek);
     if (split.current.v1 > 0) {
       rows.push({
         name: 'Вейс(рук)-Рынок', base: split.current.base || 0, v1: split.current.v1,
@@ -4446,7 +4467,10 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
       : '';
     return `<div class="wds-row wds-row-debt">
       <div class="wds-row-main">
-        <span class="wds-pair">⏰ ${escapeHtml(r.name)}</span>
+        <span class="wds-pair">⏰ ${escapeHtml(r.name)}</span>${
+          (state.pairStart && state.pairStart[r.name])
+            ? `<span style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-left:6px">счёт с ${formatDateShort(state.pairStart[r.name])}</span>`
+            : ''}
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
       </div>
       <details class="wds-break-details" open>
