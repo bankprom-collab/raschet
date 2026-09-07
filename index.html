@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v212</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v213</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5984,7 +5984,7 @@ function openHandModal() {
   const hw = handTotals(ledgerDay());
   const all = handOpenRows(ledgerDay());
   const LIMIT = 40;
-  const rows = all.slice(-LIMIT).reverse();
+  const rows = all.slice(-LIMIT);   // по возрастанию даты — как в таблице куратора (v213)
   const hidden = all.length - rows.length;
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
 
@@ -6039,47 +6039,73 @@ function openHandModal() {
   }
 
   const COVER = incomeCoverParts(ledgerDay(), true);   // когда выданы
-  const rowHtml = (r) => {
-    const pcts = [r.pct ? pf(r.pct) + '%' : '', r.pct2 ? pf(r.pct2) + '%' : ''].filter(Boolean).join(' / ') || '—';
-    const curLine = r.curator
-      ? `куратору ${pf(r.pctCur)}%: <span style="color:#ffb74d">${fmt(r.curator)}</span>`
-      : '<span style="color:var(--muted)">без куратора — вся сделка ваша</span>';
-    /* Второго процента нет — сделки нет, но куратору платим: «на руки» уходит
-       в минус. Это не ошибка расчёта, а незаполненный процент, и владелец
-       должен видеть причину прямо в строке (v211). */
-    const noDeal = (!r.deal && r.curator)
-      ? `<br><span style="color:var(--expense);font-size:10.5px">второй % не задан — прибыли по сделке нет</span>`
-      : '';
-    // Приход, выданный не целиком, даёт свою долю — показываем, какую именно
-    const part = (r.frac < 0.9995)
-      ? ` <span style="color:#ff8a4a">выдано ${Math.round(r.frac * 100)}%</span>`
-      : '';
-    // Вторая дата — когда деньги по этому приходу выданы на руки
-    const cov = COVER[r.pair + '#' + r.date + '#' + r.idx];
-    const paid = (cov && !cov.byDate && cov.parts && cov.parts.length)
-      ? cov.parts[cov.parts.length - 1].date
-      : (cov && cov.byDate ? cov.byDate : null);
-    const paidLine = paid
-      ? ` <span style="color:var(--muted);font-weight:400">→ выдан ${formatDateShort(paid)}${
-          (cov.parts && cov.parts.length > 1) ? ' (в ' + cov.parts.length + ' приёма)' : ''}</span>`
-      : '';
-    return `<div class="hm-row">
-      <div>
-        <div class="hm-when">${formatDateShort(r.date)}${paidLine}${part}</div>
-        <div class="hm-pair">${escapeHtml(r.pair)} · ${fmt(r.amount)} · ${pcts}</div>
-      </div>
-      <div class="hm-nums">
-        <b>${fmt(r.hand)}</b>
-        сделка: <span style="color:var(--accent3)">${fmt(r.deal)}</span><br>${curLine}${noDeal}
-      </div>
-    </div>`;
+
+  /* Таблица вместо карточек (v213). Владелец 08.09.2026: «хочу, чтобы
+     в таблице на руки писалось, как у куратора, от каких сделок какие суммы.
+     Мне не нужны эти навороченные — просто пиши отдельно на руки, сколько
+     там положено мне». Поэтому колонок пять: приход, выдано, пара, сумма
+     прихода, на руки. Доля куратора и итог сделки убраны — они в своём окне.
+     Расчёт не меняется, это только показ. */
+  const gotByDate = {};
+  HS.pays.forEach(p => { gotByDate[p.date] = (gotByDate[p.date] || 0) + p.amount; });
+  const gotDates = Object.keys(gotByDate).sort();
+
+  const tableOf = (list) => {
+    let acc = 0;
+    const trs = list.map((r, i) => {
+      const cov = COVER[r.pair + '#' + r.date + '#' + r.idx];
+      const paid = (cov && !cov.byDate && cov.parts && cov.parts.length)
+        ? cov.parts[cov.parts.length - 1].date
+        : (cov && cov.byDate ? cov.byDate : null);
+      const partsNote = (cov && cov.parts && cov.parts.length > 1)
+        ? `<div style="font-size:9.5px;color:var(--muted);font-family:var(--font-ui)">в ${cov.parts.length} приёма</div>` : '';
+      const part = (r.frac < 0.9995)
+        ? ` <span style="color:#ff8a4a;font-size:10.5px">выдано ${Math.round(r.frac * 100)}%</span>` : '';
+      const noDeal = (!r.deal && r.curator)
+        ? `<div style="color:var(--expense);font-size:10px;font-family:var(--font-ui)">второй % не задан — прибыли нет</div>` : '';
+      acc += r.hand;
+      const gotBy = gotDates.reduce((sum, d) => d <= (paid || r.date) ? sum + gotByDate[d] : sum, 0);
+      const due = Math.max(0, acc - gotBy);
+      const lastOfDay = (i === list.length - 1) || list[i + 1].date !== r.date;
+      return `
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
+        <td style="white-space:nowrap;color:var(--accent)">${paid ? formatDateShort(paid) : '—'}${partsNote}</td>
+        <td>${escapeHtml(r.pair)}${part}${noDeal}</td>
+        <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
+        <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:var(--accent)">${fmt(r.hand)}</td>
+        <td style="text-align:right;font-family:var(--font-num);font-weight:${lastOfDay ? '700' : '400'};color:${due > 0 ? 'var(--accent)' : 'var(--muted)'}">${fmt(due)}</td>
+      </tr>`;
+    }).join('');
+    const gSum = list.reduce((x, r) => x + r.hand, 0);
+    return `<table class="cm-table">
+      <thead>
+        <tr>
+          <th style="width:1%;white-space:nowrap" title="Когда пришли деньги от клиента">Приход</th>
+          <th style="width:1%;white-space:nowrap" title="Когда эти деньги выданы на руки">Выдано</th>
+          <th>Пара</th>
+          <th style="text-align:right">Сумма прихода</th>
+          <th style="text-align:right">Мне на руки</th>
+          <th style="text-align:right" title="Сколько ещё причитается после этой сделки">Осталось после</th>
+        </tr>
+      </thead>
+      <tbody>${trs}</tbody>
+      <tfoot>
+        <tr class="cm-total-row">
+          <td colspan="4" style="text-align:right;font-weight:700">Начислено по этим сделкам:</td>
+          <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:var(--accent)">${fmt(gSum)}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>`;
   };
+
   const groupHtml = (nm, list) => !list.length ? '' : `
-    <div style="font-size:11px;font-weight:700;color:var(--accent);margin:12px 0 4px;
+    <div style="font-size:11px;font-weight:700;color:var(--accent);margin:14px 0 6px;
                 text-transform:uppercase;letter-spacing:.6px">${nm}
       <span style="font-family:var(--font-ui);font-size:10.5px;color:var(--muted);
                    font-weight:400;text-transform:none;letter-spacing:0">· сделок: ${list.length}</span>
-    </div>${list.map(rowHtml).join('')}`;
+    </div>${tableOf(list)}`;
   const body = groupHtml('Вейс(рук)-Рынок', rows.filter(r => (r.pair || '').trim() === RYNOK))
              + groupHtml('Остальные пары', rows.filter(r => (r.pair || '').trim() !== RYNOK));
 
