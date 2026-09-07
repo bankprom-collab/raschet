@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v209</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v210</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5989,90 +5989,114 @@ function openCuratorMineModal() {
   wkEndDt.setDate(wkEndDt.getDate() + 4);
   const wkEnd = wkEndDt.toISOString().slice(0, 10);
 
+  /* Две таблицы (v210). Владелец 07.09.2026: «Вейс(рук)-Рынок хочу отдельной
+     таблицей с отдельным расчётом, остальные — отдельно». Расчёт тот же:
+     строки, суммы и порядок гашения не меняются, делится только показ.
+     У каждой таблицы свой итог; общий долг — суммой под ними. */
+  const COVER0 = incomeCoverParts(ledgerDay(), true);   // чем погашен каждый приход
+  /* «Долг после» — нарастающий остаток ПО ЭТИМ ЖЕ строкам (v207). Считаем
+     только ту часть выплат, что пришлась на строки таблицы (`partPaid`):
+     вычитание выплаты целиком уводило колонку в минус (−78 200), потому что
+     часть её закрыла сделки, ушедшие в архив. Показываем «отдано» на строке,
+     где выплата сработала, — по дате ВЫДАЧИ, ведь по ней и гасится. */
+  rows.forEach(r => {
+    const cv = COVER0[r.pair + '#' + r.date + '#' + r.idx];
+    r.payDate = (cv && cv.parts && cv.parts.length) ? cv.parts[cv.parts.length - 1].date : r.date;
+  });
+
+  const RYNOK = 'Вейс(рук)-Рынок';
+  const groups = [
+    { name: RYNOK, rows: rows.filter(r => (r.pair || '').trim() === RYNOK) },
+    { name: 'Остальные пары', rows: rows.filter(r => (r.pair || '').trim() !== RYNOK) }
+  ].filter(g => g.rows.length);
+
+  let rowSeq = 0;   // сквозная нумерация строк — чтобы id разбора не совпали
+  const tableOf = (list) => {
+    const payByDate = {};
+    list.forEach(r => { if (r.partPaid) payByDate[r.payDate] = (payByDate[r.payDate] || 0) + r.partPaid; });
+    const payDates = Object.keys(payByDate).sort();
+    const gAccrued = list.reduce((x, r) => x + r.curatorSum, 0);
+    const gPaid = list.reduce((x, r) => x + r.partPaid, 0);
+    let acc = 0;
+    const trs = list.map((r, i) => {
+      const seq = rowSeq++;
+      const partial = (r.frac !== undefined && r.frac < 0.999)
+        ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.round(r.frac * 100)}%</span>` : '';
+      const partPaid = r.partPaid
+        ? ` <span style="color:#ffb74d;font-size:10.5px">· частично отдано ${fmt(r.partPaid)}</span>` : '';
+      acc += r.curatorSum;
+      const paidBy = payDates.reduce((sum, d) => d <= r.payDate ? sum + payByDate[d] : sum, 0);
+      const due = Math.max(0, acc - paidBy);
+      const lastOfDay = (i === list.length - 1) || list[i + 1].date !== r.date;
+      const paidHere = payByDate[r.payDate];
+      const payChip = (lastOfDay && paidHere)
+        ? `<div style="color:var(--muted);font-size:10px;font-weight:400">отдано ${fmt(paidHere)}</div>` : '';
+      const cov = COVER0[r.pair + '#' + r.date + '#' + r.idx];
+      return `
+      <tr onclick="cmToggleCover(${seq})" style="cursor:pointer">
+        <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
+        <td style="white-space:nowrap;color:var(--accent)">${payDatesCell(cov)}</td>
+        <td>${escapeHtml(r.pair)}${partial}${partPaid}</td>
+        <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
+        <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
+        <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
+        <td style="text-align:right;font-family:var(--font-num);font-weight:${lastOfDay ? '700' : '400'};color:${due > 0 ? '#ffb74d' : 'var(--muted)'}">${fmt(due)}${payChip}</td>
+      </tr>
+      <tr id="cmcov-${seq}" class="cm-cover-row no-print" style="display:none">
+        <td colspan="7">${coverExplainHtml(cov)}</td>
+      </tr>
+    `;
+    }).join('');
+    return `<table class="cm-table">
+      <thead>
+        <tr>
+          <th style="width:1%;white-space:nowrap" title="Когда пришли деньги от клиента">Приход</th>
+          <th style="width:1%;white-space:nowrap" title="Когда эти деньги выданы на руки">Выдано</th>
+          <th>Пара</th>
+          <th style="text-align:right">Сумма прихода</th>
+          <th style="text-align:right">%кур</th>
+          <th style="text-align:right">К куратору</th>
+          <th style="text-align:right" title="Сколько должны куратору после этой операции">Долг после</th>
+        </tr>
+      </thead>
+      <tbody>${trs}</tbody>
+      <tfoot>
+        <tr class="cm-total-row">
+          <td colspan="6" style="text-align:right;font-weight:700">Начислено по этим сделкам:</td>
+          <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(gAccrued)}</td>
+        </tr>
+        ${gPaid > 0 ? `<tr class="cm-paid-row">
+          <td colspan="6" style="text-align:right;color:var(--muted)">− отдано по ним:</td>
+          <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(gPaid)}</td>
+        </tr>` : ''}
+        <tr class="cm-grand-row">
+          <td colspan="6" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px">Долг по этой таблице:</td>
+          <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(gAccrued - gPaid)}</td>
+        </tr>
+      </tfoot>
+    </table>`;
+  };
+
   const table = !rows.length
     ? `<div style="color:var(--muted);padding:8px 0">
         С ${formatDateShort(handStart())} нет выданных на руки приходов с процентом куратора.
       </div>`
-    : (() => {
-        // Долг после каждой операции: всё начисленное по эту строку включительно
-        // минус то, что по этим строкам отдано. Ничего не пересчитывает —
-        // складывает те же числа, что и итоги внизу.
-        const COVER0 = incomeCoverParts(ledgerDay(), true);   // чем погашен каждый приход
-        /* «Долг после» — нарастающий остаток ПО ЭТИМ ЖЕ строкам (v207).
-           Считаем только ту часть выплат, что пришлась на строки таблицы
-           (`partPaid`). Раньше вычитали выплату целиком, а она закрыла и те
-           сделки, что уже ушли в архив, — колонка уходила в минус (−78 200).
-           Показываем «отдано» на строке, где выплата действительно сработала:
-           по дате ВЫДАЧИ, ведь по ней и гасится (см. curatorSettlement). */
-        const payByDate = {};
-        rows.forEach(r => {
-          const cv = COVER0[r.pair + '#' + r.date + '#' + r.idx];
-          const pd = (cv && cv.parts && cv.parts.length) ? cv.parts[cv.parts.length - 1].date : r.date;
-          if (r.partPaid) payByDate[pd] = (payByDate[pd] || 0) + r.partPaid;
-          r.payDate = pd;
-        });
-        const payDates = Object.keys(payByDate).sort();
-        const COVER = COVER0;
-        let acc = 0;
-        const trs = rows.map((r, i) => {
-          const partial = (r.frac !== undefined && r.frac < 0.999)
-            ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.round(r.frac * 100)}%</span>` : '';
-          const partPaid = r.partPaid
-            ? ` <span style="color:#ffb74d;font-size:10.5px">· частично отдано ${fmt(r.partPaid)}</span>` : '';
-          const doneChip = '';
-          acc += r.curatorSum;
-          const paidBy = payDates.reduce((sum, d) => d <= r.payDate ? sum + payByDate[d] : sum, 0);
-          const due = Math.max(0, acc - paidBy);
-          // Последняя строка дня — по ней и смотрят «сколько должен за этот день»
-          const lastOfDay = (i === rows.length - 1) || rows[i + 1].date !== r.date;
-          const paidHere = payByDate[r.payDate];
-          const payChip = (lastOfDay && paidHere)
-            ? `<div style="color:var(--muted);font-size:10px;font-weight:400">отдано ${fmt(paidHere)}</div>` : '';
-          const cov = COVER[r.pair + '#' + r.date + '#' + r.idx];
-          return `
-          <tr onclick="cmToggleCover(${i})" style="cursor:pointer">
-            <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
-            <td style="white-space:nowrap;color:var(--accent)">${payDatesCell(cov)}</td>
-            <td>${escapeHtml(r.pair)}${partial}${partPaid}${doneChip}</td>
-            <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
-            <td style="text-align:right;color:#ffb74d;font-family:var(--font-num)">${String(r.pctCur).replace('.', ',')}%</td>
-            <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(r.curatorSum)}</td>
-            <td style="text-align:right;font-family:var(--font-num);font-weight:${lastOfDay ? '700' : '400'};color:${due > 0 ? '#ffb74d' : 'var(--muted)'}">${fmt(due)}${payChip}</td>
-          </tr>
-          <tr id="cmcov-${i}" class="cm-cover-row no-print" style="display:none">
-            <td colspan="7">${coverExplainHtml(cov)}</td>
-          </tr>
-        `;
-        }).join('');
-        return `<table class="cm-table">
-          <thead>
-            <tr>
-              <th style="width:1%;white-space:nowrap" title="Когда пришли деньги от клиента">Приход</th>
-              <th style="width:1%;white-space:nowrap" title="Когда эти деньги выданы на руки">Выдано</th>
-              <th>Пара</th>
-              <th style="text-align:right">Сумма прихода</th>
-              <th style="text-align:right">%кур</th>
-              <th style="text-align:right">К куратору</th>
-              <th style="text-align:right" title="Сколько должны куратору после этой операции">Долг после</th>
-            </tr>
-          </thead>
-          <tbody>${trs}</tbody>
-          <tfoot>
-            <tr class="cm-total-row">
-              <td colspan="6" style="text-align:right;font-weight:700">Начислено по этим сделкам:</td>
-              <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d">${fmt(accrued)}</td>
-            </tr>
-            ${paid > 0 ? `<tr class="cm-paid-row">
-              <td colspan="6" style="text-align:right;color:var(--muted)">− отдано по ним:</td>
-              <td style="text-align:right;font-family:var(--font-num);color:var(--muted-bright)">${fmt(paid)}</td>
-            </tr>` : ''}
-            <tr class="cm-grand-row">
-              <td colspan="6" style="text-align:right;font-weight:700;color:#ffb74d;font-size:14px" title="Столько должны куратору сейчас">ДОЛГ КУРАТОРУ:</td>
-              <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:15px">${fmt(remain)}</td>
-            </tr>
-          </tfoot>
-        </table>`;
-      })();
+    : groups.map(g => `
+        <div style="margin-top:14px">
+          <div style="font-size:12px;font-weight:700;color:#ffb74d;margin-bottom:6px;
+                      text-transform:uppercase;letter-spacing:.6px">${escapeHtml(g.name)}
+            <span style="font-family:var(--font-ui);font-size:10.5px;color:var(--muted);
+                         font-weight:400;text-transform:none;letter-spacing:0">· сделок: ${g.rows.length}</span>
+          </div>
+          ${tableOf(g.rows)}
+        </div>`).join('')
+      + (groups.length > 1 ? `
+        <div class="cm-grand-total" style="display:flex;justify-content:space-between;align-items:baseline;
+             gap:10px;margin-top:14px;padding:10px 12px;border-radius:10px;
+             background:rgba(255,183,77,.10);border:1px solid rgba(255,183,77,.35)">
+          <span style="font-weight:700;color:#ffb74d;font-size:14px">ДОЛГ КУРАТОРУ ВСЕГО:</span>
+          <span style="font-family:var(--font-num);font-weight:700;color:#ffb74d;font-size:16px">${fmt(remain)}</span>
+        </div>` : '');
 
   /* Блок «Отдано куратору» — ВСЕ выплаты с даты начала счёта (v206). Раньше
      collectCuratorPayments показывал только текущую неделю: при «Итого отдано
