@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v207</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v208</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5574,15 +5574,14 @@ function incomeCoverParts(dayStr, realOnly) {
       if (inr) rest -= give(inr, rest, pay, true);
       pay.rest = rest;
     });
-    // Безадресные деньги разносим по очереди только для показа задолженности.
-    // В realOnly (куратор и «На руки») они не гасят ничего — приход считается
-    // выданным, лишь когда владелец сам его подтянул.
-    if (!realOnly) {
-      pays.forEach(pay => {
-        let rest = pay.forIn ? (pay.rest || 0) : pay.amount;
-        for (let i = 0; i < ins.length && rest > 0; i++) rest -= give(ins[i], rest, pay, false);
-      });
-    }
+    /* Вторая фаза (v208). Остаток ПРИВЯЗАННОЙ выдачи разносится по другим
+       приходам пары всегда: деньги отданы, терять их нельзя. Безадресные
+       выдачи в realOnly не гасят ничего — приход считается выданным, лишь
+       когда владелец сам его подтянул. */
+    pays.forEach(pay => {
+      let rest = pay.forIn ? (pay.rest || 0) : (realOnly ? 0 : pay.amount);
+      for (let i = 0; i < ins.length && rest > 0; i++) rest -= give(ins[i], rest, pay, false);
+    });
 
     ins.forEach(x => {
       out[p + '#' + x.date + '#' + x.idx] = {
@@ -5658,11 +5657,17 @@ function pairPaidCoverage(dayStr, order, startDate, realOnly) {
       if (aim <= 0) return;
       const take = Math.min(a, aim);
       paid[key] = take;
-      if (aim > take && !realOnly) pool += (aim - take);
+      /* Остаток привязанной выдачи идёт на другие приходы пары — ВСЕГДА,
+         в том числе в realOnly (v208). Деньги отданы паре, потерять их нельзя.
+         Владелец 07.09.2026 сравнил старый и новый отчёты: выдача 31 августа
+         на 1 200 000 привязана к приходу 14 авг (к отдаче 1 093 000), избыток
+         107 000 исчезал из расчёта — «в старом отчёте цифры правильнее».
+         Непривязанные выдачи в realOnly по-прежнему не гасят ничего. */
+      if (aim > take) pool += (aim - take);
       delete aimed[key];
     });
-    // привязка «в никуда» — в общий пул; в realOnly никуда не идёт
-    if (!realOnly) for (const k in aimed) pool += aimed[k];
+    // привязка «в никуда» (приход удалён) — тоже не теряем
+    for (const k in aimed) pool += aimed[k];
 
     // Проход 2: остальное — по порядку, как и раньше.
     list.forEach(inr => {
