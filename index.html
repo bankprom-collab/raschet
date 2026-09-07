@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v205</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v206</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3364,6 +3364,9 @@ function curatorResetDate() {
 function curatorSettlement(dayStr) {
   /* Приход закрывают только выдачи, привязанные владельцем (realOnly). */
   const cover = pairPaidCoverage(dayStr, undefined, undefined, true);
+  /* Дата ВЫДАЧИ каждой сделки — день, когда она реально появилась в счёте
+     (последняя порция выдачи). По ней гасим и подводим черту (v206). */
+  const PARTS = incomeCoverParts(dayStr, true);
   const reset = curatorResetDate();
   const accr = [], pays = [];
   for (const d of Object.keys(state.days).sort()) {
@@ -3387,38 +3390,64 @@ function curatorSettlement(dayStr) {
       if (frac <= 0) return;                    // не выдано — не считается
       const sum = floor100((r.amount || 0) * r.pctCur / 100 * frac);
       if (sum <= 0) return;
+      const pp = PARTS[key];
+      const payDate = (pp && pp.parts && pp.parts.length) ? pp.parts[pp.parts.length - 1].date : d;
       accr.push({ date: d, idx: idx, pair: r.client || '—', amount: r.amount || 0,
-                  pctCur: r.pctCur, frac: frac, sum: sum, paid: 0, rest: sum, closedBy: [] });
+                  pctCur: r.pctCur, frac: frac, sum: sum, paid: 0, rest: sum, closedBy: [],
+                  payDate: payDate });
     });
   }
 
-  // Сначала обычное гашение выдачами — оно первично: реально отданное
-  // должно оставаться отданным, а не превращаться в «списано».
-  let pi = 0, left = pays.length ? pays[0].amount : 0;
-  accr.forEach(a => {
-    while (a.paid < a.sum && pi < pays.length) {
-      const take = Math.min(a.sum - a.paid, left);
-      if (take > 0) {
-        a.paid += take;
-        a.closedBy.push({ date: pays[pi].date, amount: take });
-        left -= take;
-      }
-      if (left <= 0.0001) { pi++; left = pi < pays.length ? pays[pi].amount : 0; }
-    }
-    a.rest = Math.max(0, a.sum - a.paid);
-  });
+  /* Гашение выплатами — ПО ДАТЕ ВЫДАЧИ, а не по дате прихода (v206).
 
-  // Хвост выдач, которому не нашлось начислений: отдали вперёд.
-  let ahead = left;
-  for (let k = pi + 1; k < pays.length; k++) ahead += pays[k].amount;
+     Владелец 07.09.2026: «на первых двух рисунках то, что уже было выдано
+     куратору, а на третьем ты мне пишешь опять, что надо выдавать. Суммы
+     повторяются». Что случилось: сделка Вейс(рук)-Рынок с приходом 14 августа
+     была выдана только 31 августа. В списке она встала по дате прихода —
+     ВПЕРЕДИ сделок, выданных 22–23 августа и уже оплаченных куратору.
+     Выплата перераспределилась на неё, и пять старых сделок (41 900 ₽)
+     вернулись в долг.
+
+     Правило: выплата от D гасит начисления, выданные не позже D, — от ранних
+     к поздним. То, что выдано после D, этой выплатой закрыть нельзя: в день
+     выплаты этих сделок в счёте ещё не было. Остаток выплаты (отдали вперёд)
+     идёт на следующие по порядку — как раньше. */
+  const order = accr.slice().sort((x, y) =>
+    (x.payDate < y.payDate ? -1 : x.payDate > y.payDate ? 1 :
+     x.date < y.date ? -1 : x.date > y.date ? 1 : x.idx - y.idx));
+  const give = (a, pay, amount) => {
+    const take = Math.min(a.sum - a.paid, amount);
+    if (take <= 0) return 0;
+    a.paid += take;
+    a.closedBy.push({ date: pay.date, amount: take });
+    return take;
+  };
+  pays.forEach(pay => {
+    pay.left = pay.amount;
+    for (const a of order) {
+      if (pay.left <= 0.0001) break;
+      if (a.payDate > pay.date) continue;       // выдано позже выплаты — не её
+      pay.left -= give(a, pay, pay.left);
+    }
+  });
+  pays.forEach(pay => {                          // отдали вперёд — на следующие
+    for (const a of order) {
+      if (pay.left <= 0.0001) break;
+      pay.left -= give(a, pay, pay.left);
+    }
+  });
+  accr.forEach(a => { a.rest = Math.max(0, a.sum - a.paid); });
+
+  // Хвост выплат, которому не нашлось начислений: отдали вперёд.
+  const ahead = pays.reduce((x, p) => x + (p.left > 0.0001 ? p.left : 0), 0);
 
   /* И только потом — черта. Закрывает лишь то, что ОСТАЛОСЬ непогашенным
-     до неё. Деньгами не проводится: у таких строк своя пометка, чтобы
-     в архиве было видно, что они списаны, а не оплачены. */
+     и было ВЫДАНО не позже неё (v206). Деньгами не проводится: у таких строк
+     своя пометка, чтобы в архиве было видно, что они списаны, а не оплачены. */
   const before = [];
   if (reset) {
     accr.forEach(a => {
-      if (a.rest > 0 && a.date <= reset) {
+      if (a.rest > 0 && a.payDate <= reset) {
         a.byReset = true;
         a.resetAmount = a.rest;
         a.rest = 0;
@@ -5951,7 +5980,7 @@ function openCuratorMineModal() {
         // минус всё отданное за дни не позже её даты. Ничего не пересчитывает —
         // складывает те же числа, что и итоги внизу.
         const payByDate = {};
-        collectCuratorPayments(currentDate).forEach(x => {
+        SET.pays.forEach(x => {                  // все выплаты с даты начала счёта (v206)
           payByDate[x.date] = (payByDate[x.date] || 0) + x.amount;
         });
         const payDates = Object.keys(payByDate).sort();
@@ -6017,8 +6046,11 @@ function openCuratorMineModal() {
         </table>`;
       })();
 
-  // Блок «Отдано в этой неделе» + форма ввода отдачи
-  const paidRows = collectCuratorPayments(currentDate);
+  /* Блок «Отдано куратору» — ВСЕ выплаты с даты начала счёта (v206). Раньше
+     collectCuratorPayments показывал только текущую неделю: при «Итого отдано
+     16 200» стояло «Пока ничего не отдано». */
+  const paidRows = SET.pays;
+  const paidTotal = SET.pays.reduce((x, p) => x + p.amount, 0);
   const paidList = paidRows.length
     ? paidRows.map(p => `
         <div class="cm-pay-row">
@@ -6074,7 +6106,7 @@ function openCuratorMineModal() {
       <div class="cm-pay-list">${paidList}</div>
       <div class="cm-paid-total">
         <span>Итого отдано:</span>
-        <b>${fmt(paid)}</b>
+        <b>${fmt(paidTotal)}</b>
       </div>
       <div class="cm-paid-form no-print">
         <div class="cm-paid-form-lbl">Записать новую отдачу:</div>
