@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v210</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v211</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5841,12 +5841,34 @@ function openHandModal() {
   const hidden = all.length - rows.length;
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
 
+  /* Итоги по группам (v211). Владелец 08.09.2026: «мы Вейс(рук)-Рынок
+     работали — где моя прибыль от этих сделок? там поровну: полтора процента
+     кураторам, полтора на руки». Прибыль считалась верно, но тонула среди
+     сорока строк. Теперь Рынок и остальные пары показаны отдельными итогами
+     и отдельными списками — как в окне «Куратор ко мне». Расчёт не меняется. */
+  const RYNOK = 'Вейс(рук)-Рынок';
+  const sumOf = (list) => list.reduce((a, r) => ({
+    deals: a.deals + r.deal, curator: a.curator + r.curator, hand: a.hand + r.hand
+  }), { deals: 0, curator: 0, hand: 0 });
+  const gRynok = sumOf(all.filter(r => (r.pair || '').trim() === RYNOK));
+  const gOther = sumOf(all.filter(r => (r.pair || '').trim() !== RYNOK));
+
   const head =
     `<div class="hm-sum">
        <div><div class="l">Итог сделок</div><div class="v" style="color:var(--accent3)">${fmt(hw.deals)}</div></div>
        <div><div class="l">− Куратору</div><div class="v" style="color:#ffb74d">${fmt(hw.curator)}</div></div>
        <div><div class="l">= На руки</div><div class="v" style="color:var(--accent)">${fmt(hw.hand)}</div></div>
-     </div>`;
+     </div>
+     ${(gRynok.deals || gOther.deals) ? `
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 4px">
+       ${[['Вейс(рук)-Рынок', gRynok], ['Остальные пары', gOther]].map(([nm, g]) => `
+         <div style="padding:8px 10px;border-radius:10px;background:var(--card);border:1px solid var(--border)">
+           <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">${nm}</div>
+           <div style="font-family:var(--font-num);font-size:15px;font-weight:700;color:var(--accent);margin-top:3px">${fmt(g.hand)}</div>
+           <div style="font-size:10.5px;color:var(--muted);font-family:var(--font-ui);margin-top:2px">
+             сделка ${fmt(g.deals)} · куратору ${fmt(g.curator)}</div>
+         </div>`).join('')}
+     </div>` : ''}`;
 
   if (!rows.length) {
     box.innerHTML = head
@@ -5857,11 +5879,17 @@ function openHandModal() {
   }
 
   const COVER = incomeCoverParts(ledgerDay(), true);   // когда выданы
-  const body = rows.map(r => {
+  const rowHtml = (r) => {
     const pcts = [r.pct ? pf(r.pct) + '%' : '', r.pct2 ? pf(r.pct2) + '%' : ''].filter(Boolean).join(' / ') || '—';
     const curLine = r.curator
       ? `куратору ${pf(r.pctCur)}%: <span style="color:#ffb74d">${fmt(r.curator)}</span>`
       : '<span style="color:var(--muted)">без куратора — вся сделка ваша</span>';
+    /* Второго процента нет — сделки нет, но куратору платим: «на руки» уходит
+       в минус. Это не ошибка расчёта, а незаполненный процент, и владелец
+       должен видеть причину прямо в строке (v211). */
+    const noDeal = (!r.deal && r.curator)
+      ? `<br><span style="color:var(--expense);font-size:10.5px">второй % не задан — прибыли по сделке нет</span>`
+      : '';
     // Приход, выданный не целиком, даёт свою долю — показываем, какую именно
     const part = (r.frac < 0.9995)
       ? ` <span style="color:#ff8a4a">выдано ${Math.round(r.frac * 100)}%</span>`
@@ -5882,10 +5910,18 @@ function openHandModal() {
       </div>
       <div class="hm-nums">
         <b>${fmt(r.hand)}</b>
-        сделка: <span style="color:var(--accent3)">${fmt(r.deal)}</span><br>${curLine}
+        сделка: <span style="color:var(--accent3)">${fmt(r.deal)}</span><br>${curLine}${noDeal}
       </div>
     </div>`;
-  }).join('');
+  };
+  const groupHtml = (nm, list) => !list.length ? '' : `
+    <div style="font-size:11px;font-weight:700;color:var(--accent);margin:12px 0 4px;
+                text-transform:uppercase;letter-spacing:.6px">${nm}
+      <span style="font-family:var(--font-ui);font-size:10.5px;color:var(--muted);
+                   font-weight:400;text-transform:none;letter-spacing:0">· сделок: ${list.length}</span>
+    </div>${list.map(rowHtml).join('')}`;
+  const body = groupHtml('Вейс(рук)-Рынок', rows.filter(r => (r.pair || '').trim() === RYNOK))
+             + groupHtml('Остальные пары', rows.filter(r => (r.pair || '').trim() !== RYNOK));
 
   const more = hidden > 0
     ? `<div style="color:var(--muted);font-size:11px;padding:8px 0 0">Показаны последние ${rows.length}. Раньше было ещё ${hidden} — они уже вошли в итог выше.</div>`
