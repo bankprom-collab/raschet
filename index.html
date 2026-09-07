@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v208</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v209</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5528,6 +5528,7 @@ function incomeCoverParts(dayStr, realOnly) {
       dd.in.forEach((r, idx) => {
         const p = (r.client || '').trim();
         if (!p) return;
+        if (d < pairStart(p)) return;                      // v209: как в pairPaidCoverage
         (byPair[p] || (byPair[p] = { ins: [], pays: [] })).ins.push({
           date: d, idx: idx, after1: calcInRowFinal(r), inAmount: r.amount || 0,
           left: 0, parts: [], byDate: null
@@ -5538,6 +5539,8 @@ function incomeCoverParts(dayStr, realOnly) {
       dd.out.forEach((o, oi) => {
         const p = (o.client || '').trim();
         if (!p) return;
+        if (d < pairStart(p)) return;                      // v209
+        if (o.forIn && String(o.forIn).slice(0, 10) < pairStart(p)) return;
         (byPair[p] || (byPair[p] = { ins: [], pays: [] })).pays.push({
           date: d, idx: oi, amount: o.amount || 0, forIn: o.forIn || null
         });
@@ -5613,10 +5616,17 @@ function pairPaidCoverage(dayStr, order, startDate, realOnly) {
     if (startDate && d < startDate) continue;
     const dd = state.days[d];
     if (!dd) continue;
+    /* Всё, что раньше даты начала счёта, в покрытии не участвует (v209).
+       Владелец 07.09.2026: «я же говорил, что всё считается с 31 июля —
+       зачем ты мне 1 июля сюда вплетаешь?». Было: остаток выдачи 31 августа
+       (107 000) уходил на невыданный приход 1 июля, и долг по паре завышался
+       ровно на эту сумму — 1 875 100 вместо 1 768 100.
+       Дата берётся по паре: pairStart(pair), иначе общая handStart(). */
     if (isWeekday(d) && Array.isArray(dd.in)) {
       dd.in.forEach((r, idx) => {
         const p = (r.client || '').trim();
         if (!p) return;
+        if (d < pairStart(p)) return;
         (byPair[p] || (byPair[p] = { ins: [], out: 0, aimed: {} })).ins.push({ date: d, idx, after1: calcInRowFinal(r) });
       });
     }
@@ -5624,6 +5634,9 @@ function pairPaidCoverage(dayStr, order, startDate, realOnly) {
       dd.out.forEach(o => {
         const p = (o.client || '').trim();
         if (!p) return;
+        if (d < pairStart(p)) return;
+        // выдача за приход из закрытого периода тоже не участвует
+        if (o.forIn && String(o.forIn).slice(0, 10) < pairStart(p)) return;
         const bp = (byPair[p] || (byPair[p] = { ins: [], out: 0, aimed: {} }));
         // Выдача может быть привязана к конкретному приходу (v126, поле forIn:
         // «дата#номер»). Тогда она гасит ИМЕННО его, а не самый старый долг.
@@ -8706,7 +8719,13 @@ function pairReportRows(pair, from, to) {
      по паре — нет. */
   const cover = pairPaidCoverage(currentDate, 'fifo', undefined, true);
   const parts = incomeCoverParts(currentDate, true);
-  const lo = (from || '').trim(), hi = (to || '').trim();
+  /* Нижняя граница — не раньше даты начала счёта пары (v209): всё до неё
+     закрыто и в расчёте не участвует. Иначе в отчёт попадали июльские приходы,
+     которых нет ни в шапке пары, ни в покрытии, и остаток расходился. */
+  const start = pairStart(p);
+  let lo = (from || '').trim();
+  if (!lo || lo < start) lo = start;
+  const hi = (to || '').trim();
   for (const d of Object.keys(state.days).sort()) {
     if (d > currentDate) break;
     if (lo && d < lo) continue;          // выборка периода — только показ (v151)
