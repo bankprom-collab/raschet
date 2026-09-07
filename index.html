@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v211</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v212</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3467,6 +3467,137 @@ function curatorDebt(dayStr) {
   // и в таблице, и на плитке. Без сброса результат тот же, что был:
   // начислено за всё время минус отдано за всё время.
   return curatorSettlement(dayStr).open.reduce((a, x) => a + x.rest, 0);
+}
+
+/* ── «НА РУКИ»: ПОЛУЧЕНИЯ И ЧЕРТА (v212) ─────────────────────────────────
+   Владелец 08.09.2026: «внеси возможность, чтобы можно было на руки тоже
+   выдавать и обнулять её, как и куратору ко мне». Механизм тот же, что
+   у куратора: `dd.handPaid` — сколько получено в этот день, `state.handResetAt`
+   — черта. Гашение по ДАТЕ ВЫДАЧИ сделки, как в curatorSettlement (v206):
+   получение от D закрывает то, что выдано не позже D. */
+function handResetDate() {
+  return (state && state.handResetAt) ? state.handResetAt : null;
+}
+
+function handSettlement(dayStr) {
+  const reset = handResetDate();
+  const PARTS = incomeCoverParts(dayStr, true);
+  const accr = [], pays = [];
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    const dd = state.days[d];
+    if (!dd) continue;
+    if (d >= handStart() && typeof dd.handPaid === 'number' && dd.handPaid > 0) {
+      pays.push({ date: d, amount: dd.handPaid });
+    }
+  }
+  handOpenRows(dayStr).forEach(r => {
+    if (!(r.hand > 0)) return;
+    const key = (r.pair || '').trim() + '#' + r.date + '#' + r.idx;
+    const pp = PARTS[key];
+    const payDate = (pp && pp.parts && pp.parts.length) ? pp.parts[pp.parts.length - 1].date : r.date;
+    accr.push({ date: r.date, idx: r.idx, pair: r.pair, amount: r.amount,
+                sum: r.hand, paid: 0, rest: r.hand, closedBy: [], payDate: payDate });
+  });
+
+  const order = accr.slice().sort((x, y) =>
+    (x.payDate < y.payDate ? -1 : x.payDate > y.payDate ? 1 :
+     x.date < y.date ? -1 : x.date > y.date ? 1 : x.idx - y.idx));
+  const give = (a, pay, amount) => {
+    const take = Math.min(a.sum - a.paid, amount);
+    if (take <= 0) return 0;
+    a.paid += take;
+    a.closedBy.push({ date: pay.date, amount: take });
+    return take;
+  };
+  pays.forEach(pay => {
+    pay.left = pay.amount;
+    for (const a of order) {
+      if (pay.left <= 0.0001) break;
+      if (a.payDate > pay.date) continue;
+      pay.left -= give(a, pay, pay.left);
+    }
+  });
+  pays.forEach(pay => {                       // получили вперёд
+    for (const a of order) {
+      if (pay.left <= 0.0001) break;
+      pay.left -= give(a, pay, pay.left);
+    }
+  });
+  accr.forEach(a => { a.rest = Math.max(0, a.sum - a.paid); });
+  const ahead = pays.reduce((x, p) => x + (p.left > 0.0001 ? p.left : 0), 0);
+
+  const before = [];
+  if (reset) {
+    accr.forEach(a => {
+      if (a.rest > 0 && a.payDate <= reset) {
+        a.byReset = true; a.resetAmount = a.rest; a.rest = 0;
+        before.push(a);
+      }
+    });
+  }
+  return { accr, pays, reset, ahead, byReset: before,
+           open: accr.filter(a => a.rest > 0),
+           closed: accr.filter(a => a.rest <= 0) };
+}
+
+/** Сколько ещё причитается на руки: начислено − получено. */
+function handRemain(dayStr) {
+  return handSettlement(dayStr).open.reduce((a, x) => a + x.rest, 0);
+}
+
+function addHandPayment() {
+  const dateEl = document.getElementById('hm-pay-date');
+  const amtEl = document.getElementById('hm-pay-amt');
+  if (!dateEl || !amtEl) return;
+  const dateStr = dateEl.value;
+  if (!dateStr) { alert('Выбери число, на которое записать получение.'); return; }
+  const cleaned = (amtEl.value || '').trim().replace(/\s/g, '').replace(',', '.');
+  const amount = parseFloat(cleaned);
+  if (isNaN(amount) || amount <= 0) { alert('Введи сумму больше нуля.'); return; }
+  const day = getDay(dateStr);
+  day.handPaid = (day.handPaid || 0) + amount;
+  saveState();
+  render();
+  amtEl.value = '';
+  openHandModal();
+  if (typeof showToast === 'function') showToast('Записано: получено ' + fmt(amount) + ' (' + formatDateShort(dateStr) + ')');
+}
+
+function removeHandPayment(dateStr) {
+  const day = state.days[dateStr];
+  if (!day || !day.handPaid) return;
+  if (!confirm('Убрать отметку «получено на руки» за ' + formatDateShort(dateStr) + ' (' + fmt(day.handPaid) + ')?')) return;
+  day.handPaid = 0;
+  saveState();
+  render();
+  openHandModal();
+}
+
+function askHandReset() {
+  const S = handSettlement(currentDate);
+  const left = S.open.reduce((a, x) => a + x.rest, 0);
+  if (!S.open.length) { alert('Незакрытых сделок нет — обнулять нечего.'); return; }
+  if (!confirm(
+    'Подвести черту на ' + formatDateShort(currentDate) + '?\n\n' +
+    'В архив уйдёт незакрытых сделок: ' + S.open.length + '\n' +
+    'Остаток «на руки» станет 0 (сейчас ' + fmt(left) + ')\n\n' +
+    'Деньгами это не проводится. Черту можно убрать обратно.')) return;
+  state.handResetAt = currentDate;
+  saveState();
+  render();
+  openHandModal();
+  if (typeof showToast === 'function') showToast('Черта подведена. Остаток обнулён.');
+}
+
+function askHandResetUndo() {
+  if (!confirm('Убрать черту от ' + formatDateShort(handResetDate()) +
+               '?\n\nСтарые сделки вернутся в остаток.')) return;
+  delete state.handResetAt;
+  saveState();
+  render();
+  openHandModal();
+  if (typeof showToast === 'function') showToast('Черта убрана');
 }
 
 /** Провести черту: всё начисленное по dayStr включительно считать закрытым. */
@@ -5802,7 +5933,23 @@ function renderHandTile() {
      <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
        <span style="color:var(--muted-bright)">− куратору</span>
        <span style="font-family:var(--font-num);color:#ffb74d;font-weight:700">${fmt(hw.curator)}</span>
-     </div>`;
+     </div>` + (() => {
+       /* Получено и остаток — если владелец записывал получения (v212).
+          Пока ничего не записано, плитка выглядит как раньше. */
+       const HS = handSettlement(ledgerDay());
+       const got = HS.pays.reduce((x, p) => x + p.amount, 0);
+       if (!got && !HS.reset) return '';
+       const left = HS.open.reduce((x, a) => x + a.rest, 0);
+       return `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
+           <span style="color:var(--muted-bright)">− получено</span>
+           <span style="font-family:var(--font-num);color:var(--muted-bright);font-weight:700">${fmt(got)}</span>
+         </div>
+         <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5;
+              margin-top:3px;padding-top:3px;border-top:1px dashed var(--border)">
+           <span style="color:var(--accent)">осталось получить</span>
+           <span style="font-family:var(--font-num);color:var(--accent);font-weight:700">${fmt(left)}</span>
+         </div>`;
+     })();
 }
 
 /** Блок «почему сделки нет в списке» — раскрывается по нажатию. */
@@ -5853,12 +6000,25 @@ function openHandModal() {
   const gRynok = sumOf(all.filter(r => (r.pair || '').trim() === RYNOK));
   const gOther = sumOf(all.filter(r => (r.pair || '').trim() !== RYNOK));
 
+  const HS = handSettlement(ledgerDay());          // получения и черта (v212)
+  const gotTotal = HS.pays.reduce((x, p) => x + p.amount, 0);
+  const leftTotal = HS.open.reduce((x, a) => a === null ? x : x + a.rest, 0);
+
   const head =
     `<div class="hm-sum">
        <div><div class="l">Итог сделок</div><div class="v" style="color:var(--accent3)">${fmt(hw.deals)}</div></div>
        <div><div class="l">− Куратору</div><div class="v" style="color:#ffb74d">${fmt(hw.curator)}</div></div>
        <div><div class="l">= На руки</div><div class="v" style="color:var(--accent)">${fmt(hw.hand)}</div></div>
      </div>
+     ${(gotTotal > 0 || HS.reset) ? `
+     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+                 margin-top:8px;padding:8px 12px;border-radius:10px;
+                 background:rgba(0,229,176,.08);border:1px solid rgba(0,229,176,.28)">
+       <span style="font-size:11.5px;color:var(--muted)">− получено на руки: <b
+         style="font-family:var(--font-num);color:var(--muted-bright)">${fmt(gotTotal)}</b></span>
+       <span style="font-size:13px;font-weight:700;color:var(--accent)">осталось получить:
+         <span style="font-family:var(--font-num);font-size:15px">${fmt(leftTotal)}</span></span>
+     </div>` : ''}
      ${(gRynok.deals || gOther.deals) ? `
      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 4px">
        ${[['Вейс(рук)-Рынок', gRynok], ['Остальные пары', gOther]].map(([nm, g]) => `
@@ -5927,8 +6087,56 @@ function openHandModal() {
     ? `<div style="color:var(--muted);font-size:11px;padding:8px 0 0">Показаны последние ${rows.length}. Раньше было ещё ${hidden} — они уже вошли в итог выше.</div>`
     : '';
 
+  /* Блок «Получено на руки» — список, форма и черта (v212). Устроен так же,
+     как «Отдано куратору»: те же поля, та же логика гашения по дате выдачи. */
+  const gotList = HS.pays.length
+    ? HS.pays.map(p => `
+        <div class="cm-pay-row">
+          <span class="cm-pay-date">${formatDateShort(p.date)}</span>
+          <span class="cm-pay-amt" style="color:var(--accent)">${fmt(p.amount)}</span>
+          <button class="cm-pay-del no-print" onclick="removeHandPayment('${p.date}')" title="Убрать отметку за этот день">✕</button>
+        </div>`).join('')
+    : `<div class="cm-pay-empty">Пока ничего не получено.</div>`;
+  const gotResetNote = (HS.byReset && HS.byReset.length) ? `
+      <div style="margin:8px 0 4px;padding:8px 10px;border-radius:8px;font-size:11.5px;line-height:1.5;
+           background:rgba(0,229,176,.08);border:1px solid rgba(0,229,176,.3)">
+        <b style="color:var(--accent)">Черта от ${formatDateShort(HS.reset)}</b> — сделки по эту дату
+        закрыты: <b style="font-family:var(--font-num)">${fmt(HS.byReset.reduce((x, a) => x + (a.resetAmount || a.sum), 0))}</b>
+        (${HS.byReset.length} шт.).
+        <button class="btn btn-ghost no-print" onclick="askHandResetUndo()"
+          style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:3px 10px;margin-left:6px">Убрать черту</button>
+      </div>` : '';
+  const gotBlock = `
+    <div class="cm-paid-block" style="border-color:rgba(0,229,176,.3)">
+      <div class="cm-paid-head" style="color:var(--accent)">📥 Получено на руки</div>
+      ${gotResetNote}
+      <div class="cm-pay-list">${gotList}</div>
+      <div class="cm-paid-total">
+        <span>Итого получено:</span>
+        <b style="color:var(--accent)">${fmt(gotTotal)}</b>
+      </div>
+      <div class="cm-paid-form no-print">
+        <div class="cm-paid-form-lbl">Записать новое получение:</div>
+        <div class="cm-paid-form-row">
+          <input type="date" id="hm-pay-date" class="cm-paid-inp" value="${currentDate}">
+          <input type="text" id="hm-pay-amt" class="cm-paid-inp cm-paid-inp-amt"
+                 placeholder="Сумма ₽" inputmode="decimal" oninput="numericInputFilter(event)">
+          <button class="btn btn-primary cm-paid-add" onclick="addHandPayment()"
+                  style="background:var(--accent);border-color:var(--accent);color:#000">+ Добавить</button>
+        </div>
+        ${HS.reset ? '' : `
+        <div class="cm-paid-form-lbl" style="margin-top:10px">Подвести черту:</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:6px">
+          Всё начисленное по сегодня уйдёт в архив, остаток станет нулём. Новые суммы появятся,
+          когда выдадите очередные приходы. Деньгами это не проводится — просто закрывает прошлое.
+        </div>
+        <button class="btn btn-ghost no-print" onclick="askHandReset()"
+          style="border-color:var(--accent);color:var(--accent)">Обнулить остаток на сегодня</button>`}
+      </div>
+    </div>`;
+
   box.innerHTML = head + unlinkedPayoutsHtml(ledgerDay()) + body + more
-    + handExcludedBlockHtml(ledgerDay()) + curatorPendingHtml(ledgerDay()) +
+    + handExcludedBlockHtml(ledgerDay()) + curatorPendingHtml(ledgerDay()) + gotBlock +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
      <div class="hm-note">Здесь все сделки, выданные на руки, начиная с 3 августа 2026 — без деления на недели. Всё, что было раньше, в счёт не входит. По каждой: итог сделки минус доля куратора; если процента куратора нет, вся сделка идёт на руки. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
