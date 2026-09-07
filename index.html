@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v206</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v207</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5977,14 +5977,24 @@ function openCuratorMineModal() {
       </div>`
     : (() => {
         // Долг после каждой операции: всё начисленное по эту строку включительно
-        // минус всё отданное за дни не позже её даты. Ничего не пересчитывает —
+        // минус то, что по этим строкам отдано. Ничего не пересчитывает —
         // складывает те же числа, что и итоги внизу.
+        const COVER0 = incomeCoverParts(ledgerDay(), true);   // чем погашен каждый приход
+        /* «Долг после» — нарастающий остаток ПО ЭТИМ ЖЕ строкам (v207).
+           Считаем только ту часть выплат, что пришлась на строки таблицы
+           (`partPaid`). Раньше вычитали выплату целиком, а она закрыла и те
+           сделки, что уже ушли в архив, — колонка уходила в минус (−78 200).
+           Показываем «отдано» на строке, где выплата действительно сработала:
+           по дате ВЫДАЧИ, ведь по ней и гасится (см. curatorSettlement). */
         const payByDate = {};
-        SET.pays.forEach(x => {                  // все выплаты с даты начала счёта (v206)
-          payByDate[x.date] = (payByDate[x.date] || 0) + x.amount;
+        rows.forEach(r => {
+          const cv = COVER0[r.pair + '#' + r.date + '#' + r.idx];
+          const pd = (cv && cv.parts && cv.parts.length) ? cv.parts[cv.parts.length - 1].date : r.date;
+          if (r.partPaid) payByDate[pd] = (payByDate[pd] || 0) + r.partPaid;
+          r.payDate = pd;
         });
         const payDates = Object.keys(payByDate).sort();
-        const COVER = incomeCoverParts(ledgerDay(), true);   // чем погашен каждый приход
+        const COVER = COVER0;
         let acc = 0;
         const trs = rows.map((r, i) => {
           const partial = (r.frac !== undefined && r.frac < 0.999)
@@ -5993,11 +6003,11 @@ function openCuratorMineModal() {
             ? ` <span style="color:#ffb74d;font-size:10.5px">· частично отдано ${fmt(r.partPaid)}</span>` : '';
           const doneChip = '';
           acc += r.curatorSum;
-          const paidBy = payDates.reduce((sum, d) => d <= r.date ? sum + payByDate[d] : sum, 0);
-          const due = acc - paidBy;
+          const paidBy = payDates.reduce((sum, d) => d <= r.payDate ? sum + payByDate[d] : sum, 0);
+          const due = Math.max(0, acc - paidBy);
           // Последняя строка дня — по ней и смотрят «сколько должен за этот день»
           const lastOfDay = (i === rows.length - 1) || rows[i + 1].date !== r.date;
-          const paidHere = payByDate[r.date];
+          const paidHere = payByDate[r.payDate];
           const payChip = (lastOfDay && paidHere)
             ? `<div style="color:var(--muted);font-size:10px;font-weight:400">отдано ${fmt(paidHere)}</div>` : '';
           const cov = COVER[r.pair + '#' + r.date + '#' + r.idx];
