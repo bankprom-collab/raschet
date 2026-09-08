@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v218</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v219</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4132,12 +4132,92 @@ function outForInHtml(COVER, i, payAmount) {
   const extraLine = extra > 0.5
     ? `<div style="color:var(--expense);margin-top:2px">осталось не отнесено:
         <span style="font-family:var(--font-num)">${fmt(extra)}</span> — приход закрыт целиком.
-        <button class="btn btn-ghost no-print" onclick="event.stopPropagation();splitOutRow(${i})"
+        <button class="btn btn-ghost no-print" onclick="event.stopPropagation();allocateOutRow(${i})"
           style="font-size:10.5px;padding:3px 9px;margin-left:4px;border-color:#ff8a4a;color:#ff8a4a"
           title="Разнести ${fmt(extra)} по другим приходам этой пары — отдельной записью на каждый">разнести остаток</button></div>`
     : '';
   return `<div style="font-size:10.5px;color:var(--muted-bright);font-weight:400;margin-top:3px;
     font-family:var(--font-ui);line-height:1.5">${lines}${extraLine}</div>`;
+}
+
+/* Выдачи, у которых часть суммы не отнесена ни к одному приходу (v219).
+
+   Владелец 08.09.2026 дважды прислал отчёт с 1 875 100 вместо 1 768 100:
+   разноску остатка (v217) нужно было запустить руками, а кнопка пряталась
+   в дне выдачи. Теперь такие выдачи собираются списком и разносятся одним
+   нажатием — из окна «На руки» и из блока задолженности. */
+function unallocatedPayouts(dayStr) {
+  const out = [];
+  const start = handStart();
+  const COVER = incomeCoverParts(dayStr, true);
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > dayStr) break;
+    if (d < start) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach((o, i) => {
+      const pair = (o.client || '').trim();
+      if (!pair || !o.forIn) return;                 // без привязки — это другой список
+      const cov = COVER['pay#' + d + '#' + i];
+      const used = (cov && cov.pays) ? cov.pays.reduce((a, x) => a + x.amount, 0) : 0;
+      const extra = (o.amount || 0) - used;
+      if (extra <= 0.5) return;
+      out.push({ date: d, idx: i, pair: pair, amount: o.amount || 0, used: used, extra: extra });
+    });
+  }
+  return out;
+}
+
+function unallocatedHtml(dayStr) {
+  const list = unallocatedPayouts(dayStr);
+  if (!list.length) return '';
+  const total = list.reduce((a, x) => a + x.extra, 0);
+  const rows = list.map(x => `
+    <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;
+                padding:6px 0;border-top:1px solid rgba(255,138,74,.18);font-size:11.5px">
+      <span>${formatDateShort(x.date)} · ${escapeHtml(x.pair)}
+        <span style="color:var(--muted);font-family:var(--font-ui);font-size:10.5px">
+          выдача ${fmt(x.amount)}, отнесено ${fmt(x.used)}</span></span>
+      <b style="font-family:var(--font-num);color:var(--expense)">${fmt(x.extra)}</b>
+    </div>`).join('');
+  return `<div class="no-print" style="margin:10px 0 4px;padding:10px 12px;border-radius:10px;
+      background:rgba(255,138,74,.10);border:1px solid rgba(255,138,74,.35)">
+      <div style="font-size:12px;line-height:1.5">
+        <b style="color:#ff8a4a">Не отнесено к приходам: ${fmt(total)}</b> — в ${list.length} выдач(ах).
+        <div style="margin-top:3px;color:var(--muted)">Выдача больше остатка своего прихода.
+        Пока остаток не разнесён, он не уменьшает долг по паре — отчёт показывает больше,
+        чем есть на самом деле.</div>
+        <button class="btn btn-ghost no-print" onclick="askAllocateAll()"
+          style="font-size:11.5px;padding:6px 12px;margin-top:6px;border-color:#ff8a4a;color:#ff8a4a">разнести всё</button>
+      </div>
+      ${rows}
+    </div>`;
+}
+
+/* Разнести остатки сразу по всем выдачам (v219). */
+function askAllocateAll() {
+  const list = unallocatedPayouts(ledgerDay());
+  if (!list.length) { showToast('Неотнесённых остатков нет.'); return; }
+  const total = list.reduce((a, x) => a + x.extra, 0);
+  if (!confirm('Разнести остатки по приходам: ' + list.length + ' выдач(а) на ' + fmt(total) + '?\n\n'
+    + 'Каждая выдача будет разделена на записи — по одной на приход, куда остаток укладывается.\n'
+    + 'Общие суммы выдач не меняются.')) return;
+  let сделано = 0;
+  // идём с конца, чтобы вставки не сдвигали индексы необработанных
+  list.slice().reverse().forEach(x => {
+    const day = state.days[x.date];
+    const row = day && day.out && day.out[x.idx];
+    if (!row) return;
+    const prev = currentDate;
+    currentDate = x.date;
+    const было = day.out.length;
+    try { allocateOutRow(x.idx, true); } finally { currentDate = prev; }
+    if (day.out.length > было) сделано++;
+  });
+  recalcCarryoversAfter(currentDate);
+  saveState();
+  render();
+  showToast(сделано ? ('Разнесено выдач: ' + сделано) : 'Разносить оказалось некуда');
 }
 
 /* Разнести неотнесённый остаток выдачи по приходам пары (v217).
@@ -4149,7 +4229,7 @@ function outForInHtml(COVER, i, payAmount) {
    владелец сделал бы руками, — создаёт ОТДЕЛЬНУЮ ЗАПИСЬ на каждый приход,
    куда остаток укладывается. Каждая запись со своей привязкой: правило
    «каждому приходу — своя выдача» соблюдено, а деньги не теряются. */
-function splitOutRow(i) {
+function allocateOutRow(i, silent) {
   const day = getDay(currentDate);
   const row = day.out && day.out[i];
   if (!row) return;
@@ -4158,7 +4238,7 @@ function splitOutRow(i) {
   const cov = COVER['pay#' + currentDate + '#' + i];
   const used = (cov && cov.pays) ? cov.pays.reduce((a, x) => a + x.amount, 0) : 0;
   let extra = (row.amount || 0) - used;
-  if (extra <= 0.5) { showToast('Здесь нечего разносить — вся сумма отнесена.'); return; }
+  if (extra <= 0.5) { if (!silent) showToast('Здесь нечего разносить — вся сумма отнесена.'); return; }
 
   // куда можно положить остаток: невыданные приходы пары, от старых к новым
   const targets = [];
@@ -4175,12 +4255,12 @@ function splitOutRow(i) {
     left -= take;
   });
   if (!targets.length) {
-    alert('Некуда разнести ' + fmt(extra) + ': у пары «' + pair + '» нет других невыданных приходов.\n\n'
+    if (!silent) alert('Некуда разнести ' + fmt(extra) + ': у пары «' + pair + '» нет других невыданных приходов.\n\n'
       + 'Проверьте сумму выдачи — возможно, она введена с ошибкой.');
     return;
   }
   const списком = targets.map(t => '   ' + fmt(t.amount) + ' → приход ' + formatDateShort(t.date)).join('\n');
-  if (!confirm('Разнести остаток ' + fmt(extra) + ' по приходам пары?\n\n'
+  if (!silent && !confirm('Разнести остаток ' + fmt(extra) + ' по приходам пары?\n\n'
     + fmt(used) + ' остаётся за приходом, который уже указан\n' + списком
     + (left > 0.5 ? '\n   ' + fmt(left) + ' — некуда положить, останется в первой записи' : '')
     + '\n\nОбщая сумма выдачи не меняется.')) return;
@@ -4192,10 +4272,12 @@ function splitOutRow(i) {
       dueDate: row.dueDate || null, forIn: t.date + '#' + t.idx
     });
   });
-  recalcCarryoversAfter(currentDate);
-  saveState();
-  render();
-  showToast('Разнесено записей: ' + targets.length);
+  if (!silent) {
+    recalcCarryoversAfter(currentDate);
+    saveState();
+    render();
+    showToast('Разнесено записей: ' + targets.length);
+  }
 }
 
 // Безопасное экранирование HTML для примечаний
@@ -6244,7 +6326,7 @@ function openHandModal() {
       </div>
     </div>`;
 
-  box.innerHTML = head + unlinkedPayoutsHtml(ledgerDay()) + body + more
+  box.innerHTML = head + unallocatedHtml(ledgerDay()) + unlinkedPayoutsHtml(ledgerDay()) + body + more
     + handExcludedBlockHtml(ledgerDay()) + curatorPendingHtml(ledgerDay()) + gotBlock +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
