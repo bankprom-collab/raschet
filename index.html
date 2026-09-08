@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v216</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v217</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4129,10 +4129,70 @@ function outForInHtml(COVER, i, payAmount) {
   const extraLine = extra > 0.5
     ? `<div style="color:var(--expense);margin-top:2px">осталось не отнесено:
         <span style="font-family:var(--font-num)">${fmt(extra)}</span> — приход закрыт целиком.
-        Поправьте сумму или разбейте выдачу на две записи.</div>`
+        <button class="btn btn-ghost no-print" onclick="event.stopPropagation();splitOutRow(${i})"
+          style="font-size:10.5px;padding:3px 9px;margin-left:4px;border-color:#ff8a4a;color:#ff8a4a"
+          title="Разнести ${fmt(extra)} по другим приходам этой пары — отдельной записью на каждый">разнести остаток</button></div>`
     : '';
   return `<div style="font-size:10.5px;color:var(--muted-bright);font-weight:400;margin-top:3px;
     font-family:var(--font-ui);line-height:1.5">${lines}${extraLine}</div>`;
+}
+
+/* Разнести неотнесённый остаток выдачи по приходам пары (v217).
+
+   Владелец 08.09.2026: в отчёте по Вейс(рук)-Рынок вместо 1 875 100 должно
+   стоять 1 768 100 — разница 107 000 — это остаток выдачи 31 августа
+   (1 200 000 при приходе к отдаче 1 093 000). По правилу v216 излишек сам
+   никуда не переходит; чтобы он не пропадал, программа делает то же, что
+   владелец сделал бы руками, — создаёт ОТДЕЛЬНУЮ ЗАПИСЬ на каждый приход,
+   куда остаток укладывается. Каждая запись со своей привязкой: правило
+   «каждому приходу — своя выдача» соблюдено, а деньги не теряются. */
+function splitOutRow(i) {
+  const day = getDay(currentDate);
+  const row = day.out && day.out[i];
+  if (!row) return;
+  const pair = (row.client || '').trim();
+  const COVER = incomeCoverParts(currentDate, true);
+  const cov = COVER['pay#' + currentDate + '#' + i];
+  const used = (cov && cov.pays) ? cov.pays.reduce((a, x) => a + x.amount, 0) : 0;
+  let extra = (row.amount || 0) - used;
+  if (extra <= 0.5) { showToast('Здесь нечего разносить — вся сумма отнесена.'); return; }
+
+  // куда можно положить остаток: невыданные приходы пары, от старых к новым
+  const targets = [];
+  let left = extra;
+  /* Остатки считаем по ВСЕМ данным (ledgerDay), а не на день выдачи: иначе
+     приход, который позже закрыт другой выдачей, выглядит свободным, и остаток
+     уходит весь в него — а потом снова оказывается неотнесённым. */
+  pairUnpaidRows(pair, ledgerDay()).forEach(r => {
+    if (left <= 0.5) return;
+    if (r.date + '#' + r.idx === row.forIn) return;      // свой приход уже закрыт
+    const take = Math.min(left, r.left);
+    if (take <= 0.5) return;
+    targets.push({ date: r.date, idx: r.idx, amount: take });
+    left -= take;
+  });
+  if (!targets.length) {
+    alert('Некуда разнести ' + fmt(extra) + ': у пары «' + pair + '» нет других невыданных приходов.\n\n'
+      + 'Проверьте сумму выдачи — возможно, она введена с ошибкой.');
+    return;
+  }
+  const списком = targets.map(t => '   ' + fmt(t.amount) + ' → приход ' + formatDateShort(t.date)).join('\n');
+  if (!confirm('Разнести остаток ' + fmt(extra) + ' по приходам пары?\n\n'
+    + fmt(used) + ' остаётся за приходом, который уже указан\n' + списком
+    + (left > 0.5 ? '\n   ' + fmt(left) + ' — некуда положить, останется в первой записи' : '')
+    + '\n\nОбщая сумма выдачи не меняется.')) return;
+
+  row.amount = used + (left > 0.5 ? left : 0);
+  targets.slice().reverse().forEach(t => {
+    day.out.splice(i + 1, 0, {
+      client: row.client, amount: t.amount, note: row.note || '',
+      dueDate: row.dueDate || null, forIn: t.date + '#' + t.idx
+    });
+  });
+  recalcCarryoversAfter(currentDate);
+  saveState();
+  render();
+  showToast('Разнесено записей: ' + targets.length);
 }
 
 // Безопасное экранирование HTML для примечаний
