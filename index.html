@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v220</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v221</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4154,6 +4154,108 @@ function outForInHtml(COVER, i, payAmount) {
     font-family:var(--font-ui);line-height:1.5">${lines}${extraLine}</div>`;
 }
 
+/* Сверка кассы и долга по парам (v221).
+
+   Владелец 09.09.2026: «Итого на конец дня 4 679 700» и «нам должны
+   3 920 300» — «эти две суммы не бьются». Они и не обязаны совпадать
+   до копейки, но разница должна объясняться. Из чего она складывается:
+
+   касса  = Σ приходов после 1-го % − Σ ВСЕХ выдач (по всей истории, с carryover)
+   долг   = Σ невыданных приходов с даты начала счёта, по привязкам
+
+   Значит касса − долг = (приходы до границы, ещё не выданные)
+                       − (выдачи, не отнесённые ни к одному приходу)
+                       − (выдачи за приходы из закрытого периода).
+
+   Сверка показывает каждую часть: видно, что именно разводит два числа. */
+function balanceReconcile(dayStr) {
+  const день = dayStr || ledgerDay();
+  /* Кассу считаем накопительно по всем дням до этого числа, а не calcBalance
+     одного дня: тот берёт переходящий остаток, и если день пустой, покажет
+     ноль. Начальный остаток самого раннего дня добавляем, если он задан. */
+  let касса = 0, первый = true;
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день) break;
+    const dd = state.days[d];
+    if (!dd) continue;
+    if (первый) { касса += (dd.carryover || 0); первый = false; }
+    if (Array.isArray(dd.in)) касса += dd.in.reduce((a, r) => a + (calcInRowFinal(r) || 0), 0);
+    if (Array.isArray(dd.out)) касса -= dd.out.reduce((a, o) => a + (o.amount || 0), 0);
+  }
+  const W = computeWeekPairDebt();
+  const долг = [...W.rows, ...W.overdueRows].reduce((a, r) => a + r.v1, 0);
+
+  const COVER = incomeCoverParts(день, true);
+  let доГраницы = 0, неОтнесено = 0, заСтарое = 0;
+  const cov = pairPaidCoverage(день, 'fifo', undefined, true);
+
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день) break;
+    const dd = state.days[d];
+    if (!dd) continue;
+    // приходы раньше границы: в кассе есть, в долге нет
+    if (isWeekday(d) && Array.isArray(dd.in)) {
+      dd.in.forEach((r, idx) => {
+        const p = (r.client || '').trim();
+        if (!p || d >= pairStart(p)) return;
+        доГраницы += calcInRowFinal(r) || 0;
+      });
+    }
+    if (!Array.isArray(dd.out)) continue;
+    dd.out.forEach((o, i) => {
+      const p = (o.client || '').trim();
+      const сумма = o.amount || 0;
+      if (!сумма) return;
+      // выдача за приход из закрытого периода — в долге не участвует
+      if (d < pairStart(p) || (o.forIn && String(o.forIn).slice(0, 10) < pairStart(p))) {
+        заСтарое += сумма;
+        return;
+      }
+      const c = COVER['pay#' + d + '#' + i];
+      const отнесено = (c && c.pays) ? c.pays.reduce((a, x) => a + x.amount, 0) : 0;
+      неОтнесено += Math.max(0, сумма - отнесено);
+    });
+  }
+  const объяснено = доГраницы - неОтнесено - заСтарое;
+  const разница = касса - долг;
+  return { касса, долг, разница, доГраницы, неОтнесено, заСтарое,
+           необъяснено: разница - объяснено };
+}
+
+function balanceReconcileHtml(dayStr) {
+  const R = balanceReconcile(dayStr);
+  if (Math.abs(R.разница) < 1) return '';
+  const строка = (подпись, знач, цвет) => знач > 0.5 ? `
+    <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
+      <span style="color:var(--muted)">${подпись}</span>
+      <b style="font-family:var(--font-num);color:${цвет || 'var(--muted-bright)'}">${fmt(знач)}</b>
+    </div>` : '';
+  return `<div class="no-print" style="margin-top:10px;padding:10px 12px;border-radius:10px;
+      background:rgba(123,140,255,.08);border:1px solid rgba(123,140,255,.3);font-size:11.5px;line-height:1.5">
+      <div style="font-weight:700;color:var(--accent3);margin-bottom:4px">Почему касса и долг не совпадают</div>
+      <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
+        <span style="color:var(--muted)">итого на конец дня</span>
+        <b style="font-family:var(--font-num)">${fmt(R.касса)}</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
+        <span style="color:var(--muted)">нам должны по парам</span>
+        <b style="font-family:var(--font-num)">${fmt(R.долг)}</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;
+                  border-top:1px dashed var(--border);margin-top:3px">
+        <span style="font-weight:700">разница</span>
+        <b style="font-family:var(--font-num);color:var(--accent3)">${fmt(R.разница)}</b>
+      </div>
+      <div style="margin-top:6px;color:var(--muted);font-size:10.5px">из чего складывается:</div>
+      ${строка('приходы до начала счёта — в кассе есть, в долге нет', R.доГраницы)}
+      ${строка('выдачи, не отнесённые к приходам — минус', R.неОтнесено, 'var(--expense)')}
+      ${строка('выдачи за приходы из закрытого периода — минус', R.заСтарое)}
+      ${Math.abs(R.необъяснено) > 1 ? строка('необъяснённый остаток', Math.abs(R.необъяснено), 'var(--expense)') : ''}
+      ${R.неОтнесено > 0.5 ? `<button class="btn btn-ghost no-print" onclick="askAllocateAll()"
+        style="font-size:11px;padding:5px 11px;margin-top:6px;border-color:#ff8a4a;color:#ff8a4a">разнести остатки</button>` : ''}
+    </div>`;
+}
+
 /* Выдачи, у которых часть суммы не отнесена ни к одному приходу (v219).
 
    Владелец 08.09.2026 дважды прислал отчёт с 1 875 100 вместо 1 768 100:
@@ -4933,7 +5035,8 @@ function renderWeekDebtSummary() {
     <details class="wds-foot"><summary style="cursor:pointer;list-style:none">Как это считается</summary>По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом ЗА ЭТУ НЕДЕЛЮ (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Долг с прошлых недель сюда не подмешивается — смотри блок «⏰ Просрочено» ниже.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</details>
   </div>` : '';
 
-  const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff);
+  const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff)
+    + balanceReconcileHtml(currentDate);   // сверка кассы и долга (v221)
 
   box.innerHTML = mainBlock + overdueBlock;
 }
