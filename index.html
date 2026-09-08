@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v215</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v216</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4086,7 +4086,7 @@ function renderOutBody(day) {
         : '';
       return `
       <tr>
-        <td class="client-name">${escapeHtml(r.client)}${dueChipEditableHtml(r, 'out', i)}${noteHtml}${outForInHtml(COVER, i)}</td>
+        <td class="client-name">${escapeHtml(r.client)}${dueChipEditableHtml(r, 'out', i)}${noteHtml}${outForInHtml(COVER, i, r.amount)}</td>
         <td class="amount neg">${fmt(r.amount)}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="openQuickEntryEdit('out',${i})" title="Редактировать">✏️</button>
@@ -4106,7 +4106,7 @@ function renderOutBody(day) {
    случай: 21 августа у пары было два прихода, 883 000 и 1 600 411,3; выдача
    759 400 предназначалась первому, а очередь отдала её второму (он введён
    раньше), и куратор начислился по невыданному приходу. */
-function outForInHtml(COVER, i) {
+function outForInHtml(COVER, i, payAmount) {
   const cov = COVER['pay#' + currentDate + '#' + i];
   if (!cov || !cov.pays.length) {
     return `<div style="font-size:10.5px;color:var(--muted);font-weight:400;margin-top:3px;font-family:var(--font-ui)">
@@ -4120,8 +4120,19 @@ function outForInHtml(COVER, i) {
       style="font-family:var(--font-num)">${fmt(x.inAmount)}</span>${
       cov.pays.length > 1 ? ' — ' + fmt(x.amount) : ''}</div>`;
   }).join('');
+  /* Излишек: выдача больше остатка своего прихода (v216). На другие приходы
+     он не переходит — по правилу владельца «каждая выдача считается только
+     по тому приходу, на котором была». Значит сумма введена неверно, и это
+     надо показать, а не прятать. */
+  const used = cov.pays.reduce((a, x) => a + x.amount, 0);
+  const extra = (payAmount || 0) - used;
+  const extraLine = extra > 0.5
+    ? `<div style="color:var(--expense);margin-top:2px">осталось не отнесено:
+        <span style="font-family:var(--font-num)">${fmt(extra)}</span> — приход закрыт целиком.
+        Поправьте сумму или разбейте выдачу на две записи.</div>`
+    : '';
   return `<div style="font-size:10.5px;color:var(--muted-bright);font-weight:400;margin-top:3px;
-    font-family:var(--font-ui);line-height:1.5">${lines}</div>`;
+    font-family:var(--font-ui);line-height:1.5">${lines}${extraLine}</div>`;
 }
 
 // Безопасное экранирование HTML для примечаний
@@ -5715,14 +5726,15 @@ function incomeCoverParts(dayStr, realOnly) {
       if (inr) rest -= give(inr, rest, pay, true);
       pay.rest = rest;
     });
-    /* Вторая фаза (v208). Остаток ПРИВЯЗАННОЙ выдачи разносится по другим
-       приходам пары всегда: деньги отданы, терять их нельзя. Безадресные
-       выдачи в realOnly не гасят ничего — приход считается выданным, лишь
-       когда владелец сам его подтянул. */
-    pays.forEach(pay => {
-      let rest = pay.forIn ? (pay.rest || 0) : (realOnly ? 0 : pay.amount);
-      for (let i = 0; i < ins.length && rest > 0; i++) rest -= give(ins[i], rest, pay, false);
-    });
+    /* Вторая фаза — только вне realOnly (v216). В расчёте каждая выдача
+       закрывает ровно свой приход: ни излишек привязанной, ни безадресные
+       деньги на другие приходы не переходят. */
+    if (!realOnly) {
+      pays.forEach(pay => {
+        let rest = pay.forIn ? (pay.rest || 0) : pay.amount;
+        for (let i = 0; i < ins.length && rest > 0; i++) rest -= give(ins[i], rest, pay, false);
+      });
+    }
 
     ins.forEach(x => {
       out[p + '#' + x.date + '#' + x.idx] = {
@@ -5808,17 +5820,18 @@ function pairPaidCoverage(dayStr, order, startDate, realOnly) {
       if (aim <= 0) return;
       const take = Math.min(a, aim);
       paid[key] = take;
-      /* Остаток привязанной выдачи идёт на другие приходы пары — ВСЕГДА,
-         в том числе в realOnly (v208). Деньги отданы паре, потерять их нельзя.
-         Владелец 07.09.2026 сравнил старый и новый отчёты: выдача 31 августа
-         на 1 200 000 привязана к приходу 14 авг (к отдаче 1 093 000), избыток
-         107 000 исчезал из расчёта — «в старом отчёте цифры правильнее».
-         Непривязанные выдачи в realOnly по-прежнему не гасят ничего. */
-      if (aim > take) pool += (aim - take);
+      /* Излишек привязанной выдачи НЕ переходит на другие приходы (v216).
+         Владелец 08.09.2026: «специально разделяем каждый приход: на него
+         отдельная выдача идёт. Зачем перемешивать? Каждая выдача считается
+         только по тому приходу, на котором была; если по этому выдачи не было,
+         то и не считается». Излишек показывается отдельной пометкой — значит
+         сумма выдачи введена неверно и её надо поправить или разбить.
+         (v208, где излишек перетекал, отменён.) */
+      if (aim > take && !realOnly) pool += (aim - take);
       delete aimed[key];
     });
-    // привязка «в никуда» (приход удалён) — тоже не теряем
-    for (const k in aimed) pool += aimed[k];
+    // привязка «в никуда» (приход удалён) — в общий пул только вне realOnly
+    if (!realOnly) for (const k in aimed) pool += aimed[k];
 
     // Проход 2: остальное — по порядку, как и раньше.
     list.forEach(inr => {
