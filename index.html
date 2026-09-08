@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v219</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v220</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3377,8 +3377,18 @@ function curatorSettlement(dayStr) {
        за уже закрытый период гасили сделку 31 июля, она уходила в архив,
        и счёт показывал «нет выданных на руки приходов» при живом долге
        12 100. Период считается целиком — и приходы, и выплаты. */
-    if (d >= handStart() && typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
-      pays.push({ date: d, amount: dd.curatorPaid });
+    /* Выплаты разделены по таблицам (v220). Владелец 08.09.2026: внёс 87 800
+       за «остальные пары», а закрылась ещё и часть Вейс(рук)-Рынок — гашение
+       шло по общей очереди. Теперь у каждой выплаты своя группа: `curatorPaid`
+       — остальные пары, `curatorPaidR` — Вейс(рук)-Рынок. Два счёта, две
+       очереди, ничего не перемешивается. */
+    if (d >= handStart()) {
+      if (typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
+        pays.push({ date: d, amount: dd.curatorPaid, group: 'other' });
+      }
+      if (typeof dd.curatorPaidR === 'number' && dd.curatorPaidR > 0) {
+        pays.push({ date: d, amount: dd.curatorPaidR, group: 'rynok' });
+      }
     }
     if (!isWeekday(d) || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3411,6 +3421,8 @@ function curatorSettlement(dayStr) {
      к поздним. То, что выдано после D, этой выплатой закрыть нельзя: в день
      выплаты этих сделок в счёте ещё не было. Остаток выплаты (отдали вперёд)
      идёт на следующие по порядку — как раньше. */
+  const RYNOK = 'Вейс(рук)-Рынок';
+  accr.forEach(a => { a.group = ((a.pair || '').trim() === RYNOK) ? 'rynok' : 'other'; });
   const order = accr.slice().sort((x, y) =>
     (x.payDate < y.payDate ? -1 : x.payDate > y.payDate ? 1 :
      x.date < y.date ? -1 : x.date > y.date ? 1 : x.idx - y.idx));
@@ -3425,13 +3437,15 @@ function curatorSettlement(dayStr) {
     pay.left = pay.amount;
     for (const a of order) {
       if (pay.left <= 0.0001) break;
+      if (a.group !== pay.group) continue;      // своя таблица — своя выплата
       if (a.payDate > pay.date) continue;       // выдано позже выплаты — не её
       pay.left -= give(a, pay, pay.left);
     }
   });
-  pays.forEach(pay => {                          // отдали вперёд — на следующие
+  pays.forEach(pay => {                          // отдали вперёд — на следующие своей группы
     for (const a of order) {
       if (pay.left <= 0.0001) break;
+      if (a.group !== pay.group) continue;
       pay.left -= give(a, pay, pay.left);
     }
   });
@@ -6536,14 +6550,15 @@ function openCuratorMineModal() {
   /* Блок «Отдано куратору» — ВСЕ выплаты с даты начала счёта (v206). Раньше
      collectCuratorPayments показывал только текущую неделю: при «Итого отдано
      16 200» стояло «Пока ничего не отдано». */
-  const paidRows = SET.pays;
+  const paidRows = SET.pays;   // v220: у каждой выплаты своя группа
   const paidTotal = SET.pays.reduce((x, p) => x + p.amount, 0);
   const paidList = paidRows.length
     ? paidRows.map(p => `
         <div class="cm-pay-row">
           <span class="cm-pay-date">${formatDateShort(p.date)}</span>
-          <span class="cm-pay-amt">${fmt(p.amount)}</span>
-          <button class="cm-pay-del no-print" onclick="removeCuratorPayment('${p.date}')" title="Убрать отметку об отдаче за этот день">✕</button>
+          <span class="cm-pay-amt">${fmt(p.amount)}<span style="font-family:var(--font-ui);font-size:10px;
+            color:var(--muted);font-weight:400;margin-left:6px">${p.group === 'rynok' ? 'Вейс(рук)-Рынок' : 'остальные пары'}</span></span>
+          <button class="cm-pay-del no-print" onclick="removeCuratorPayment('${p.date}','${p.group}')" title="Убрать отметку об отдаче за этот день">✕</button>
         </div>
       `).join('')
     : `<div class="cm-pay-empty">Пока ничего не отдано.</div>`;
@@ -6600,7 +6615,18 @@ function openCuratorMineModal() {
         <div class="cm-paid-form-row">
           <input type="date" id="cm-pay-date" value="${currentDate}" class="cm-paid-inp" title="Число, которым записываем отдачу">
           <input type="text" id="cm-pay-amt" inputmode="decimal" placeholder="Сумма ₽" class="cm-paid-inp cm-paid-inp-amt" oninput="numericInputFilter(event)">
-          <button class="btn btn-primary cm-paid-add" onclick="addCuratorPayment()" style="background:#ffb74d;border-color:#ffb74d;color:#000;font-weight:700">+ Добавить</button>
+        </div>
+        <div class="cm-paid-form-row" style="margin-top:6px">
+          <button class="btn btn-primary cm-paid-add" onclick="addCuratorPayment('rynok')"
+            style="background:#ffb74d;border-color:#ffb74d;color:#000;font-weight:700"
+            title="Отдача засчитается в таблицу Вейс(рук)-Рынок">+ в Вейс(рук)-Рынок</button>
+          <button class="btn btn-primary cm-paid-add" onclick="addCuratorPayment('other')"
+            style="background:#ffb74d;border-color:#ffb74d;color:#000;font-weight:700"
+            title="Отдача засчитается в таблицу остальных пар">+ в остальные пары</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:5px;line-height:1.45">
+          Каждая таблица — свой счёт: отдача закрывает сделки только той таблицы,
+          в которую записана.
         </div>
       </div>
       <div class="cm-paid-form no-print" style="border-top:1px dashed rgba(255,255,255,.08);margin-top:10px;padding-top:10px">
@@ -6954,7 +6980,7 @@ function askCuratorResetUndo() {
 
 // Добавить новую отдачу куратору (сумму на выбранную дату).
 // Прибавляется к day.curatorPaid этого дня — тот же механизм, что кнопка «Отдана» в шапке.
-function addCuratorPayment() {
+function addCuratorPayment(group) {
   const dateEl = document.getElementById('cm-pay-date');
   const amtEl = document.getElementById('cm-pay-amt');
   if (!dateEl || !amtEl) return;
@@ -6965,20 +6991,25 @@ function addCuratorPayment() {
   if (isNaN(amount) || amount <= 0) { alert('Введи сумму больше нуля.'); return; }
   // getDay создаст день, если его ещё нет, и подтянет carryover от prev-with-data
   const day = getDay(dateStr);
-  day.curatorPaid = (day.curatorPaid || 0) + amount;
+  const поле = (group === 'rynok') ? 'curatorPaidR' : 'curatorPaid';   // v220
+  day[поле] = (day[поле] || 0) + amount;
   saveState();
   render();
   amtEl.value = '';
   openCuratorMineModal();
-  if (typeof showToast === 'function') showToast('Записано: отдано ' + fmt(amount) + ' (' + formatDateShort(dateStr) + ')');
+  if (typeof showToast === 'function') showToast('Записано: отдано ' + fmt(amount)
+    + ' — ' + (group === 'rynok' ? 'Вейс(рук)-Рынок' : 'остальные пары')
+    + ' (' + formatDateShort(dateStr) + ')');
 }
 
 // Убрать отметку об отдаче за конкретный день недели (обнуляет day.curatorPaid).
-function removeCuratorPayment(dateStr) {
+function removeCuratorPayment(dateStr, group) {
   const day = state.days[dateStr];
-  if (!day || !day.curatorPaid) return;
-  if (!confirm('Убрать отметку «отдано куратору» за ' + formatDateShort(dateStr) + ' (' + fmt(day.curatorPaid) + ')?')) return;
-  day.curatorPaid = 0;
+  const поле = (group === 'rynok') ? 'curatorPaidR' : 'curatorPaid';   // v220
+  if (!day || !day[поле]) return;
+  if (!confirm('Убрать отметку «отдано куратору» за ' + formatDateShort(dateStr)
+    + ' (' + fmt(day[поле]) + ', ' + (group === 'rynok' ? 'Вейс(рук)-Рынок' : 'остальные пары') + ')?')) return;
+  day[поле] = 0;
   saveState();
   render();
   openCuratorMineModal();
