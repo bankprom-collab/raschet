@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v214</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v215</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5516,6 +5516,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
   // видеть, из чего сложилась сумма целиком. Выданные приглушены и помечены —
   // в остаток они не входят, но и не исчезают из глаз.
   const cover = pairPaidCoverage(currentDate, 'fifo', undefined, true);   // v194
+  const PARTS = incomeCoverParts(currentDate, true);   // чем закрыт каждый приход (v215)
   const allRows = [];
   inRows.forEach(r => {
     const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля выдано
@@ -5531,6 +5532,7 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
       // невыданная часть — она и складывается в «Итого невыдано»
       uAfter1: paidFull ? 0 : (whole ? a1 : r100(a1 * uf)),
       state: paidFull ? 'paid' : (whole ? 'open' : 'part'),
+      payParts: ((PARTS[p + '#' + r.date + '#' + r.idx] || {}).parts) || [],
     });
   });
   // Подгоняем «после 1-го %» последней НЕвыданной строки, чтобы сумма
@@ -5570,8 +5572,18 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
     const partsHtml = (r.parts && r.parts.length > 1)
       ? `<span class="wds-break-parts" title="Из чего сложилась сумма">${r.parts.map(n => fmtRaw(n)).join(' + ')}</span>`
       : '';
+    /* Чем закрыта выданная часть (v215). Владелец 08.09.2026: «здесь ещё
+       ничего не выдавалось, а она пишет какое-то другое число». Приход был
+       помечен «часть», хотя выдачи к нему не привязывали: туда перетёк
+       остаток выдачи, привязанной к другому приходу этой пары (правило v208).
+       Теперь видно, какая это выдача и на сколько. */
+    const payNote = (r.state !== 'open' && r.payParts && r.payParts.length)
+      ? `<div class="wds-break-parts" style="color:var(--muted);margin-top:2px">закрыто: ${
+          r.payParts.map(x => formatDateShort(x.date) + ' — ' + fmt(x.amount)
+            + (x.aimed ? '' : ' (перешло с другого прихода)')).join(' · ')}</div>`
+      : '';
     return `<div class="wds-break-row${r.state === 'paid' ? ' is-paid' : ''}">
-      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${chip}${r.state !== 'paid' ? dueChipHtml(r.dueDate) : ''}</span>
+      <span class="wds-break-date">${formatDateShort(r.date)}${tagChip}${chip}${r.state !== 'paid' ? dueChipHtml(r.dueDate) : ''}${payNote}</span>
       <span class="wds-break-amt">${fmt(r.amount)}${partsHtml}</span>
       <span class="wds-break-pct">${pcts || '—'}</span>
       <span class="wds-break-after">→ ${fmt(r.after1)}</span>
