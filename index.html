@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v217</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v218</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2943,8 +2943,11 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
          Вычитание выданного (v198–v199) на частично выданном приходе давало
          разницу по всему приходу: осталось 216 870,83, а «−16%» показывало
          157 500 вместо 182 200 и разницу 30 100 вместо 5 400. */
+      /* Округляем ПО КАЖДОМУ приходу, а не общую сумму (v218): иначе шапка
+         пары расходилась с отчётом на 100 ₽ — там каждая строка округляется
+         отдельно. Нашлось сквозной ревизией 08.09.2026. */
       if (hasSecondPct(r)) {
-        box.v2 += r100(r.total2) * left;
+        box.v2 += r100(r100(r.total2) * left);
         box.has2 = true; box.pct2 = r.pct2;
       }
     });
@@ -2953,7 +2956,7 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
     /* Базу НЕ округляем (v196): это сумма приходов как есть. Владелец
        28.08.2026: «сумма должна быть 1 600 411,3, а ты пишешь 1 600 400».
        Округление до сотен — только для сумм после процентов. */
-    b.v1 = r100(b.v1); b.v2 = b.has2 ? r100(b.v2) : 0;
+    b.v1 = r100(b.v1); b.v2 = b.has2 ? b.v2 : 0;   // v2 уже округлён построчно
   });
   return { current: cur, overdue: ovd };
 }
