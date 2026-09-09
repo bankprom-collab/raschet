@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v223</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v224</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2809,7 +2809,11 @@ function weekMondayStr(dateStr) {
   dt.setDate(dt.getDate() - back);
   return dt.toISOString().slice(0, 10);
 }
-// Рабочий день (понедельник–пятница)?
+/* Рабочий день (понедельник–пятница). Больше нигде в счёте не используется:
+   в v224 владелец попросил считать приходы выходных наравне с буднями, и все
+   фильтры по дню недели сняты. Оставлено на случай, если правило вернётся —
+   тогда его надо ставить одновременно в pairDebtByIncomes, pairPaidCoverage,
+   pairReportRows и во всех накопителях недели, иначе блоки разойдутся. */
 function isWeekday(dateStr) {
   const dow = new Date(dateStr + 'T12:00:00').getDay();
   return dow >= 1 && dow <= 5;
@@ -2852,14 +2856,13 @@ function computeTagRunningTotals(dayStr) {
     if (weekMondayStr(d) !== thisWeek) continue; // только дни текущей недели
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
-    const weekday = isWeekday(d);
     dd.in.forEach(r => {
       const pair = (r.client || '').trim();
       const f1 = calcInRowFinal(r);
       const has2 = hasSecondPct(r);
       const f2 = has2 ? r100(r.total2) : 0;
-      // Прибавляем к накопителям только по рабочим дням
-      if (pair && weekday) {
+      // Прибавляем к накопителям каждый приход, любой день недели (v224)
+      if (pair) {
         acc1[pair] = (acc1[pair] || 0) + f1;
         if (has2) acc2[pair] = (acc2[pair] || 0) + f2;
       }
@@ -2921,7 +2924,6 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (d < start) continue;   // владелец 28.08.2026: «мне нужны только августовские»
-    if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     const wk = weekMondayStr(d);
@@ -2991,7 +2993,7 @@ function pairWeekDebt(dayStr, pairName, startWeek) {
       if (applyGd && d <= gd) continue;   // приходы/выдачи ПО дату отдачи — отданы
       const dd = state.days[d];
       if (!dd) continue;
-      if (isWeekday(d) && Array.isArray(dd.in)) {
+      if (Array.isArray(dd.in)) {
         dd.in.forEach(r => {
           if ((r.client || '').trim() !== pair) return;
           accBase += (r.amount || 0);
@@ -3091,7 +3093,7 @@ function pairWeekDebtSplit(dayStr, pairName, startWeek) {
       if (applyGd && d <= gd) continue;   // приходы/выдачи ПО дату отдачи — отданы
       const dd = state.days[d];
       if (!dd) continue;
-      if (isWeekday(d) && Array.isArray(dd.in)) {
+      if (Array.isArray(dd.in)) {
         dd.in.forEach(r => {
           if ((r.client || '').trim() !== pair) return;
           accBase += (r.amount || 0);
@@ -3270,7 +3272,6 @@ function curatorWeeklyAccrued(dayStr) {
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
-    if (!isWeekday(d)) continue;                 // сб/вс не учитываются
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3320,7 +3321,6 @@ function curatorAccruedTotal(dayStr) {
   const cover = pairPaidCoverage(dayStr, undefined, undefined, true);   // только настоящие выдачи
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3390,7 +3390,7 @@ function curatorSettlement(dayStr) {
         pays.push({ date: d, amount: dd.curatorPaidR, group: 'rynok' });
       }
     }
-    if (!isWeekday(d) || !Array.isArray(dd.in)) continue;
+    if (!Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
       if (!(r.pctCur > 0)) return;
       if (d < handStart()) return;              // до начала счёта — закрыто
@@ -3639,7 +3639,6 @@ function dealsWeeklyAccrued(dayStr) {
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
-    if (!isWeekday(d)) continue;                 // сб/вс не учитываются
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3699,7 +3698,6 @@ function handOpenRows(dayStr) {
   const cover = pairPaidCoverage(dayStr, undefined, undefined, true);   // только настоящие выдачи
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -3732,7 +3730,6 @@ function handExcludedRows(dayStr) {
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (d < handStart()) continue;               // старая история — не разбираем
-    if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -4168,8 +4165,9 @@ function outForInHtml(COVER, i, payAmount) {
       до границы, неотнесённые выдачи, выдачи за старое), всё прочее валилось
       в «необъяснённый остаток». Проверка нашла четыре дыры — каждая молча
       уходила туда:
-        • приход в субботу/воскресенье: в кассе есть, в долг по парам не
-          попадает (pairDebtByIncomes берёт только будни);
+        • приход в субботу/воскресенье: в кассе есть, в долг по парам
+          не попадал — снято в v224 по прямой просьбе владельца («считать
+          их наравне с буднями»), поэтому отдельной статьи больше нет;
         • приход без указанной пары: то же самое;
         • пара с проставленным «числом отдачи»: считается отданной, а деньги
           в кассе остались;
@@ -4185,7 +4183,7 @@ function outForInHtml(COVER, i, payAmount) {
                       с парой, только с pairStart, кроме закрытых «числом отдачи»)
 
      касса_полная − долг_расчётный = остаток 1-го дня
-        + приходы без пары + приходы в выходные + приходы до начала счёта
+        + приходы без пары + приходы до начала счёта
         + невыданное по парам с отметкой «отдано»
         − выдачи, не отнесённые к приходам − выдачи за старые приходы
 
@@ -4220,7 +4218,7 @@ function balanceReconcile(dayStr) {
   const cov = pairPaidCoverage(день, 'fifo', undefined, true);
   const dOut = state.debtOutDates || {};
 
-  let доГраницы = 0, выходные = 0, безПары = 0, отдано = 0, долгРасчётный = 0;
+  let доГраницы = 0, безПары = 0, отдано = 0, долгРасчётный = 0;
   let неОтнесено = 0, заСтарое = 0;
   const отданныеПары = new Set();
 
@@ -4234,7 +4232,6 @@ function balanceReconcile(dayStr) {
       if (!после1) return;
       const p = (r.client || '').trim();
       if (!p) { безПары += после1; return; }
-      if (!isWeekday(d)) { выходные += после1; return; }
       if (d < pairStart(p)) { доГраницы += после1; return; }
       const frac = cov[p + '#' + d + '#' + idx] || 0;
       const невыдано = после1 * (1 - frac);
@@ -4267,10 +4264,10 @@ function balanceReconcile(dayStr) {
   (W.givenRows || []).forEach(r => отданныеПары.add(r.name));
 
   const разница = касса - долг;
-  const статьи = остаток1 + сдвигОстатка + безПары + выходные + доГраницы
+  const статьи = остаток1 + сдвигОстатка + безПары + доГраницы
                + отдано + прочее - неОтнесено - заСтарое;
   return { касса, долг, разница, база: W.grandBase,
-           остаток1, сдвигОстатка, безПары, выходные, доГраницы, отдано, прочее,
+           остаток1, сдвигОстатка, безПары, доГраницы, отдано, прочее,
            неОтнесено, заСтарое,
            отданныеПары: [...отданныеПары], ручныеПары,
            расхождение: разница - статьи };   // обязано быть 0: проверка тождества
@@ -4311,7 +4308,6 @@ function balanceReconcileHtml(dayStr) {
       ${строка('остаток, лежавший до первого дня счёта', R.остаток1)}
       ${строка('ручной переходящий остаток — счёт начат заново', R.сдвигОстатка)}
       ${строка('приходы до начала счёта — в кассе есть, в долге нет', R.доГраницы)}
-      ${строка('приходы в выходные — в долг по парам не входят', R.выходные)}
       ${строка('приходы без указанной пары — в долг не входят', R.безПары)}
       ${строка('невыданное по парам с отметкой «отдано»' + списком(R.отданныеПары), R.отдано)}
       ${строка('ручные коррекции ✏️ и округления' + списком(R.ручныеПары), R.прочее)}
@@ -4323,27 +4319,17 @@ function balanceReconcileHtml(dayStr) {
     </div>`;
 }
 
-/* Приходы, которые лежат в кассе, но в недельный долг по парам не попадают (v223).
+/* Приходы, которые лежат в кассе, но ни в один долг по парам не попадают.
 
-   Найдено сквозной ревизией 09.09.2026 при разборе вопроса владельца
-   «база 11 937 329,25 против итога дня 11 820 500». Проверка на 300
-   сценариях: если добавить приход в субботу, шапка пары и отчёт по паре
-   расходятся в 111 случаях из 300.
+   В v223 сюда попадали ещё и приходы в выходные: pairDebtByIncomes и
+   pairPaidCoverage брали только будни, поэтому субботний приход был в кассе
+   и в отчёте по паре, а из «нам должны» пропадал. Владелец 09.09.2026 на
+   вопрос ответил прямо: «да, бывает, считать их в долг наравне с буднями» —
+   фильтр по будням снят везде (v224), и такие приходы теперь обычные.
 
-   Пример на цифрах: пятница — приход 1 000 000 (после 13% → 870 000),
-   суббота — приход 2 000 000 (→ 1 740 000). Касса показывает 1 740 000,
-   отчёт по паре — остаток 2 610 000, а шапка «нам должны» — 870 000.
-   Приход субботы просто исчезает из долга: pairDebtByIncomes и
-   pairPaidCoverage берут только будни (неделя считается пн–пт).
-
-   Расчёт при этом НЕ трогаем — правило «неделя пн–пт» владелец задавал сам.
-   Программа теперь показывает такие приходы отдельным блоком с суммой и
-   переносит их на ближайший будний день по кнопке (дата — данные владельца,
-   поэтому только с подтверждением).
-
-   Вторая причина попасть сюда — приход без указанной пары: он тоже есть
-   в кассе и тоже не участвует ни в одном долге. Такой перенести нельзя —
-   нужно выбрать пару, поэтому он показывается как есть. */
+   Остался один случай: приход, у которого не выбрана пара. Он есть в кассе,
+   но долг ни перед кем не создаёт — показываем его, чтобы сумма не терялась
+   молча. Перенести его нельзя: нужно открыть день и выбрать пару. */
 function offDebtIncomes(dayStr) {
   const день = dayStr || ledgerDay();
   const list = [];
@@ -4354,91 +4340,29 @@ function offDebtIncomes(dayStr) {
     dd.in.forEach((r, idx) => {
       const после1 = calcInRowFinal(r) || 0;
       if (после1 <= 0.5) return;
-      const p = (r.client || '').trim();
-      if (!p) { list.push({ date: d, idx, pair: '', amount: r.amount || 0, after1: после1, причина: 'без пары' }); return; }
-      if (d < pairStart(p)) return;                      // закрытый период — это норма
-      if (!isWeekday(d)) list.push({ date: d, idx, pair: p, amount: r.amount || 0, after1: после1, причина: 'выходной' });
+      if ((r.client || '').trim()) return;
+      list.push({ date: d, idx, pair: '', amount: r.amount || 0, after1: после1, причина: 'без пары' });
     });
   }
   return list;
 }
 
-/* Ближайший будний день НЕ ПОЗЖЕ указанного (суббота и воскресенье → пятница
-   той же недели, так что неделя по weekMondayStr не меняется). */
-function prevWeekday(dateStr) {
-  const dt = new Date(dateStr + 'T12:00:00');
-  while (dt.getDay() === 0 || dt.getDay() === 6) dt.setDate(dt.getDate() - 1);
-  return dt.toISOString().slice(0, 10);
-}
-
-/* Переносит приход на другой день ВМЕСТЕ с привязками выдач.
-   Выдачи ссылаются на приход строкой «дата#номер» (forIn), поэтому при
-   переносе едет и ссылка на сам приход, и номера тех приходов исходного дня,
-   что стояли после него, — иначе выдачи молча переедут на соседние приходы. */
-function moveIncomeToDay(fromDate, idx, toDate) {
-  if (fromDate === toDate) return false;
-  const src = state.days[fromDate];
-  if (!src || !Array.isArray(src.in) || !src.in[idx]) return false;
-  const dst = getDay(toDate);
-  if (!Array.isArray(dst.in)) dst.in = [];
-  const row = src.in.splice(idx, 1)[0];
-  const newIdx = dst.in.push(row) - 1;
-  for (const d in state.days) {
-    const dd = state.days[d];
-    if (!dd || !Array.isArray(dd.out)) continue;
-    dd.out.forEach(o => {
-      if (!o.forIn) return;
-      const части = String(o.forIn).split('#');
-      if (части[0] !== fromDate) return;
-      const n = parseInt(части[1], 10);
-      if (n === idx) o.forIn = toDate + '#' + newIdx;
-      else if (n > idx) o.forIn = fromDate + '#' + (n - 1);
-    });
-  }
-  return true;
-}
-
-function askMoveWeekendIncomes() {
-  const list = offDebtIncomes(ledgerDay()).filter(x => x.причина === 'выходной');
-  if (!list.length) { showToast('Приходов в выходные нет.'); return; }
-  const сумма = list.reduce((a, x) => a + x.after1, 0);
-  const списком = list.map(x => '   ' + formatDateShort(x.date) + ' → ' + formatDateShort(prevWeekday(x.date))
-    + '   ' + x.pair + '   ' + fmt(x.after1)).join('\n');
-  if (!confirm('Перенести приходы из выходных на пятницу той же недели?\n\n' + списком
-    + '\n\nВсего: ' + list.length + ' на ' + fmt(сумма)
-    + '\n\nСуммы и проценты не меняются — меняется только дата, чтобы приход попал'
-    + '\nв недельный долг по паре. Привязанные выдачи поедут вместе с приходом.')) return;
-  // с конца: перенос сдвигает номера приходов внутри дня
-  let сделано = 0;
-  list.slice().reverse().forEach(x => { if (moveIncomeToDay(x.date, x.idx, prevWeekday(x.date))) сделано++; });
-  recalcCarryoversAfter(list[0].date);
-  saveState();
-  render();
-  showToast(сделано ? ('Перенесено приходов: ' + сделано) : 'Переносить оказалось нечего');
-}
-
 function offDebtIncomesHtml(dayStr) {
   const list = offDebtIncomes(dayStr);
   if (!list.length) return '';
-  const выходные = list.filter(x => x.причина === 'выходной');
-  const безПары = list.filter(x => x.причина === 'без пары');
   const сумма = list.reduce((a, x) => a + x.after1, 0);
   const строки = list.map(x => `
     <div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;flex-wrap:wrap">
-      <span style="color:var(--muted)">${formatDateShort(x.date)}${x.причина === 'выходной' ? ' (выходной)' : ''}
-        ${x.pair ? '· ' + escapeHtml(x.pair) : '· <b style="color:#ff8a4a">пара не указана</b>'}</span>
+      <span style="color:var(--muted)">${formatDateShort(x.date)} · <b style="color:#ff8a4a">пара не указана</b></span>
       <b style="font-family:var(--font-num)">${fmt(x.after1)}</b>
     </div>`).join('');
   return `<div class="no-print" style="margin-top:10px;padding:10px 12px;border-radius:10px;
       background:rgba(255,138,74,.10);border:1px solid rgba(255,138,74,.35);font-size:11.5px;line-height:1.5">
-    <div style="font-weight:700;color:#ff8a4a;margin-bottom:4px">⚠️ Эти приходы в долг по парам не попали — ${fmt(сумма)}</div>
+    <div style="font-weight:700;color:#ff8a4a;margin-bottom:4px">⚠️ Приходы без пары — ${fmt(сумма)}</div>
     <div style="color:var(--muted);font-size:10.5px;margin-bottom:5px">
-      Деньги в кассе есть, а в «нам должны» их нет: недельный долг считается только по будням и только по парам.</div>
+      Деньги в кассе есть, а долга ни перед кем нет: у этих приходов не выбрана пара.
+      Откройте день и выберите её — сумма встанет в «нам должны».</div>
     ${строки}
-    ${выходные.length ? `<button class="btn btn-ghost no-print" onclick="askMoveWeekendIncomes()"
-      style="font-size:11px;padding:5px 11px;margin-top:7px;border-color:#ff8a4a;color:#ff8a4a">перенести на пятницу</button>` : ''}
-    ${безПары.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10.5px">
-      Приход без пары перенести нельзя — откройте его день и выберите пару.</div>` : ''}
   </div>`;
 }
 
@@ -4762,7 +4686,6 @@ function pairWeekAccruals(dayStr) {
   for (const d of allDays) {
     if (d > dayStr) break;
     if (weekMondayStr(d) !== thisWeek) continue;   // только дни текущей недели
-    if (!isWeekday(d)) continue;                    // приход копим по будням
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach(r => {
@@ -4826,7 +4749,7 @@ function pairRemainingAfterGivenDate(dayStr, pairName, afterDate) {
     if (d <= afterDate) continue;           // по дату отдачи включительно — закрыто
     const dd = state.days[d];
     if (!dd) continue;
-    if (isWeekday(d) && Array.isArray(dd.in)) {   // приход копим только по будням
+    if (Array.isArray(dd.in)) {   // v224: приход считается в любой день недели
       dd.in.forEach(r => {
         if ((r.client || '').trim() !== pair) return;
         accBase += (r.amount || 0);
@@ -4877,7 +4800,7 @@ function computeWeekPairDebt() {
   const pairsSet = new Set(Object.keys(accr));
   const thisWeek = weekMondayStr(currentDate);
   for (const d of Object.keys(state.days)) {
-    if (d > currentDate || weekMondayStr(d) >= thisWeek || !isWeekday(d)) continue;
+    if (d > currentDate || weekMondayStr(d) >= thisWeek) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach(r => { const p = (r.client || '').trim(); if (p) pairsSet.add(p); });
@@ -5114,7 +5037,6 @@ function pairPaidShare(pair, dayStr) {
   let all = 0, paid = 0;
   for (const d of Object.keys(state.days).sort()) {
     if (d > day) break;
-    if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -5436,7 +5358,7 @@ function diagnosePair() {
       const w = weekMondayStr(d);
       const b = byWeek[w] || (byWeek[w] = { in: 0, inCnt: 0, out: 0, unpaid: 0 });
       const cov = pairPaidCoverage(currentDate, 'fifo', undefined, true);   // как везде (v200)
-      if (isWeekday(d) && Array.isArray(dd.in)) {
+      if (Array.isArray(dd.in)) {
         dd.in.forEach((r, idx) => {
           if ((r.client || '').trim() !== p) return;
           b.in += calcInRowFinal(r) || 0;
@@ -5502,7 +5424,7 @@ function diagnosePair() {
     for (const d of Object.keys(state.days).sort()) {
       if (d > currentDate) break;
       const dd = state.days[d];
-      if (!dd || !isWeekday(d) || !Array.isArray(dd.in)) continue;
+      if (!dd || !Array.isArray(dd.in)) continue;
       dd.in.forEach(r => {
         if ((r.client || '').trim() !== p) return;
         rows.push('   ' + d + ': ' + fmt(r.amount || 0)
@@ -5904,7 +5826,6 @@ function collectPairBaseBreakdown(pair, scope) {
     if (!dd) return;
     (dd.in || []).forEach((r, idx) => {
       if ((r.client || '').trim() !== p) return;
-      if (!isWeekday(d)) return;   // приход участвует в базе только по будням — как в pairWeekDebt
       inRows.push({
         date: d, week: wk, idx: idx,
         amount: r.amount || 0,
@@ -6124,7 +6045,7 @@ function incomeCoverParts(dayStr, realOnly) {
     if (d > day) break;
     const dd = state.days[d];
     if (!dd) continue;
-    if (isWeekday(d) && Array.isArray(dd.in)) {
+    if (Array.isArray(dd.in)) {
       dd.in.forEach((r, idx) => {
         const p = (r.client || '').trim();
         if (!p) return;
@@ -6223,7 +6144,7 @@ function pairPaidCoverage(dayStr, order, startDate, realOnly) {
        (107 000) уходил на невыданный приход 1 июля, и долг по паре завышался
        ровно на эту сумму — 1 875 100 вместо 1 768 100.
        Дата берётся по паре: pairStart(pair), иначе общая handStart(). */
-    if (isWeekday(d) && Array.isArray(dd.in)) {
+    if (Array.isArray(dd.in)) {   // v224: приход считается в любой день недели
       dd.in.forEach((r, idx) => {
         const p = (r.client || '').trim();
         if (!p) return;
@@ -6327,7 +6248,7 @@ function curatorWeekMaps(dayStr) {
     if (typeof dd.curatorPaid === 'number' && dd.curatorPaid > 0) {
       paidByWeek[wk] = (paidByWeek[wk] || 0) + dd.curatorPaid;
     }
-    if (isWeekday(d) && Array.isArray(dd.in)) {
+    if (Array.isArray(dd.in)) {
       dd.in.forEach((r, idx) => {
         if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
           const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
@@ -6359,7 +6280,6 @@ function collectCuratorMineRows(dayStr) {
   const M = curatorWeekMaps(dayStr);
   for (const d of M.allDays) {
     if (d > dayStr) break;
-    if (!isWeekday(d)) continue;
     const wk = weekMondayStr(d);
     if (!M.isShownWeek(wk)) continue;
     const dd = state.days[d];
@@ -7014,7 +6934,6 @@ function curatorPendingRows(dayStr) {
   const before = [], after = [];
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
-    if (!isWeekday(d)) continue;
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -7635,7 +7554,6 @@ function pairUnpaidRows(pair, dayStr) {
        не должны попадаться ни в списке «Ещё не выдано», ни при разноске старых
        выдач: привязать к ним нечего, а путаницы от них много. */
     if (d < start) continue;
-    if (!isWeekday(d)) continue;            // в базе участвуют только будни
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -8640,7 +8558,7 @@ function clientAnalytics(pair, from, to) {
       if (weekMondayStr(d) !== wk) continue;
       const dd = state.days[d]; if (!dd) continue;
       let dIn1x = 0, dIn2x = 0, dPaid = 0, dRaw = 0, dHas2 = false, dp1 = null, dp2 = null;
-      if (isWeekday(d) && Array.isArray(dd.in)) {     // приход копим по будням (как в модели)
+      if (Array.isArray(dd.in)) {     // приход копим в любой день недели (v224)
         dd.in.forEach(r => {
           if ((r.client || '').trim() !== pair) return;
           dRaw += (r.amount || 0);
@@ -9561,7 +9479,7 @@ function pairReportRows(pair, from, to) {
                       && r.total !== null && r.total !== undefined) ? r100(r.total) : (r.total || 0);
       const after2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
                       && r.total2 !== null && r.total2 !== undefined) ? r100(r.total2) : null;
-      const frac = isWeekday(d) ? (cover[p + '#' + d + '#' + idx] || 0) : 0;
+      const frac = cover[p + '#' + d + '#' + idx] || 0;
       const paid = r100(after1 * frac);
       const pp = parts[p + '#' + d + '#' + idx];
       rows.push({ date: d, amount: r.amount || 0, parts: r.parts || null,
