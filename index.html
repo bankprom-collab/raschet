@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v224</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v225</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4263,57 +4263,77 @@ function balanceReconcile(dayStr) {
     .map(k => k.slice(k.indexOf('::') + 2));
   (W.givenRows || []).forEach(r => отданныеПары.add(r.name));
 
+  /* Первая ступень разбора: база — это приходы ДО процентов, «нам должны» —
+     они же после 1-го %. Разность и есть удержанный 1-й процент (v225). */
+  const первыйПроцент = W.grandBase - долг;
   const разница = касса - долг;
   const статьи = остаток1 + сдвигОстатка + безПары + доГраницы
                + отдано + прочее - неОтнесено - заСтарое;
-  return { касса, долг, разница, база: W.grandBase,
+  return { касса, долг, разница, база: W.grandBase, первыйПроцент,
            остаток1, сдвигОстатка, безПары, доГраницы, отдано, прочее,
            неОтнесено, заСтарое,
            отданныеПары: [...отданныеПары], ручныеПары,
            расхождение: разница - статьи };   // обязано быть 0: проверка тождества
 }
 
+/* Разбор «от базы до итога дня» (v225).
+
+   Владелец 10.09.2026 в третий раз прислал те же два снимка — «база
+   11 937 329,25» и «Итого на конец дня 11 820 500» — со словами: «Всё равно
+   вот расхождение. Вопроса о происхождении не было». То есть словами объяснять
+   нечего: нужен разбор в самой программе, на его данных, строка за строкой.
+
+   Блок ведёт лесенку от одного числа к другому. Каждая ступень — реальная
+   статья, посчитанная по его данным; последняя строка обязана дать ровно то,
+   что стоит в плитке «Итого на конец дня». Если не даёт — сломано тождество,
+   и об этом написано прямым текстом, а не спрятано.
+
+   Блок стоит СРАЗУ под шапкой задолженности, а не в конце: два предыдущих
+   раза он висел под всем списком пар, и владелец до него не доскроллил. */
 function balanceReconcileHtml(dayStr) {
   const R = balanceReconcile(dayStr);
   if (Math.abs(R.разница) < 1 && Math.abs(R.база - R.касса) < 1) return '';
-  const строка = (подпись, знач, цвет) => Math.abs(знач) > 0.5 ? `
-    <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
-      <span style="color:var(--muted)">${подпись}</span>
-      <b style="font-family:var(--font-num);color:${цвет || 'var(--muted-bright)'}">${знач < 0 ? '−' : ''}${fmt(Math.abs(знач))}</b>
+  const ступень = (подпись, знак, знач, цвет) => Math.abs(знач) > 0.5 ? `
+    <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;align-items:baseline">
+      <span style="color:var(--muted)"><b style="color:${цвет || 'var(--muted-bright)'};
+        font-family:var(--font-num);margin-right:5px">${знак}</b>${подпись}</span>
+      <b style="font-family:var(--font-num);color:${цвет || 'var(--muted-bright)'};white-space:nowrap">${fmt(Math.abs(знач))}</b>
     </div>` : '';
+  const итог = (подпись, знач, цвет) => `
+    <div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;align-items:baseline;
+                border-top:1px dashed var(--border);margin-top:3px">
+      <span style="font-weight:700">${подпись}</span>
+      <b style="font-family:var(--font-num);font-size:13px;color:${цвет};white-space:nowrap">${fmt(знач)}</b>
+    </div>`;
   const списком = (пары) => пары.length
     ? ` <span style="color:var(--muted);font-size:10px">(${пары.map(escapeHtml).join(', ')})</span>` : '';
-  return `<div class="no-print" style="margin-top:10px;padding:10px 12px;border-radius:10px;
+  // Знак у статьи выбираем по её собственному знаку: ручные коррекции и сдвиг
+  // остатка могут уйти в любую сторону, и «+ минус 200 000» читать нельзя.
+  const дв = (подпись, знач, цвет) => ступень(подпись, знач < 0 ? '−' : '+', знач, цвет);
+  return `<div class="no-print" style="margin:8px 0 10px;padding:10px 12px;border-radius:10px;
       background:rgba(123,140,255,.08);border:1px solid rgba(123,140,255,.3);font-size:11.5px;line-height:1.5">
-      <div style="font-weight:700;color:var(--accent3);margin-bottom:4px">Почему касса и долг не совпадают</div>
-      <div style="padding:6px 8px;margin-bottom:6px;border-radius:8px;background:rgba(255,183,77,.10);
-                  border:1px solid rgba(255,183,77,.28);color:#ffb74d;font-size:11px">
-        «База» ${fmt(R.база)} — это приходы <b>до процентов</b>. Касса считается после 1-го %,
-        поэтому с итогом дня базу сравнивать нельзя: после 1-го % это как раз «нам должны» ${fmt(R.долг)}.
+      <div style="font-weight:700;color:var(--accent3);margin-bottom:5px">Откуда база и куда она уходит</div>
+      <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;align-items:baseline">
+        <span style="font-weight:700">база — приходы до процентов</span>
+        <b style="font-family:var(--font-num);font-size:13px;white-space:nowrap">${fmt(R.база)}</b>
       </div>
-      <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
-        <span style="color:var(--muted)">итого на конец дня</span>
-        <b style="font-family:var(--font-num)">${fmt(R.касса)}</b>
-      </div>
-      <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
-        <span style="color:var(--muted)">нам должны по парам</span>
-        <b style="font-family:var(--font-num)">${fmt(R.долг)}</b>
-      </div>
-      <div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;
-                  border-top:1px dashed var(--border);margin-top:3px">
-        <span style="font-weight:700">разница</span>
-        <b style="font-family:var(--font-num);color:var(--accent3)">${fmt(R.разница)}</b>
-      </div>
-      <div style="margin-top:6px;color:var(--muted);font-size:10.5px">из чего складывается:</div>
-      ${строка('остаток, лежавший до первого дня счёта', R.остаток1)}
-      ${строка('ручной переходящий остаток — счёт начат заново', R.сдвигОстатка)}
-      ${строка('приходы до начала счёта — в кассе есть, в долге нет', R.доГраницы)}
-      ${строка('приходы без указанной пары — в долг не входят', R.безПары)}
-      ${строка('невыданное по парам с отметкой «отдано»' + списком(R.отданныеПары), R.отдано)}
-      ${строка('ручные коррекции ✏️ и округления' + списком(R.ручныеПары), R.прочее)}
-      ${строка('выдачи, не отнесённые к приходам — минус', -R.неОтнесено, 'var(--expense)')}
-      ${строка('выдачи за приходы из закрытого периода — минус', -R.заСтарое, 'var(--expense)')}
-      ${Math.abs(R.расхождение) > 1 ? строка('⚠️ сверка не сошлась — покажите это разработчику', R.расхождение, 'var(--expense)') : ''}
+      ${ступень('1-й процент по этим приходам', '−', R.первыйПроцент, 'var(--expense)')}
+      ${итог('нам должны по парам', R.долг, '#ff8a4a')}
+      ${дв('остаток, лежавший до первого дня счёта', R.остаток1)}
+      ${дв('ручной переходящий остаток — счёт начат заново', R.сдвигОстатка)}
+      ${дв('приходы до начала счёта — в кассе есть, в долге нет', R.доГраницы)}
+      ${дв('приходы без указанной пары', R.безПары)}
+      ${дв('невыданное по парам с отметкой «отдано»' + списком(R.отданныеПары), R.отдано)}
+      ${дв('ручные коррекции ✏️ и округления' + списком(R.ручныеПары), R.прочее)}
+      ${ступень('выдачи, не отнесённые к приходам', '−', R.неОтнесено, 'var(--expense)')}
+      ${ступень('выдачи за приходы из закрытого периода', '−', R.заСтарое, 'var(--expense)')}
+      ${итог('итого на конец дня', R.касса, '#00e5b0')}
+      ${Math.abs(R.расхождение) > 1 ? `
+        <div style="margin-top:6px;padding:6px 8px;border-radius:8px;background:rgba(255,82,82,.12);
+                    border:1px solid rgba(255,82,82,.35);color:#ff5252;font-size:11px">
+          ⚠️ Лесенка не сошлась на ${fmt(Math.abs(R.расхождение))} — покажите этот блок разработчику.</div>` : `
+        <div style="margin-top:6px;color:var(--muted);font-size:10.5px">
+          Сумма всех ступеней в точности равна итогу дня — расхождения нет, есть эти статьи.</div>`}
       ${R.неОтнесено > 0.5 ? `<button class="btn btn-ghost no-print" onclick="askAllocateAll()"
         style="font-size:11px;padding:5px 11px;margin-top:6px;border-color:#ff8a4a;color:#ff8a4a">разнести остатки</button>` : ''}
     </div>`;
@@ -5141,13 +5161,17 @@ function renderWeekDebtSummary() {
       <span>📋 Задолженность по парам за неделю${isFri ? ' · ПЯТНИЦА' : ''}</span>
       <span class="wds-total">${totalLine}</span>
     </div>
+    ${balanceReconcileHtml(currentDate)}
     ${body}
     <details class="wds-foot"><summary style="cursor:pointer;list-style:none">Как это считается</summary>По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом ЗА ЭТУ НЕДЕЛЮ (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Долг с прошлых недель сюда не подмешивается — смотри блок «⏰ Просрочено» ниже.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</details>
   </div>` : '';
 
   const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff)
-    + offDebtIncomesHtml(currentDate)      // приходы вне долга (v223)
-    + balanceReconcileHtml(currentDate);   // сверка кассы и долга (v221)
+    + offDebtIncomesHtml(currentDate)      // приходы без пары (v223)
+    /* Разбор «база → итог дня» показывается ВВЕРХУ, сразу под шапкой (v225):
+       снизу владелец до него не доскроллил. Здесь — только если пар нет вовсе
+       и верхнего блока не существует. */
+    + (rows.length ? '' : balanceReconcileHtml(currentDate));
 
   box.innerHTML = mainBlock + overdueBlock;
 }
