@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v222</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v223</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4154,59 +4154,100 @@ function outForInHtml(COVER, i, payAmount) {
     font-family:var(--font-ui);line-height:1.5">${lines}${extraLine}</div>`;
 }
 
-/* Сверка кассы и долга по парам (v221).
+/* Сверка кассы и долга по парам (v221, переписана в v223).
 
-   Владелец 09.09.2026: «Итого на конец дня 4 679 700» и «нам должны
-   3 920 300» — «эти две суммы не бьются». Они и не обязаны совпадать
-   до копейки, но разница должна объясняться. Из чего она складывается:
+   Владелец 09.09.2026 прислал два снимка: «база: 11 937 329,25 ₽» в блоке
+   задолженности и «Итого на конец дня 11 820 500 ₽» — «почему эти суммы
+   разнятся». Ответ из двух частей.
 
-   касса  = Σ приходов после 1-го % − Σ ВСЕХ выдач (по всей истории, с carryover)
-   долг   = Σ невыданных приходов с даты начала счёта, по привязкам
+   1. «База» — это суммы приходов ДО процентов. Касса живёт после 1-го %:
+      в итог дня идёт calcInRowFinal (после 1-го %, округлённый). С кассой
+      сравнивать надо не базу, а «нам должны» — ту же базу после 1-го %.
 
-   Значит касса − долг = (приходы до границы, ещё не выданные)
-                       − (выдачи, не отнесённые ни к одному приходу)
-                       − (выдачи за приходы из закрытого периода).
+   2. Остаток разницы раскладывается по статьям. В v221 их было три (приходы
+      до границы, неотнесённые выдачи, выдачи за старое), всё прочее валилось
+      в «необъяснённый остаток». Проверка нашла четыре дыры — каждая молча
+      уходила туда:
+        • приход в субботу/воскресенье: в кассе есть, в долг по парам не
+          попадает (pairDebtByIncomes берёт только будни);
+        • приход без указанной пары: то же самое;
+        • пара с проставленным «числом отдачи»: считается отданной, а деньги
+          в кассе остались;
+        • ручная коррекция ✏️: заменяет расчётную сумму пары.
+      И сама касса считалась мимо плитки: ручной переходящий остаток
+      в середине истории (carryoverManual) не сбрасывал накопление, поэтому
+      строка «итого на конец дня» в сверке могла не совпасть с плиткой.
 
-   Сверка показывает каждую часть: видно, что именно разводит два числа. */
+   Тождество, на котором держится блок (выведено, а не подогнано):
+
+     касса_полная = остаток 1-го дня + Σ приходов после 1-го % − Σ всех выдач
+     долг_расчётный = Σ невыданных приходов после 1-го % (только будни, только
+                      с парой, только с pairStart, кроме закрытых «числом отдачи»)
+
+     касса_полная − долг_расчётный = остаток 1-го дня
+        + приходы без пары + приходы в выходные + приходы до начала счёта
+        + невыданное по парам с отметкой «отдано»
+        − выдачи, не отнесённые к приходам − выдачи за старые приходы
+
+   Плюс две поправки: сдвиг от ручного переходящего остатка (касса плитки
+   минус касса_полная) и разница между расчётным и показанным долгом
+   (ручные коррекции ✏️, пары, целиком помеченные отданными, округления).
+   Сумма статей РАВНА разнице всегда — поэтому строки «необъяснено» больше
+   нет: если бы она понадобилась, значит сломано тождество, а не данные. */
 function balanceReconcile(dayStr) {
   const день = dayStr || ledgerDay();
-  /* Кассу считаем накопительно по всем дням до этого числа, а не calcBalance
-     одного дня: тот берёт переходящий остаток, и если день пустой, покажет
-     ноль. Начальный остаток самого раннего дня добавляем, если он задан. */
-  let касса = 0, первый = true;
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > день) break;
+  const дни = Object.keys(state.days).sort().filter(d => d <= день);
+
+  /* Касса — по цепочке дней, ровно как её показывает плитка «Итого на конец
+     дня»: день с ручным переходящим остатком начинает счёт заново. */
+  let касса = 0, кассаПолная = 0, остаток1 = 0, первый = true;
+  for (const d of дни) {
     const dd = state.days[d];
     if (!dd) continue;
-    if (первый) { касса += (dd.carryover || 0); первый = false; }
-    if (Array.isArray(dd.in)) касса += dd.in.reduce((a, r) => a + (calcInRowFinal(r) || 0), 0);
-    if (Array.isArray(dd.out)) касса -= dd.out.reduce((a, o) => a + (o.amount || 0), 0);
+    const приход = Array.isArray(dd.in) ? dd.in.reduce((a, r) => a + (calcInRowFinal(r) || 0), 0) : 0;
+    const выдано = Array.isArray(dd.out) ? dd.out.reduce((a, o) => a + (o.amount || 0), 0) : 0;
+    if (первый) { остаток1 = (dd.carryover || 0); кассаПолная = остаток1; касса = остаток1; первый = false; }
+    else if (dd.carryoverManual === true) { касса = (dd.carryover || 0); }
+    касса += приход - выдано;
+    кассаПолная += приход - выдано;
   }
+  const сдвигОстатка = касса - кассаПолная;   // ручной остаток в середине истории
+
   const W = computeWeekPairDebt();
   const долг = [...W.rows, ...W.overdueRows].reduce((a, r) => a + r.v1, 0);
 
   const COVER = incomeCoverParts(день, true);
-  let доГраницы = 0, неОтнесено = 0, заСтарое = 0;
   const cov = pairPaidCoverage(день, 'fifo', undefined, true);
+  const dOut = state.debtOutDates || {};
 
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > день) break;
+  let доГраницы = 0, выходные = 0, безПары = 0, отдано = 0, долгРасчётный = 0;
+  let неОтнесено = 0, заСтарое = 0;
+  const отданныеПары = new Set();
+
+  for (const d of дни) {
     const dd = state.days[d];
     if (!dd) continue;
-    // приходы раньше границы: в кассе есть, в долге нет
-    if (isWeekday(d) && Array.isArray(dd.in)) {
-      dd.in.forEach((r, idx) => {
-        const p = (r.client || '').trim();
-        if (!p || d >= pairStart(p)) return;
-        доГраницы += calcInRowFinal(r) || 0;
-      });
-    }
+    /* Приходы: раскладываем в том же порядке, в каком их отсеивает
+       pairDebtByIncomes, — иначе один и тот же приход попадёт в две статьи. */
+    if (Array.isArray(dd.in)) dd.in.forEach((r, idx) => {
+      const после1 = calcInRowFinal(r) || 0;
+      if (!после1) return;
+      const p = (r.client || '').trim();
+      if (!p) { безПары += после1; return; }
+      if (!isWeekday(d)) { выходные += после1; return; }
+      if (d < pairStart(p)) { доГраницы += после1; return; }
+      const frac = cov[p + '#' + d + '#' + idx] || 0;
+      const невыдано = после1 * (1 - frac);
+      const gd = dOut[weekMondayStr(d) + '::' + p];
+      if (gd && d <= gd) { отдано += невыдано; if (невыдано > 0.5) отданныеПары.add(p); return; }
+      долгРасчётный += невыдано;
+    });
+    /* Выдачи: сколько из каждой не легло ни на один приход. */
     if (!Array.isArray(dd.out)) continue;
     dd.out.forEach((o, i) => {
       const p = (o.client || '').trim();
       const сумма = o.amount || 0;
       if (!сумма) return;
-      // выдача за приход из закрытого периода — в долге не участвует
       if (d < pairStart(p) || (o.forIn && String(o.forIn).slice(0, 10) < pairStart(p))) {
         заСтарое += сумма;
         return;
@@ -4216,23 +4257,43 @@ function balanceReconcile(dayStr) {
       неОтнесено += Math.max(0, сумма - отнесено);
     });
   }
-  const объяснено = доГраницы - неОтнесено - заСтарое;
+
+  /* Расчётный долг против показанного: ручные коррекции ✏️, пары, целиком
+     помеченные отданными (они уходят в givenRows), и округление до сотен. */
+  const прочее = долгРасчётный - долг;
+  const ручныеПары = Object.keys(state.weekDebtOverrides || {})
+    .filter(k => k.slice(0, k.indexOf('::')) === weekMondayStr(currentDate))
+    .map(k => k.slice(k.indexOf('::') + 2));
+  (W.givenRows || []).forEach(r => отданныеПары.add(r.name));
+
   const разница = касса - долг;
-  return { касса, долг, разница, доГраницы, неОтнесено, заСтарое,
-           необъяснено: разница - объяснено };
+  const статьи = остаток1 + сдвигОстатка + безПары + выходные + доГраницы
+               + отдано + прочее - неОтнесено - заСтарое;
+  return { касса, долг, разница, база: W.grandBase,
+           остаток1, сдвигОстатка, безПары, выходные, доГраницы, отдано, прочее,
+           неОтнесено, заСтарое,
+           отданныеПары: [...отданныеПары], ручныеПары,
+           расхождение: разница - статьи };   // обязано быть 0: проверка тождества
 }
 
 function balanceReconcileHtml(dayStr) {
   const R = balanceReconcile(dayStr);
-  if (Math.abs(R.разница) < 1) return '';
-  const строка = (подпись, знач, цвет) => знач > 0.5 ? `
+  if (Math.abs(R.разница) < 1 && Math.abs(R.база - R.касса) < 1) return '';
+  const строка = (подпись, знач, цвет) => Math.abs(знач) > 0.5 ? `
     <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
       <span style="color:var(--muted)">${подпись}</span>
-      <b style="font-family:var(--font-num);color:${цвет || 'var(--muted-bright)'}">${fmt(знач)}</b>
+      <b style="font-family:var(--font-num);color:${цвет || 'var(--muted-bright)'}">${знач < 0 ? '−' : ''}${fmt(Math.abs(знач))}</b>
     </div>` : '';
+  const списком = (пары) => пары.length
+    ? ` <span style="color:var(--muted);font-size:10px">(${пары.map(escapeHtml).join(', ')})</span>` : '';
   return `<div class="no-print" style="margin-top:10px;padding:10px 12px;border-radius:10px;
       background:rgba(123,140,255,.08);border:1px solid rgba(123,140,255,.3);font-size:11.5px;line-height:1.5">
       <div style="font-weight:700;color:var(--accent3);margin-bottom:4px">Почему касса и долг не совпадают</div>
+      <div style="padding:6px 8px;margin-bottom:6px;border-radius:8px;background:rgba(255,183,77,.10);
+                  border:1px solid rgba(255,183,77,.28);color:#ffb74d;font-size:11px">
+        «База» ${fmt(R.база)} — это приходы <b>до процентов</b>. Касса считается после 1-го %,
+        поэтому с итогом дня базу сравнивать нельзя: после 1-го % это как раз «нам должны» ${fmt(R.долг)}.
+      </div>
       <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
         <span style="color:var(--muted)">итого на конец дня</span>
         <b style="font-family:var(--font-num)">${fmt(R.касса)}</b>
@@ -4247,13 +4308,138 @@ function balanceReconcileHtml(dayStr) {
         <b style="font-family:var(--font-num);color:var(--accent3)">${fmt(R.разница)}</b>
       </div>
       <div style="margin-top:6px;color:var(--muted);font-size:10.5px">из чего складывается:</div>
+      ${строка('остаток, лежавший до первого дня счёта', R.остаток1)}
+      ${строка('ручной переходящий остаток — счёт начат заново', R.сдвигОстатка)}
       ${строка('приходы до начала счёта — в кассе есть, в долге нет', R.доГраницы)}
-      ${строка('выдачи, не отнесённые к приходам — минус', R.неОтнесено, 'var(--expense)')}
-      ${строка('выдачи за приходы из закрытого периода — минус', R.заСтарое)}
-      ${Math.abs(R.необъяснено) > 1 ? строка('необъяснённый остаток', Math.abs(R.необъяснено), 'var(--expense)') : ''}
+      ${строка('приходы в выходные — в долг по парам не входят', R.выходные)}
+      ${строка('приходы без указанной пары — в долг не входят', R.безПары)}
+      ${строка('невыданное по парам с отметкой «отдано»' + списком(R.отданныеПары), R.отдано)}
+      ${строка('ручные коррекции ✏️ и округления' + списком(R.ручныеПары), R.прочее)}
+      ${строка('выдачи, не отнесённые к приходам — минус', -R.неОтнесено, 'var(--expense)')}
+      ${строка('выдачи за приходы из закрытого периода — минус', -R.заСтарое, 'var(--expense)')}
+      ${Math.abs(R.расхождение) > 1 ? строка('⚠️ сверка не сошлась — покажите это разработчику', R.расхождение, 'var(--expense)') : ''}
       ${R.неОтнесено > 0.5 ? `<button class="btn btn-ghost no-print" onclick="askAllocateAll()"
         style="font-size:11px;padding:5px 11px;margin-top:6px;border-color:#ff8a4a;color:#ff8a4a">разнести остатки</button>` : ''}
     </div>`;
+}
+
+/* Приходы, которые лежат в кассе, но в недельный долг по парам не попадают (v223).
+
+   Найдено сквозной ревизией 09.09.2026 при разборе вопроса владельца
+   «база 11 937 329,25 против итога дня 11 820 500». Проверка на 300
+   сценариях: если добавить приход в субботу, шапка пары и отчёт по паре
+   расходятся в 111 случаях из 300.
+
+   Пример на цифрах: пятница — приход 1 000 000 (после 13% → 870 000),
+   суббота — приход 2 000 000 (→ 1 740 000). Касса показывает 1 740 000,
+   отчёт по паре — остаток 2 610 000, а шапка «нам должны» — 870 000.
+   Приход субботы просто исчезает из долга: pairDebtByIncomes и
+   pairPaidCoverage берут только будни (неделя считается пн–пт).
+
+   Расчёт при этом НЕ трогаем — правило «неделя пн–пт» владелец задавал сам.
+   Программа теперь показывает такие приходы отдельным блоком с суммой и
+   переносит их на ближайший будний день по кнопке (дата — данные владельца,
+   поэтому только с подтверждением).
+
+   Вторая причина попасть сюда — приход без указанной пары: он тоже есть
+   в кассе и тоже не участвует ни в одном долге. Такой перенести нельзя —
+   нужно выбрать пару, поэтому он показывается как есть. */
+function offDebtIncomes(dayStr) {
+  const день = dayStr || ledgerDay();
+  const list = [];
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день) break;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      const после1 = calcInRowFinal(r) || 0;
+      if (после1 <= 0.5) return;
+      const p = (r.client || '').trim();
+      if (!p) { list.push({ date: d, idx, pair: '', amount: r.amount || 0, after1: после1, причина: 'без пары' }); return; }
+      if (d < pairStart(p)) return;                      // закрытый период — это норма
+      if (!isWeekday(d)) list.push({ date: d, idx, pair: p, amount: r.amount || 0, after1: после1, причина: 'выходной' });
+    });
+  }
+  return list;
+}
+
+/* Ближайший будний день НЕ ПОЗЖЕ указанного (суббота и воскресенье → пятница
+   той же недели, так что неделя по weekMondayStr не меняется). */
+function prevWeekday(dateStr) {
+  const dt = new Date(dateStr + 'T12:00:00');
+  while (dt.getDay() === 0 || dt.getDay() === 6) dt.setDate(dt.getDate() - 1);
+  return dt.toISOString().slice(0, 10);
+}
+
+/* Переносит приход на другой день ВМЕСТЕ с привязками выдач.
+   Выдачи ссылаются на приход строкой «дата#номер» (forIn), поэтому при
+   переносе едет и ссылка на сам приход, и номера тех приходов исходного дня,
+   что стояли после него, — иначе выдачи молча переедут на соседние приходы. */
+function moveIncomeToDay(fromDate, idx, toDate) {
+  if (fromDate === toDate) return false;
+  const src = state.days[fromDate];
+  if (!src || !Array.isArray(src.in) || !src.in[idx]) return false;
+  const dst = getDay(toDate);
+  if (!Array.isArray(dst.in)) dst.in = [];
+  const row = src.in.splice(idx, 1)[0];
+  const newIdx = dst.in.push(row) - 1;
+  for (const d in state.days) {
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach(o => {
+      if (!o.forIn) return;
+      const части = String(o.forIn).split('#');
+      if (части[0] !== fromDate) return;
+      const n = parseInt(части[1], 10);
+      if (n === idx) o.forIn = toDate + '#' + newIdx;
+      else if (n > idx) o.forIn = fromDate + '#' + (n - 1);
+    });
+  }
+  return true;
+}
+
+function askMoveWeekendIncomes() {
+  const list = offDebtIncomes(ledgerDay()).filter(x => x.причина === 'выходной');
+  if (!list.length) { showToast('Приходов в выходные нет.'); return; }
+  const сумма = list.reduce((a, x) => a + x.after1, 0);
+  const списком = list.map(x => '   ' + formatDateShort(x.date) + ' → ' + formatDateShort(prevWeekday(x.date))
+    + '   ' + x.pair + '   ' + fmt(x.after1)).join('\n');
+  if (!confirm('Перенести приходы из выходных на пятницу той же недели?\n\n' + списком
+    + '\n\nВсего: ' + list.length + ' на ' + fmt(сумма)
+    + '\n\nСуммы и проценты не меняются — меняется только дата, чтобы приход попал'
+    + '\nв недельный долг по паре. Привязанные выдачи поедут вместе с приходом.')) return;
+  // с конца: перенос сдвигает номера приходов внутри дня
+  let сделано = 0;
+  list.slice().reverse().forEach(x => { if (moveIncomeToDay(x.date, x.idx, prevWeekday(x.date))) сделано++; });
+  recalcCarryoversAfter(list[0].date);
+  saveState();
+  render();
+  showToast(сделано ? ('Перенесено приходов: ' + сделано) : 'Переносить оказалось нечего');
+}
+
+function offDebtIncomesHtml(dayStr) {
+  const list = offDebtIncomes(dayStr);
+  if (!list.length) return '';
+  const выходные = list.filter(x => x.причина === 'выходной');
+  const безПары = list.filter(x => x.причина === 'без пары');
+  const сумма = list.reduce((a, x) => a + x.after1, 0);
+  const строки = list.map(x => `
+    <div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;flex-wrap:wrap">
+      <span style="color:var(--muted)">${formatDateShort(x.date)}${x.причина === 'выходной' ? ' (выходной)' : ''}
+        ${x.pair ? '· ' + escapeHtml(x.pair) : '· <b style="color:#ff8a4a">пара не указана</b>'}</span>
+      <b style="font-family:var(--font-num)">${fmt(x.after1)}</b>
+    </div>`).join('');
+  return `<div class="no-print" style="margin-top:10px;padding:10px 12px;border-radius:10px;
+      background:rgba(255,138,74,.10);border:1px solid rgba(255,138,74,.35);font-size:11.5px;line-height:1.5">
+    <div style="font-weight:700;color:#ff8a4a;margin-bottom:4px">⚠️ Эти приходы в долг по парам не попали — ${fmt(сумма)}</div>
+    <div style="color:var(--muted);font-size:10.5px;margin-bottom:5px">
+      Деньги в кассе есть, а в «нам должны» их нет: недельный долг считается только по будням и только по парам.</div>
+    ${строки}
+    ${выходные.length ? `<button class="btn btn-ghost no-print" onclick="askMoveWeekendIncomes()"
+      style="font-size:11px;padding:5px 11px;margin-top:7px;border-color:#ff8a4a;color:#ff8a4a">перенести на пятницу</button>` : ''}
+    ${безПары.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10.5px">
+      Приход без пары перенести нельзя — откройте его день и выберите пару.</div>` : ''}
+  </div>`;
 }
 
 /* Выдачи, у которых часть суммы не отнесена ни к одному приходу (v219).
@@ -4991,7 +5177,9 @@ function renderWeekDebtSummary() {
 
   const { rows, overdueRows, totalBase, total, total2, totalDiff,
            overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff } = computeWeekPairDebt();
-  if (!rows.length && !overdueRows.length) { box.innerHTML = ''; return; }
+  /* Пар в списке нет — но деньги в кассе могут быть. Тогда показываем одну
+     сверку: без неё разница просто пропадала бы с экрана (v223). */
+  if (!rows.length && !overdueRows.length) { box.innerHTML = offDebtIncomesHtml(currentDate) + balanceReconcileHtml(currentDate); return; }
 
   const body = rows.map(r => {
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
@@ -5036,6 +5224,7 @@ function renderWeekDebtSummary() {
   </div>` : '';
 
   const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff)
+    + offDebtIncomesHtml(currentDate)      // приходы вне долга (v223)
     + balanceReconcileHtml(currentDate);   // сверка кассы и долга (v221)
 
   box.innerHTML = mainBlock + overdueBlock;
