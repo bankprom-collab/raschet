@@ -1460,7 +1460,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v221</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v222</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -6264,7 +6264,21 @@ function openHandModal() {
   const box = document.getElementById('hand-modal-body');
   if (!box) return;
   const hw = handTotals(ledgerDay());
-  const all = handOpenRows(ledgerDay());
+  const HSraw = handSettlement(ledgerDay());
+  /* В таблице — только сделки, по которым ещё не получено (v222). Владелец
+     09.09.2026: «ввёл цифру, а она не ушла — эта простыня должна уйти».
+     Раньше показывались все выданные сделки подряд, без учёта полученного;
+     у куратора закрытые давно уходят в архив, здесь этого не хватало.
+     Остаток по сделке берём из handSettlement — там гашение по дате выдачи. */
+  const restBy = {};
+  HSraw.accr.forEach(a => { restBy[a.pair + '#' + a.date + '#' + a.idx] = a; });
+  const all = handOpenRows(ledgerDay()).filter(r => {
+    const a = restBy[r.pair + '#' + r.date + '#' + r.idx];
+    if (!a) return true;                       // нет процента куратора и т.п. — оставляем
+    r.gotPart = a.paid;                        // сколько по ней уже получено
+    r.restHand = a.rest;
+    return a.rest > 0.5;                       // закрытые уходят в архив
+  });
   const LIMIT = 40;
   const rows = all.slice(-LIMIT);   // по возрастанию даты — как в таблице куратора (v213)
   const hidden = all.length - rows.length;
@@ -6281,6 +6295,7 @@ function openHandModal() {
   }), { deals: 0, curator: 0, hand: 0 });
   const gRynok = sumOf(all.filter(r => (r.pair || '').trim() === RYNOK));
   const gOther = sumOf(all.filter(r => (r.pair || '').trim() !== RYNOK));
+  const закрытых = HSraw.closed.length + (HSraw.byReset ? HSraw.byReset.length : 0);
 
   const HS = handSettlement(ledgerDay());          // получения и черта (v212)
   const gotTotal = HS.pays.reduce((x, p) => x + p.amount, 0);
@@ -6314,7 +6329,9 @@ function openHandModal() {
 
   if (!rows.length) {
     box.innerHTML = head
-      + '<div style="color:var(--muted);padding:8px 0">Выданных сделок пока нет — пока приход не выдан на руки, считать нечего.</div>'
+      + `<div style="color:var(--muted);padding:8px 0">${закрытых
+          ? 'Всё полученное закрыто — новых сделок к получению нет.'
+          : 'Выданных сделок пока нет — пока приход не выдан на руки, считать нечего.'}</div>`
       + handExcludedBlockHtml(ledgerDay());
     document.getElementById('hand-modal').classList.add('open');
     return;
@@ -6345,6 +6362,8 @@ function openHandModal() {
         ? ` <span style="color:#ff8a4a;font-size:10.5px">выдано ${Math.round(r.frac * 100)}%</span>` : '';
       const noDeal = (!r.deal && r.curator)
         ? `<div style="color:var(--expense);font-size:10px;font-family:var(--font-ui)">второй % не задан — прибыли нет</div>` : '';
+      const gotNote = (r.gotPart > 0.5)
+        ? `<div style="color:var(--accent);font-size:10px;font-family:var(--font-ui)">получено ${fmt(r.gotPart)} из ${fmt(r.hand)}</div>` : '';
       acc += r.hand;
       const gotBy = gotDates.reduce((sum, d) => d <= (paid || r.date) ? sum + gotByDate[d] : sum, 0);
       const due = Math.max(0, acc - gotBy);
@@ -6353,7 +6372,7 @@ function openHandModal() {
       <tr>
         <td style="color:var(--muted);white-space:nowrap">${formatDateShort(r.date)}</td>
         <td style="white-space:nowrap;color:var(--accent)">${paid ? formatDateShort(paid) : '—'}${partsNote}</td>
-        <td>${escapeHtml(r.pair)}${part}${noDeal}</td>
+        <td>${escapeHtml(r.pair)}${part}${noDeal}${gotNote}</td>
         <td style="text-align:right;font-family:var(--font-num)">${fmt(r.amount)}</td>
         <td style="text-align:right;font-family:var(--font-num);font-weight:700;color:var(--accent)">${fmt(r.hand)}</td>
         <td style="text-align:right;font-family:var(--font-num);font-weight:${lastOfDay ? '700' : '400'};color:${due > 0 ? 'var(--accent)' : 'var(--muted)'}">${fmt(due)}</td>
@@ -6414,6 +6433,28 @@ function openHandModal() {
         <button class="btn btn-ghost no-print" onclick="askHandResetUndo()"
           style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:3px 10px;margin-left:6px">Убрать черту</button>
       </div>` : '';
+  /* Архив полученного — как у куратора (v222): сделки, по которым деньги
+     уже забраны, из таблицы уходят, но остаются видимыми. */
+  const архив = HSraw.closed.slice().reverse();
+  const архивБлок = (!архив.length && !(HSraw.byReset || []).length) ? '' : `
+    <details class="cm-arch" style="margin-top:10px">
+      <summary>🗄 Уже получено — сделок: ${архив.length + (HSraw.byReset || []).length}</summary>
+      ${(HSraw.byReset || []).length ? `<div class="cm-arch-day">
+        <div class="cm-arch-head"><span>Закрыто чертой ${formatDateShort(HSraw.reset)}</span>
+          <b>${fmt(HSraw.byReset.reduce((a, x) => a + (x.resetAmount || x.sum), 0))}</b></div>
+        ${HSraw.byReset.map(a => `<div class="cm-arch-row">
+            <span>${formatDateShort(a.date)} · ${escapeHtml(a.pair)}</span>
+            <span style="font-family:var(--font-num)">${fmt(a.resetAmount || a.sum)}</span>
+          </div>`).join('')}
+      </div>` : ''}
+      ${архив.map(a => `<div class="cm-arch-row">
+          <span>${formatDateShort(a.date)} · ${escapeHtml(a.pair)}
+            <span style="color:var(--muted);font-family:var(--font-ui);font-size:10px">получено ${
+              a.closedBy.map(c => formatDateShort(c.date)).join(', ')}</span></span>
+          <span style="font-family:var(--font-num)">${fmt(a.sum)}</span>
+        </div>`).join('')}
+    </details>`;
+
   const gotBlock = `
     <div class="cm-paid-block" style="border-color:rgba(0,229,176,.3)">
       <div class="cm-paid-head" style="color:var(--accent)">📥 Получено на руки</div>
@@ -6444,7 +6485,7 @@ function openHandModal() {
     </div>`;
 
   box.innerHTML = head + unallocatedHtml(ledgerDay()) + unlinkedPayoutsHtml(ledgerDay()) + body + more
-    + handExcludedBlockHtml(ledgerDay()) + curatorPendingHtml(ledgerDay()) + gotBlock +
+    + архивБлок + handExcludedBlockHtml(ledgerDay()) + curatorPendingHtml(ledgerDay()) + gotBlock +
     `<div class="hm-foot"><span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px">Итого на руки</span>
        <span class="v">${fmt(hw.hand)}</span></div>
      <div class="hm-note">Здесь все сделки, выданные на руки, начиная с 3 августа 2026 — без деления на недели. Всё, что было раньше, в счёт не входит. По каждой: итог сделки минус доля куратора; если процента куратора нет, вся сделка идёт на руки. То же число показывают плитка на дашборде и строка «= На руки» под приходами.</div>`;
