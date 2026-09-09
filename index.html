@@ -294,6 +294,14 @@
     opacity: .5; transition: opacity .2s, box-shadow .2s, border-color .2s;
   }
   .week-debt-block:hover { opacity: .92; }
+  /* На телефоне наведения нет, и блок навсегда оставался полупрозрачным (v226).
+     Владелец 10.09.2026 про разбор под шапкой: «где её смотреть, что делать» —
+     он его просто не видел: весь блок задолженности показывался в половину
+     яркости каждый день, кроме пятницы. Приглушение оставляем только там,
+     где мышь есть и наведением можно вернуть полную яркость. */
+  @media (hover: none), (pointer: coarse) {
+    .week-debt-block { opacity: 1; }
+  }
   .week-debt-block.fri {
     opacity: 1; border-color: rgba(255,138,74,.5);
     background: rgba(255,138,74,.07);
@@ -1460,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v225</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v226</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
