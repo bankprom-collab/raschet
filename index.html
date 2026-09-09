@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v227</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v228</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2945,7 +2945,13 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
       const box = (wk >= weekStart) ? cur : ovd;
       const after1 = calcInRowFinal(r) || 0;
       const paid = after1 * frac;               // фактически выданное по приходу
-      box.base += (r.amount || 0) * left;
+      /* База — ПОЛНАЯ сумма прихода, а не его невыданная доля (v228).
+         Владелец 10.09.2026 про Мухтар-Ленин: приход 1 201 691, из него закрыто
+         759 400, в шапке стояло «база 323 803,41» — доля от суммы. Его слова:
+         «база остаётся 1 201 691, которые надо базой записать. Остальное всё
+         убирай». Приход, закрытый целиком, в базу не попадает вовсе — его
+         отсекает проверка left выше. */
+      box.base += (r.amount || 0);
       box.v1 += after1 - paid;
       if (r.pct !== null && r.pct !== undefined && r.pct > 0) box.pct1 = r.pct;
       /* Обе суммы — от НЕВЫДАННОЙ части прихода (v214, возврат к исходному).
@@ -4230,6 +4236,7 @@ function balanceReconcile(dayStr) {
   const dOut = state.debtOutDates || {};
 
   let доГраницы = 0, безПары = 0, отдано = 0, долгS = 0, долгДоОпорного = 0;
+  let первыйПроцент = 0, ужеВыдано = 0;   // v228: две ступени от базы к долгу
   let отнесеноПоПриходам = 0, всеВыдачи = 0, неОтнесено = 0;
   const отданныеПары = new Set();
 
@@ -4249,7 +4256,10 @@ function balanceReconcile(dayStr) {
         if (!p || d < pairStart(p)) return;
         const gdd = dOut[weekMondayStr(d) + '::' + p];
         if (gdd && d <= gdd) return;
+        if (невыдано <= 0.5) return;
         долгДоОпорного += невыдано;
+        первыйПроцент += (r.amount || 0) - после1;
+        ужеВыдано += после1 * frac;
         return;
       }
       отнесеноПоПриходам += после1 * frac;
@@ -4258,6 +4268,12 @@ function balanceReconcile(dayStr) {
       const gd = dOut[weekMondayStr(d) + '::' + p];
       if (gd && d <= gd) { отдано += невыдано; if (невыдано > 0.5) отданныеПары.add(p); return; }
       долгS += невыдано;
+      /* Приход попал в базу целиком (v228) — значит от базы до «нам должны»
+         две ступени: удержанный 1-й процент и уже выданное по этому приходу. */
+      if (невыдано > 0.5) {
+        первыйПроцент += (r.amount || 0) - после1;
+        ужеВыдано += после1 * frac;
+      }
     });
     if (!вПериоде || !Array.isArray(dd.out)) continue;
     dd.out.forEach((o, i) => {
@@ -4281,13 +4297,10 @@ function balanceReconcile(dayStr) {
     .map(k => k.slice(k.indexOf('::') + 2));
   (W.givenRows || []).forEach(r => отданныеПары.add(r.name));
 
-  /* Первая ступень разбора: база — это приходы ДО процентов, «нам должны» —
-     они же после 1-го %. Разность и есть удержанный 1-й процент (v225). */
-  const первыйПроцент = W.grandBase - долг;
   const разница = касса - долг;
   const статьи = остатокНаНачало + безПары + доГраницы + отдано
                + прочее - выдачиМимо - долгДоОпорного;
-  return { касса, долг, разница, база: W.grandBase, первыйПроцент,
+  return { касса, долг, разница, база: W.grandBase, первыйПроцент, ужеВыдано,
            опорный, остатокНаНачало, безПары, доГраницы, отдано,
            выдачиМимо, неОтнесено, долгДоОпорного, прочее,
            отданныеПары: [...отданныеПары], ручныеПары,
@@ -4337,6 +4350,7 @@ function balanceReconcileHtml(dayStr) {
         <b style="font-family:var(--font-num);font-size:13px;white-space:nowrap">${fmt(R.база)}</b>
       </div>
       ${ступень('1-й процент по этим приходам', '−', R.первыйПроцент, 'var(--expense)')}
+      ${ступень('уже выдано по этим приходам', '−', R.ужеВыдано, 'var(--expense)')}
       ${итог('нам должны по парам', R.долг, '#ff8a4a')}
       ${ступень('долг за приходы раньше ' + дата + ' — этих денег в кассе нет', '−', R.долгДоОпорного, 'var(--expense)')}
       ${дв('остаток на ' + дата + ', с которого идёт счёт кассы', R.остатокНаНачало)}
@@ -4786,6 +4800,7 @@ function pairRemainingAfterGivenDate(dayStr, pairName, afterDate) {
   const thisWeek = weekMondayStr(dayStr);
   let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
   let has2 = false, pct1 = null, pct2 = null;
+  const cov = pairPaidCoverage(dayStr, 'fifo', undefined, true);   // v228: для базы
   const allDays = Object.keys(state.days).sort();
   for (const d of allDays) {
     if (d > dayStr || weekMondayStr(d) !== thisWeek) continue;
@@ -4793,9 +4808,10 @@ function pairRemainingAfterGivenDate(dayStr, pairName, afterDate) {
     const dd = state.days[d];
     if (!dd) continue;
     if (Array.isArray(dd.in)) {   // v224: приход считается в любой день недели
-      dd.in.forEach(r => {
+      dd.in.forEach((r, idx) => {
         if ((r.client || '').trim() !== pair) return;
-        accBase += (r.amount || 0);
+        // В базу — полная сумма прихода, если он закрыт не целиком (v228)
+        if ((cov[pair + '#' + d + '#' + idx] || 0) < 0.9995) accBase += (r.amount || 0);
         acc1 += calcInRowFinal(r);
         if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
         if (hasSecondPct(r)) { acc2 += r100(r.total2); has2 = true; pct2 = r.pct2; }
@@ -4812,7 +4828,7 @@ function pairRemainingAfterGivenDate(dayStr, pairName, afterDate) {
   const v2 = (has2 && net > 0) ? r100(acc2 * frac) : null;   // v214
   return {
     name: pair,
-    base: r100(accBase * frac),
+    base: accBase,   // v228: полные суммы, без округления и без доли
     v1: remaining,
     v2: v2,
     has2: has2 && v2 !== null && v2 > 0,
