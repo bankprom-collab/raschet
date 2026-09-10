@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v228</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v229</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5148,6 +5148,90 @@ function pairDueHtml(pair) {
     </div>`;
 }
 
+/* Частично выданные приходы — арифметика прямо в строке пары (v229).
+
+   Владелец 10.09.2026: «надо, чтобы обязательно после указания процентов,
+   если идёт выдача частичная, эта сумма указывалась бы… из чего складывается
+   остаток по первой части процентов, например 13% и 15%: сумма, которая там
+   остаётся, было видно, когда отдана и как из этих сумм она вычитается.
+   И какой остаток к выдаче остаётся?»
+
+   Показываем по каждому НЕ до конца закрытому приходу:
+
+     28 авг · приход 1 201 691
+        13,5%:  1 039 500 − 759 400 (24 авг) = осталось 280 100
+        16%:    1 009 400 − 737 400          = осталось 272 000
+
+   ⚠️ По 2-му проценту выдача НЕ вычитается напрямую: остаток считается долей
+   невыданного (v214, по прямой просьбе владельца). Поэтому вычитаемое берём
+   как «после 2-го % − остаток» — тогда строка сходится до рубля при любом
+   округлении, а не показывает 250 000 там, где на самом деле 272 000.
+
+   Приходы, которых выдача не касалась, сюда не идут: для них вычитать нечего,
+   а список должен оставаться коротким — он висит прямо в строке пары. */
+function pairPartialHtml(pair, scope) {
+  const p = (pair || '').trim();
+  if (!p) return '';
+  const день = currentDate;
+  const cover = pairPaidCoverage(день, 'fifo', undefined, true);
+  const PARTS = incomeCoverParts(день, true);
+  const start = pairStart(p);
+  const thisWeek = weekMondayStr(день);
+  const dOut = state.debtOutDates || {};
+  const строки = [];
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день) break;
+    if (d < start) continue;
+    const wk = weekMondayStr(d);
+    if (scope === 'current' && wk < thisWeek) continue;
+    if (scope === 'overdue' && wk >= thisWeek) continue;
+    const gd = dOut[wk + '::' + p];
+    if (gd && d <= gd) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() !== p) return;
+      const frac = cover[p + '#' + d + '#' + idx] || 0;
+      if (frac <= 0.0005 || frac >= 0.9995) return;   // только частично выданные
+      const after1 = calcInRowFinal(r) || 0;
+      const остаток1 = r100(after1 * (1 - frac));
+      const выдано1 = after1 - остаток1;
+      const after2 = hasSecondPct(r) ? r100(r.total2) : null;
+      const остаток2 = (after2 !== null) ? r100(after2 * (1 - frac)) : null;
+      const выдано2 = (after2 !== null) ? after2 - остаток2 : null;
+      const parts = ((PARTS[p + '#' + d + '#' + idx] || {}).parts) || [];
+      const когда = parts.length
+        ? parts.map(x => fmt(x.amount) + ' <span style="opacity:.7">(' + formatDateShort(x.date) + ')</span>').join(' − ')
+        : fmt(выдано1);
+      const пц = (v) => (v === null || v === undefined) ? '' : String(v).replace('.', ',') + '%';
+      строки.push(`
+        <div style="margin-top:5px">
+          <div style="color:var(--muted-bright)">${formatDateShort(d)} · приход <b style="font-family:var(--font-num)">${fmt(r.amount || 0)}</b></div>
+          <div style="padding-left:10px">
+            <span style="color:#ff8a4a">${пц(r.pct) || '1-й %'}:</span>
+            <span style="font-family:var(--font-num)">${fmt(after1)}</span> −
+            <span style="font-family:var(--font-num);color:var(--expense)">${когда}</span> =
+            <b style="font-family:var(--font-num);color:#ff8a4a">осталось ${fmt(остаток1)}</b>
+          </div>
+          ${after2 !== null ? `
+          <div style="padding-left:10px">
+            <span style="color:#818cf8">${пц(r.pct2) || '2-й %'}:</span>
+            <span style="font-family:var(--font-num)">${fmt(after2)}</span> −
+            <span style="font-family:var(--font-num);color:var(--expense)">${fmt(выдано2)}</span> =
+            <b style="font-family:var(--font-num);color:#818cf8">осталось ${fmt(остаток2)}</b>
+          </div>` : ''}
+        </div>`);
+    });
+  }
+  if (!строки.length) return '';
+  return `<div style="margin-top:6px;padding:7px 9px;border-radius:8px;
+      background:rgba(255,138,74,.07);border:1px solid rgba(255,138,74,.22);
+      font-size:11px;line-height:1.55;font-family:var(--font-ui)">
+    <div style="color:#ff8a4a;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px">Частично выдано</div>
+    ${строки.join('')}
+  </div>`;
+}
+
 function renderWeekDebtSummary() {
   const box = document.getElementById('week-debt-summary');
   if (!box) return;
@@ -5181,6 +5265,7 @@ function renderWeekDebtSummary() {
           <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button>
         </span>
         <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+        ${pairPartialHtml(r.name, 'current')}
         ${pairDueHtml(r.name)}
         ${pairProgressHtml(r.name)}
       </div>
@@ -5313,6 +5398,7 @@ function openDebtOutModal() {
               <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс, напр. «-Авангард»)">🏷️</button>
             </span>
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+            ${pairPartialHtml(r.name, 'overdue')}
             ${pairDueHtml(r.name)}
           </div>
           <details class="wds-break-details">
