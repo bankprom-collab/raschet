@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v232</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v233</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5324,6 +5324,169 @@ function setPairStart(encodedPair, dateStr) {
   showToast(dateStr ? ('Пара считается с ' + formatDateShort(dateStr)) : 'Счёт пары — с общей даты');
 }
 
+/* Удаление записей пары до даты (v233).
+
+   Владелец 10.09.2026: «Сделай кнопку „Удалить все записи до даты“».
+   До этого была только граница счёта («🧹 Счёт с», v232) — она записи прячет,
+   но не удаляет, и владелец справедливо заметил: если вводить поверх, старое
+   всплывёт, как только дату снимешь. Ему нужен чистый лист по паре.
+
+   Удаляются приходы и выдачи ОДНОЙ пары строго раньше даты. Дата берётся
+   из поля «🧹 Счёт с» — то есть та же граница, которую он уже выставил
+   и увидел в расчёте; отдельно её вводить не надо, и промахнуться нечем.
+
+   ⚠️ Это единственное место в программе, где записи удаляются насовсем.
+   Поэтому: копия в слот pre-purge, полный разбор в подтверждении (что уйдёт,
+   каким станет итог на конец дня) и ВТОРОЕ подтверждение перед удалением.
+
+   ⚠️ Привязки выдач (forIn = «дата#номер») ломаются дважды: удаляется сам
+   приход и сдвигаются номера соседей в том же дне. Поэтому пересобираем
+   ссылки по всей базе — у ВСЕХ пар, а не только у этой: в одном дне могут
+   лежать приходы разных пар, и удаление наших сдвигает чужие номера. */
+function pairPurgePreview(pair, dateStr) {
+  const p = (pair || '').trim();
+  const день = ledgerDay();
+  let приходов = 0, суммаПриходов = 0, выдач = 0, суммаВыдач = 0, осиротеют = 0;
+  const удаляемые = {};            // дата → набор номеров приходов
+  for (const d of Object.keys(state.days).sort()) {
+    if (d >= dateStr) continue;
+    const dd = state.days[d];
+    if (!dd) continue;
+    (dd.in || []).forEach((r, idx) => {
+      if ((r.client || '').trim() !== p) return;
+      приходов++; суммаПриходов += (r.amount || 0);
+      (удаляемые[d] || (удаляемые[d] = new Set())).add(idx);
+    });
+    (dd.out || []).forEach(o => {
+      if ((o.client || '').trim() !== p) return;
+      выдач++; суммаВыдач += (o.amount || 0);
+    });
+  }
+  // выдачи, которые останутся, но потеряют свой приход
+  for (const d of Object.keys(state.days)) {
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach(o => {
+      if (!o.forIn) return;
+      if (d < dateStr && (o.client || '').trim() === p) return;   // сама удалится
+      const части = String(o.forIn).split('#');
+      const набор = удаляемые[части[0]];
+      if (набор && набор.has(parseInt(части[1], 10))) осиротеют += (o.amount || 0);
+    });
+  }
+  return { приходов, суммаПриходов, выдач, суммаВыдач, осиротеют,
+           итогДо: цепочкаИтога(state.days, день),
+           итогПосле: цепочкаИтога(удалитьИзКопии(state.days, p, dateStr), день) };
+}
+
+/* Итог на конец дня по цепочке: день с ручным остатком начинает счёт заново.
+   Та же логика, что в balanceReconcile, — считаем по переданному набору дней. */
+function цепочкаИтога(days, день) {
+  let итог = 0, первый = true;
+  for (const d of Object.keys(days).sort()) {
+    if (d > день) break;
+    const dd = days[d];
+    if (!dd) continue;
+    if (первый || dd.carryoverManual === true) { итог = (dd.carryover || 0); первый = false; }
+    if (Array.isArray(dd.in)) итог += dd.in.reduce((a, r) => a + (calcInRowFinal(r) || 0), 0);
+    if (Array.isArray(dd.out)) итог -= dd.out.reduce((a, o) => a + (o.amount || 0), 0);
+  }
+  return итог;
+}
+
+function удалитьИзКопии(days, pair, dateStr) {
+  const копия = JSON.parse(JSON.stringify(days));
+  for (const d of Object.keys(копия)) {
+    if (d >= dateStr) continue;
+    const dd = копия[d];
+    if (!dd) continue;
+    if (Array.isArray(dd.in)) dd.in = dd.in.filter(r => (r.client || '').trim() !== pair);
+    if (Array.isArray(dd.out)) dd.out = dd.out.filter(o => (o.client || '').trim() !== pair);
+  }
+  return копия;
+}
+
+function askPurgePairBefore(encodedPair) {
+  const pair = decodeURIComponent(encodedPair);
+  const dateStr = (state.pairStart || {})[pair];
+  if (!dateStr) { alert('Сначала поставьте дату в поле «🧹 Счёт с» — до неё и будут удалены записи.'); return; }
+  const d = pairPurgePreview(pair, dateStr);
+  if (!d.приходов && !d.выдач) { showToast('Записей раньше ' + formatDateShort(dateStr) + ' по этой паре нет.'); return; }
+
+  const строки = [
+    'УДАЛИТЬ записи пары «' + pair + '» раньше ' + formatDateShort(dateStr) + '?',
+    '',
+    '   приходов: ' + d.приходов + ' на ' + fmt(d.суммаПриходов),
+    '   выдач: ' + d.выдач + ' на ' + fmt(d.суммаВыдач),
+    '',
+    'Итого на конец дня: ' + fmt(d.итогДо) + '  →  ' + fmt(d.итогПосле)
+  ];
+  if (d.осиротеют > 0.5) {
+    строки.push('');
+    строки.push('⚠️ Выдачи на ' + fmt(d.осиротеют) + ' привязаны к удаляемым приходам.');
+    строки.push('Они останутся, но потеряют привязку — их надо будет разнести заново.');
+  }
+  строки.push('');
+  строки.push('Это НЕЛЬЗЯ отменить. Копия сохранится в «Синхронизация → Резервные копии».');
+  if (!confirm(строки.join('\n'))) return;
+  if (!confirm('Точно удалить? Записей: ' + (d.приходов + d.выдач) + '.')) return;
+
+  backupSlot('pre-purge');
+
+  /* Считаем карту «старый номер → новый» ДО того, как что-то удалим:
+     после splice номера уже другие. */
+  const карта = {};        // дата → { старыйНомер: новыйНомер | null }
+  for (const dd0 of Object.keys(state.days).sort()) {
+    if (dd0 >= dateStr) continue;
+    const dd = state.days[dd0];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    const m = {};
+    let n = 0;
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() === pair) m[idx] = null;
+      else m[idx] = n++;
+    });
+    карта[dd0] = m;
+  }
+
+  let убрано = 0;
+  for (const d0 of Object.keys(state.days).sort()) {
+    if (d0 >= dateStr) continue;
+    const dd = state.days[d0];
+    if (!dd) continue;
+    if (Array.isArray(dd.in)) {
+      const было = dd.in.length;
+      dd.in = dd.in.filter(r => (r.client || '').trim() !== pair);
+      убрано += было - dd.in.length;
+    }
+    if (Array.isArray(dd.out)) {
+      const было = dd.out.length;
+      dd.out = dd.out.filter(o => (o.client || '').trim() !== pair);
+      убрано += было - dd.out.length;
+    }
+  }
+
+  // пересобираем привязки по ВСЕЙ базе: номера приходов в этих днях сдвинулись
+  for (const d0 of Object.keys(state.days)) {
+    const dd = state.days[d0];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach(o => {
+      if (!o.forIn) return;
+      const части = String(o.forIn).split('#');
+      const m = карта[части[0]];
+      if (!m) return;
+      const нов = m[parseInt(части[1], 10)];
+      o.forIn = (нов === null || нов === undefined) ? null : (части[0] + '#' + нов);
+    });
+  }
+
+  const первыйДень = Object.keys(state.days).sort()[0];
+  recalcCarryoversAfter(первыйДень);
+  saveState();
+  render();
+  showToast('Удалено записей: ' + убрано);
+}
+
 /* Поле «🧹 Счёт с» для строки пары — рядом с «Числом отдачи». */
 function pairStartFieldHtml(pair) {
   const p = (pair || '').trim();
@@ -5334,7 +5497,10 @@ function pairStartFieldHtml(pair) {
     <input type="date" class="wds-date-inp" value="${свой}"
       onchange="setPairStart('${nameAttr}', this.value)"
       title="Начало счёта по этой паре. Приходы и выдачи раньше этой даты в расчёт не идут. По умолчанию — общая дата ${formatDateShort(handStart())}.">
-    ${свой ? `<button class="wds-date-clear" onclick="setPairStart('${nameAttr}', '')" title="Вернуть общую дату">✕</button>` : ''}
+    ${свой ? `<button class="wds-date-clear" onclick="setPairStart('${nameAttr}', '')" title="Вернуть общую дату">✕</button>
+      <button class="btn btn-ghost no-print" onclick="askPurgePairBefore('${nameAttr}')"
+        style="font-size:10.5px;padding:4px 9px;margin-left:6px;border-color:var(--expense);color:var(--expense)"
+        title="Удалить приходы и выдачи этой пары раньше ${formatDateShort(свой)} — насовсем">🗑 удалить записи до ${formatDateShort(свой)}</button>` : ''}
   </div>`;
 }
 
@@ -10768,6 +10934,7 @@ function backupKeyLabel(key) {
   if (suffix === 'pre-sync') return 'До замены данными с Google Drive';
   if (suffix === 'pre-import') return 'До импорта из файла';
   if (suffix === 'pre-restore') return 'До восстановления из копии';
+  if (suffix === 'pre-purge') return 'До удаления записей пары';
   if (/^\d{4}-\d{2}-\d{2}$/.test(suffix)) {
     return 'Копия за ' + (typeof formatDateShort === 'function' ? formatDateShort(suffix) : suffix);
   }
