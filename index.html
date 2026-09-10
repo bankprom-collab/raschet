@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v230</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v231</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2927,8 +2927,8 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
   const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
   const dOut = state.debtOutDates || {};
   const start = pairStart(pair);   // v205: у пары может быть своя дата
-  const cur = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
-  const ovd = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null };
+  const cur = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null, markedGiven: null };
+  const ovd = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null, markedGiven: null };
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     if (d < start) continue;   // владелец 28.08.2026: «мне нужны только августовские»
@@ -2936,13 +2936,21 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
     if (!dd || !Array.isArray(dd.in)) continue;
     const wk = weekMondayStr(d);
     const gd = dOut[wk + '::' + pair];
-    if (gd && d <= gd) continue;                 // закрыт числом отдачи
+    /* Отметка «Число отдачи» БОЛЬШЕ НЕ ЗАКРЫВАЕТ приход, по которому не было
+       выдачи (v231). Владелец 10.09.2026: «Верни Мухтар-Ленин. Почему его нет
+       вообще в отчётности?» Раньше здесь стоял ранний выход, и отметка убирала
+       из долга ВСЕ приходы по эту дату — вместе с невыданными. Пара исчезала
+       целиком, хотя в отчёте по паре остаток был на месте.
+       Приход, выданный полностью, отсекается проверкой left ниже — как любой
+       другой. Так задолженность считает то же, что покрытие, счёт куратора
+       и «На руки»: в realOnly они отметку и раньше не слушали. */
     dd.in.forEach((r, idx) => {
       if ((r.client || '').trim() !== pair) return;
       const frac = cover[pair + '#' + d + '#' + idx] || 0;
       const left = 1 - frac;
       if (left <= 0.0005) return;
       const box = (wk >= weekStart) ? cur : ovd;
+      if (gd && d <= gd) box.markedGiven = gd;   // отметка стоит, а деньги висят
       const after1 = calcInRowFinal(r) || 0;
       const paid = after1 * frac;               // фактически выданное по приходу
       /* База — ПОЛНАЯ сумма прихода, а не его невыданная доля (v228).
@@ -4235,7 +4243,8 @@ function balanceReconcile(dayStr) {
   const cov = pairPaidCoverage(день, 'fifo', undefined, true);
   const dOut = state.debtOutDates || {};
 
-  let доГраницы = 0, безПары = 0, отдано = 0, долгS = 0, долгДоОпорного = 0;
+  let доГраницы = 0, безПары = 0, долгS = 0, долгДоОпорного = 0;
+  const отдано = 0;   // v231: статья закрыта — отметка больше не прячет деньги
   let первыйПроцент = 0, ужеВыдано = 0;   // v228: две ступени от базы к долгу
   let отнесеноПоПриходам = 0, всеВыдачи = 0, неОтнесено = 0;
   const отданныеПары = new Set();
@@ -4254,8 +4263,6 @@ function balanceReconcile(dayStr) {
          могут ещё числиться — это отдельная (минусовая) ступень. */
       if (!вПериоде) {
         if (!p || d < pairStart(p)) return;
-        const gdd = dOut[weekMondayStr(d) + '::' + p];
-        if (gdd && d <= gdd) return;
         if (невыдано <= 0.5) return;
         долгДоОпорного += невыдано;
         первыйПроцент += (r.amount || 0) - после1;
@@ -4265,8 +4272,9 @@ function balanceReconcile(dayStr) {
       отнесеноПоПриходам += после1 * frac;
       if (!p) { безПары += после1; return; }
       if (d < pairStart(p)) { доГраницы += после1; return; }
-      const gd = dOut[weekMondayStr(d) + '::' + p];
-      if (gd && d <= gd) { отдано += невыдано; if (невыдано > 0.5) отданныеПары.add(p); return; }
+      /* v231: отметка «отдано» больше не выкидывает приход из долга — деньги
+         идут в «нам должны», отдельной статьи в разборе для них нет. */
+      if (dOut[weekMondayStr(d) + '::' + p]) отданныеПары.add(p);
       долгS += невыдано;
       /* Приход попал в базу целиком (v228) — значит от базы до «нам должны»
          две ступени: удержанный 1-й процент и уже выданное по этому приходу. */
@@ -4298,7 +4306,7 @@ function balanceReconcile(dayStr) {
   (W.givenRows || []).forEach(r => отданныеПары.add(r.name));
 
   const разница = касса - долг;
-  const статьи = остатокНаНачало + безПары + доГраницы + отдано
+  const статьи = остатокНаНачало + безПары + доГраницы
                + прочее - выдачиМимо - долгДоОпорного;
   return { касса, долг, разница, база: W.grandBase, первыйПроцент, ужеВыдано,
            опорный, остатокНаНачало, безПары, доГраницы, отдано,
@@ -4356,7 +4364,6 @@ function balanceReconcileHtml(dayStr) {
       ${дв('остаток на ' + дата + ', с которого идёт счёт кассы', R.остатокНаНачало)}
       ${дв('приходы до начала счёта — в кассе есть, в долге нет', R.доГраницы)}
       ${дв('приходы без указанной пары', R.безПары)}
-      ${дв('невыданное по парам с отметкой «отдано»' + списком(R.отданныеПары), R.отдано)}
       ${дв('ручные коррекции ✏️ и округления' + списком(R.ручныеПары), R.прочее)}
       ${дв('выдачи мимо приходов этого периода', -R.выдачиМимо, 'var(--expense)')}
       ${итог('итого на конец дня', R.касса, '#00e5b0')}
@@ -4890,7 +4897,8 @@ function computeWeekPairDebt() {
           name: p, base: split.current.base || 0, v1: split.current.v1,
           v2: (split.current.has2 && split.current.v2 > 0) ? split.current.v2 : null,
           has2: split.current.has2 && split.current.v2 > 0,
-          pct1: split.current.pct1, pct2: split.current.pct2, carry: false
+          pct1: split.current.pct1, pct2: split.current.pct2, carry: false,
+          givenDate: split.current.markedGiven || null
         });
       }
       if (split.overdue.v1 > 0) {
@@ -4898,7 +4906,8 @@ function computeWeekPairDebt() {
           name: p, base: split.overdue.base || 0, v1: split.overdue.v1,
           v2: (split.overdue.has2 && split.overdue.v2 > 0) ? split.overdue.v2 : null,
           has2: split.overdue.has2 && split.overdue.v2 > 0,
-          pct1: split.overdue.pct1, pct2: split.overdue.pct2, carry: true
+          pct1: split.overdue.pct1, pct2: split.overdue.pct2, carry: true,
+          givenDate: split.overdue.markedGiven || null
         });
       }
       return;
@@ -4928,7 +4937,8 @@ function computeWeekPairDebt() {
         name: 'Вейс(рук)-Рынок', base: split.current.base || 0, v1: split.current.v1,
         v2: (split.current.has2 && split.current.v2 > 0) ? split.current.v2 : null,
         has2: split.current.has2 && split.current.v2 > 0,
-        pct1: split.current.pct1, pct2: split.current.pct2, carry: false
+        pct1: split.current.pct1, pct2: split.current.pct2, carry: false,
+          givenDate: split.current.markedGiven || null
       });
     }
     if (split.overdue.v1 > 0) {
@@ -4936,7 +4946,8 @@ function computeWeekPairDebt() {
         name: 'Вейс(рук)-Рынок', base: split.overdue.base || 0, v1: split.overdue.v1,
         v2: (split.overdue.has2 && split.overdue.v2 > 0) ? split.overdue.v2 : null,
         has2: split.overdue.has2 && split.overdue.v2 > 0,
-        pct1: split.overdue.pct1, pct2: split.overdue.pct2, carry: true
+        pct1: split.overdue.pct1, pct2: split.overdue.pct2, carry: true,
+          givenDate: split.overdue.markedGiven || null
       });
     }
   }
@@ -4980,45 +4991,25 @@ function computeWeekPairDebt() {
     if (r.base === null || r.base === undefined) r.base = 0;
   });
 
-  // ── «Число отдачи» проставлено → пара ОТДАНА ──────────────────────────────
-  // Такая пара ПОЛНОСТЬЮ не показывается: ни в блоке «Задолженность по парам
-  // за неделю», ни в плитке/модалке «Сумма к отдаче», ни в итогах. Это только
-  // ФИЛЬТР поверх готовых сумм — сама расчётная логика выше не меняется.
-  // Вернуть пару (убрать дату) — кнопка «🔍 Проверить пару» в «Сумма к отдаче».
-  // givenRows возвращается для партнёрской выгрузки и диагностики.
+  /* ── «Число отдачи» проставлено ────────────────────────────────────────
+     Раньше такая пара ПОЛНОСТЬЮ убиралась из списка, из плитки и из итогов.
+     v231: пара с непогашенным остатком остаётся — отметка не может закрыть
+     приход, по которому денег не было. Владелец 10.09.2026: «Верни
+     Мухтар-Ленин. Почему его нет вообще в отчётности?»
+
+     Что осталось от отметки: она видна как дата в строке пары и как пометка
+     🔓 «отмечено отдано». Пара, где всё действительно выдано, и так не имеет
+     остатка — её сюда не заносит сам расчёт.
+
+     givenRows сохраняется пустым для партнёрской выгрузки и диагностики,
+     которые на него ссылаются. */
   const givenRows = [];
   {
     const dOut = state.debtOutDates || {};
-    const ovAll = state.weekDebtOverrides || {};
-    for (let i = rows.length - 1; i >= 0; i--) {
+    for (let i = 0; i < rows.length; i++) {
       const gd = dOut[thisWeek + '::' + rows[i].name];
-      if (!gd) continue;
-      // Ручная коррекция ✏️ имеет приоритет — при ней оставляем прежнее поведение
-      // (пара с числом отдачи полностью скрыта), чтобы не спорить с ручной суммой.
-      const ov = ovAll[thisWeek + '::' + rows[i].name];
-      const hasOverride = ov && ov.v1 !== null && ov.v1 !== undefined;
-      // «Число отдачи» закрывает приходы ПО эту дату включительно. Приходы,
-      // добавленные ПОЗЖЕ даты отдачи, — это новый, ещё не отданный долг: пара
-      // снова показывается на эту (меньшую) сумму. Если после даты отдачи ничего
-      // нового не пришло (или всё уже выдано) — пара полностью отдана, уходит в givenRows.
-      const after = hasOverride ? null : pairRemainingAfterGivenDate(currentDate, rows[i].name, gd);
-      if (after) {
-        rows[i].base = after.base;
-        rows[i].v1 = after.v1;
-        rows[i].v2 = (after.v2 === null || after.v2 === undefined) ? after.v1 : after.v2;
-        rows[i].has2 = after.has2;
-        rows[i].pct1 = (after.pct1 !== null) ? after.pct1 : rows[i].pct1;
-        rows[i].pct2 = (after.pct2 !== null) ? after.pct2 : rows[i].pct2;
-        rows[i].carry = false;
-        rows[i].reopenedAfterGiven = true;
-        rows[i].givenDate = gd;   // помним дату прошлой отдачи (для UI/диагностики)
-        rows[i].diff = r100(rows[i].v1 - rows[i].v2);
-      } else {
-        rows[i].givenDate = gd;
-        givenRows.unshift(rows.splice(i, 1)[0]);
-      }
+      if (gd) rows[i].givenDate = gd;
     }
-    givenRows.sort((x, y) => y.v1 - x.v1);
   }
 
   rows.sort((x, y) => y.v1 - x.v1);
@@ -5181,12 +5172,10 @@ function pairDueHtml(pair) {
    по паре остаток на месте. Воспроизведено на трёх приходах Мухтар-Ленина:
    в отчёте 2 428 300, в блоке задолженности пары нет вообще.
 
-   Раньше об этом не говорило ничего, кроме одной сводной строки в разборе
-   («невыданное по парам с отметкой „отдано“»). Теперь такие приходы собраны
-   отдельным блоком: пара, дата отметки, суммы и кнопка снять отметку.
-
-   ⚠️ Расчёт не тронут: отметка по-прежнему закрывает приходы. Меняется только
-   то, что деньги перестали исчезать молча. */
+   v231 (владелец: «Верни Мухтар-Ленин»): отметка больше НЕ закрывает приход,
+   по которому не было выдачи, — такие приходы остаются в задолженности
+   с пометкой 🔓 «отмечено отдано». Этот блок собирает их списком: пара, дата
+   отметки, каждый приход и кнопка снять отметку, если она поставлена по ошибке. */
 function closedByDateButUnpaid(dayStr) {
   const день = dayStr || ledgerDay();
   const dOut = state.debtOutDates || {};
@@ -5224,7 +5213,7 @@ function closedByDateButUnpaid(dayStr) {
 function clearDebtOutWeek(week, encodedPair) {
   const pair = decodeURIComponent(encodedPair);
   if (!confirm('Убрать отметку «отдано» с пары «' + pair + '» за неделю с ' + formatDateShort(week) + '?\n\n'
-    + 'Невыданные приходы этой недели вернутся в задолженность.')) return;
+    + 'Суммы не изменятся — уйдёт только пометка 🔓 в строке пары.')) return;
   if (state.debtOutDates) delete state.debtOutDates[week + '::' + pair];
   saveState();
   render();
@@ -5256,10 +5245,10 @@ function closedByDateHtml(dayStr) {
   }).join('');
   return `<div class="no-print" style="margin-top:10px;padding:10px 12px;border-radius:10px;
       background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);font-size:11.5px;line-height:1.5">
-    <div style="font-weight:700;color:#f59e0b;margin-bottom:3px">⚠️ Отмечены отданными, но выдачи не было — ${fmt(итог)}</div>
+    <div style="font-weight:700;color:#f59e0b;margin-bottom:3px">⚠️ Стоит отметка «отдано», но выдачи не было — ${fmt(итог)}</div>
     <div style="color:var(--muted);font-size:10.5px">
-      У этих пар проставлено «Число отдачи», и оно закрывает все приходы по эту дату.
-      Поэтому из задолженности они ушли, хотя деньги по ним не выдавались.</div>
+      Эти приходы остаются в задолженности (v231): отметка не может закрыть приход,
+      по которому денег не было. Либо запишите выдачу, либо снимите отметку.</div>
     ${тело}
   </div>`;
 }
@@ -5272,7 +5261,6 @@ function pairPartialHtml(pair, scope) {
   const PARTS = incomeCoverParts(день, true);
   const start = pairStart(p);
   const thisWeek = weekMondayStr(день);
-  const dOut = state.debtOutDates || {};
   const строки = [];
   for (const d of Object.keys(state.days).sort()) {
     if (d > день) break;
@@ -5280,8 +5268,8 @@ function pairPartialHtml(pair, scope) {
     const wk = weekMondayStr(d);
     if (scope === 'current' && wk < thisWeek) continue;
     if (scope === 'overdue' && wk >= thisWeek) continue;
-    const gd = dOut[wk + '::' + p];
-    if (gd && d <= gd) continue;
+    /* Отметка «отдано» здесь тоже больше не фильтрует (v231): приход остался
+       в долге, значит и разбор выдачи по нему должен быть виден. */
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -5352,7 +5340,7 @@ function renderWeekDebtSummary() {
     const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
     const tag = r.carry ? ` <span class="chip chip-info">↪ перенос</span>` : '';
     const man = r.manual ? ` <span class="chip chip-warn">✋ ручная</span>` : '';
-    const reop = r.reopenedAfterGiven ? ` <span class="chip chip-ok" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
+    const reop = r.givenDate ? ` <span class="chip chip-warn" title="Стоит «Число отдачи» ${r.givenDate}, но по этим приходам выдачи не было — они остались в долге">🔓 отмечено отдано</span>` : '';
     const editBtn = (state.manualMode === true)
       ? ` <span style="cursor:pointer" title="Изменить сумму пары вручную" onclick="editWeekDebtPair('${escapeHtml(r.name).replace(/'/g, "\\'")}')">✏️</span>`
       : '';
@@ -5486,7 +5474,7 @@ function openDebtOutModal() {
         const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
         const tag = r.carry ? ` <span class="chip chip-info">↪ перенос</span>` : '';
         const man = r.manual ? ` <span class="chip chip-warn">✋ ручная</span>` : '';
-        const reop = r.reopenedAfterGiven ? ` <span class="chip chip-ok" title="Новый приход после отметки об отдаче (${r.givenDate}) — ещё не отдан">🔄 после отдачи</span>` : '';
+        const reop = r.givenDate ? ` <span class="chip chip-warn" title="Стоит «Число отдачи» ${r.givenDate}, но по этим приходам выдачи не было — они остались в долге">🔓 отмечено отдано</span>` : '';
         const dateKey = wk + '::' + r.name;
         const savedDate = (state.debtOutDates && state.debtOutDates[dateKey]) || '';
         const nameAttr = encodeURIComponent(r.name);
