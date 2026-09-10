@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v229</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v230</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5169,6 +5169,101 @@ function pairDueHtml(pair) {
 
    Приходы, которых выдача не касалась, сюда не идут: для них вычитать нечего,
    а список должен оставаться коротким — он висит прямо в строке пары. */
+/* Приходы, закрытые «числом отдачи», по которым выдачи не было (v230).
+
+   Владелец 10.09.2026: «Куда у меня пропали остатки по Мухтар-Ленину?
+   Почему их нет в отчётности?»
+
+   «Число отдачи» — это отметка «пара рассчитана», и она закрывает ВСЕ приходы
+   по эту дату включительно (pairDebtByIncomes: `if (gd && d <= gd) continue`).
+   Если по какому-то из них выдача не проходила, деньги просто исчезают
+   из задолженности: пары нет ни в текущей неделе, ни в просрочке, а в отчёте
+   по паре остаток на месте. Воспроизведено на трёх приходах Мухтар-Ленина:
+   в отчёте 2 428 300, в блоке задолженности пары нет вообще.
+
+   Раньше об этом не говорило ничего, кроме одной сводной строки в разборе
+   («невыданное по парам с отметкой „отдано“»). Теперь такие приходы собраны
+   отдельным блоком: пара, дата отметки, суммы и кнопка снять отметку.
+
+   ⚠️ Расчёт не тронут: отметка по-прежнему закрывает приходы. Меняется только
+   то, что деньги перестали исчезать молча. */
+function closedByDateButUnpaid(dayStr) {
+  const день = dayStr || ledgerDay();
+  const dOut = state.debtOutDates || {};
+  if (!Object.keys(dOut).length) return [];
+  const cover = pairPaidCoverage(день, 'fifo', undefined, true);
+  const поПарам = {};
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день) break;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    const wk = weekMondayStr(d);
+    dd.in.forEach((r, idx) => {
+      const p = (r.client || '').trim();
+      if (!p || d < pairStart(p)) return;
+      const gd = dOut[wk + '::' + p];
+      if (!gd || d > gd) return;                 // отметка эти приходы не закрывает
+      const frac = cover[p + '#' + d + '#' + idx] || 0;
+      if (frac >= 0.9995) return;                // выдан целиком — вопросов нет
+      const after1 = calcInRowFinal(r) || 0;
+      const остаток1 = r100(after1 * (1 - frac));
+      if (остаток1 <= 0) return;
+      const box = поПарам[p] || (поПарам[p] = { pair: p, rows: [], base: 0, v1: 0, v2: 0, has2: false });
+      box.rows.push({ date: d, week: wk, gd: gd, amount: r.amount || 0,
+                      after1: after1, left1: остаток1, part: frac > 0.0005 });
+      box.base += (r.amount || 0);
+      box.v1 += остаток1;
+      if (hasSecondPct(r)) { box.v2 += r100(r100(r.total2) * (1 - frac)); box.has2 = true; }
+    });
+  }
+  return Object.values(поПарам).sort((a, b) => b.v1 - a.v1);
+}
+
+/* Снять «число отдачи» с конкретной недели (setDebtOutDate умеет только
+   текущую, а отметка чаще всего висит на старой). */
+function clearDebtOutWeek(week, encodedPair) {
+  const pair = decodeURIComponent(encodedPair);
+  if (!confirm('Убрать отметку «отдано» с пары «' + pair + '» за неделю с ' + formatDateShort(week) + '?\n\n'
+    + 'Невыданные приходы этой недели вернутся в задолженность.')) return;
+  if (state.debtOutDates) delete state.debtOutDates[week + '::' + pair];
+  saveState();
+  render();
+  showToast('Отметка снята — пара вернулась в расчёт');
+}
+
+function closedByDateHtml(dayStr) {
+  const list = closedByDateButUnpaid(dayStr);
+  if (!list.length) return '';
+  const итог = list.reduce((a, x) => a + x.v1, 0);
+  const тело = list.map(x => {
+    const nameAttr = encodeURIComponent(x.pair);
+    const строки = x.rows.map(r => `
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;flex-wrap:wrap">
+        <span style="color:var(--muted)">${formatDateShort(r.date)} · приход ${fmt(r.amount)}${r.part ? ' <span style="opacity:.75">(выдан частично)</span>' : ' <span style="opacity:.75">(выдачи не было)</span>'}</span>
+        <b style="font-family:var(--font-num)">${fmt(r.left1)}</b>
+      </div>`).join('');
+    const недели = [...new Set(x.rows.map(r => r.week))];
+    const кнопки = недели.map(w => `<button class="btn btn-ghost no-print"
+        onclick="clearDebtOutWeek('${w}', '${nameAttr}')"
+        style="font-size:10.5px;padding:4px 9px;margin:5px 5px 0 0;border-color:#f59e0b;color:#f59e0b">убрать отметку за ${formatDateShort(w)}</button>`).join('');
+    return `<div style="margin-top:7px;padding-top:6px;border-top:1px dashed rgba(245,158,11,.25)">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <b style="color:#f59e0b">${escapeHtml(x.pair)}</b>
+        <span style="font-family:var(--font-num)">осталось <b style="color:#f59e0b">${fmt(x.v1)}</b>${x.has2 ? ' · по 2-му %: <b style="color:#818cf8">' + fmt(x.v2) + '</b>' : ''}</span>
+      </div>
+      ${строки}${кнопки}
+    </div>`;
+  }).join('');
+  return `<div class="no-print" style="margin-top:10px;padding:10px 12px;border-radius:10px;
+      background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);font-size:11.5px;line-height:1.5">
+    <div style="font-weight:700;color:#f59e0b;margin-bottom:3px">⚠️ Отмечены отданными, но выдачи не было — ${fmt(итог)}</div>
+    <div style="color:var(--muted);font-size:10.5px">
+      У этих пар проставлено «Число отдачи», и оно закрывает все приходы по эту дату.
+      Поэтому из задолженности они ушли, хотя деньги по ним не выдавались.</div>
+    ${тело}
+  </div>`;
+}
+
 function pairPartialHtml(pair, scope) {
   const p = (pair || '').trim();
   if (!p) return '';
@@ -5244,7 +5339,13 @@ function renderWeekDebtSummary() {
            overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff } = computeWeekPairDebt();
   /* Пар в списке нет — но деньги в кассе могут быть. Тогда показываем одну
      сверку: без неё разница просто пропадала бы с экрана (v223). */
-  if (!rows.length && !overdueRows.length) { box.innerHTML = offDebtIncomesHtml(currentDate) + balanceReconcileHtml(currentDate); return; }
+  /* Пар в списке нет — но деньги могут висеть под отметкой «отдано»
+     или без пары. Блок обязан показаться и тогда (v230). */
+  if (!rows.length && !overdueRows.length) {
+    box.innerHTML = closedByDateHtml(currentDate) + offDebtIncomesHtml(currentDate)
+                  + balanceReconcileHtml(currentDate);
+    return;
+  }
 
   const body = rows.map(r => {
     const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
@@ -5291,6 +5392,7 @@ function renderWeekDebtSummary() {
   </div>` : '';
 
   const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff)
+    + closedByDateHtml(currentDate)        // отмечены отданными, но не выданы (v230)
     + offDebtIncomesHtml(currentDate)      // приходы без пары (v223)
     /* Разбор «база → итог дня» показывается ВВЕРХУ, сразу под шапкой (v225):
        снизу владелец до него не доскроллил. Здесь — только если пар нет вовсе
