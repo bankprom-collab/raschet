@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v233</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v234</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5497,7 +5497,8 @@ function pairStartFieldHtml(pair) {
     <input type="date" class="wds-date-inp" value="${свой}"
       onchange="setPairStart('${nameAttr}', this.value)"
       title="Начало счёта по этой паре. Приходы и выдачи раньше этой даты в расчёт не идут. По умолчанию — общая дата ${formatDateShort(handStart())}.">
-    ${свой ? `<button class="wds-date-clear" onclick="setPairStart('${nameAttr}', '')" title="Вернуть общую дату">✕</button>
+    ${свой ? `<button class="wds-date-clear" onclick="setPairStart('${nameAttr}', '')" title="Вернуть общую дату">✕</button>` : ''}
+    ${(свой && p !== 'Вейс(рук)-Рынок') ? `
       <button class="btn btn-ghost no-print" onclick="askPurgePairBefore('${nameAttr}')"
         style="font-size:10.5px;padding:4px 9px;margin-left:6px;border-color:var(--expense);color:var(--expense)"
         title="Удалить приходы и выдачи этой пары раньше ${formatDateShort(свой)} — насовсем">🗑 удалить записи до ${formatDateShort(свой)}</button>` : ''}
