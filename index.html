@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v231</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v232</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5253,6 +5253,91 @@ function closedByDateHtml(dayStr) {
   </div>`;
 }
 
+/* Дата начала счёта у ОТДЕЛЬНОЙ пары (v232).
+
+   Владелец 10.09.2026: «По Мухтар-Ленину вычистить всё, что было раньше.
+   Остаются только две невыданные суммы: за 28 августа 1 201 691, за 9 сентября
+   890 122. Эти суммы должны отражаться в задолженности, всё остальное снести.»
+
+   Поле state.pairStart существует с v205 и читается по всей программе —
+   покрытие, задолженность, счёт куратора, «На руки», отчёты, — но задать его
+   из окна было нельзя: оно проставлялось только жёстко, для Вейс(рук)-Рынок.
+   Теперь у каждой пары есть своё поле «🧹 Счёт с».
+
+   Это ровно то, что просил владелец: приходы и выдачи раньше этой даты
+   по паре не считаются вообще, как будто их нет. Не путать с «Числом отдачи»:
+   та лишь помечает пару отданной за неделю и с v231 сумм не трогает.
+
+   ⚠️ Дата — правка данных, поэтому спрашиваем подтверждение и показываем,
+   что именно уйдёт: сколько приходов, сколько выдач и на какие суммы.
+   Отдельно предупреждаем про выдачи, привязанные к приходам ПОСЛЕ границы:
+   такая выдача перестанет их гасить, и приход снова станет невыданным. */
+function pairStartDropPreview(pair, dateStr) {
+  const p = (pair || '').trim();
+  const день = ledgerDay();
+  let приходов = 0, суммаПриходов = 0, выдач = 0, суммаВыдач = 0, отвяжется = 0;
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день || d >= dateStr) continue;
+    const dd = state.days[d];
+    if (!dd) continue;
+    (dd.in || []).forEach(r => {
+      if ((r.client || '').trim() !== p) return;
+      приходов++; суммаПриходов += (r.amount || 0);
+    });
+    (dd.out || []).forEach(o => {
+      if ((o.client || '').trim() !== p) return;
+      выдач++; суммаВыдач += (o.amount || 0);
+      if (o.forIn && String(o.forIn).slice(0, 10) >= dateStr) отвяжется += (o.amount || 0);
+    });
+  }
+  return { приходов, суммаПриходов, выдач, суммаВыдач, отвяжется };
+}
+
+function setPairStart(encodedPair, dateStr) {
+  const pair = decodeURIComponent(encodedPair);
+  if (!state.pairStart) state.pairStart = {};
+  if (!dateStr) {
+    if (!confirm('Убрать «Счёт с» у пары «' + pair + '»?\n\n'
+      + 'Пара снова будет считаться с общей даты начала счёта — ' + formatDateShort(handStart()) + '.')) return;
+    delete state.pairStart[pair];
+  } else {
+    const d = pairStartDropPreview(pair, dateStr);
+    const строки = [
+      'Считать пару «' + pair + '» с ' + formatDateShort(dateStr) + '?',
+      '',
+      'Всё, что раньше этой даты, по паре учитываться не будет:'
+    ];
+    строки.push(d.приходов ? '   приходов: ' + d.приходов + ' на ' + fmt(d.суммаПриходов) : '   приходов раньше даты нет');
+    строки.push(d.выдач ? '   выдач: ' + d.выдач + ' на ' + fmt(d.суммаВыдач) : '   выдач раньше даты нет');
+    if (d.отвяжется > 0.5) {
+      строки.push('');
+      строки.push('⚠️ Из них ' + fmt(d.отвяжется) + ' привязано к приходам ПОСЛЕ этой даты.');
+      строки.push('Эти выдачи перестанут их гасить — приходы снова станут невыданными.');
+    }
+    строки.push('');
+    строки.push('Записи никуда не денутся, их просто перестанет видеть расчёт по паре.');
+    if (!confirm(строки.join('\n'))) return;
+    state.pairStart[pair] = dateStr;
+  }
+  saveState();
+  render();
+  showToast(dateStr ? ('Пара считается с ' + formatDateShort(dateStr)) : 'Счёт пары — с общей даты');
+}
+
+/* Поле «🧹 Счёт с» для строки пары — рядом с «Числом отдачи». */
+function pairStartFieldHtml(pair) {
+  const p = (pair || '').trim();
+  const nameAttr = encodeURIComponent(p);
+  const свой = (state.pairStart || {})[p] || '';
+  return `<div class="wds-date">
+    <span class="wds-date-lbl" title="Всё, что раньше этой даты, по паре не считается вообще">🧹 Счёт с:</span>
+    <input type="date" class="wds-date-inp" value="${свой}"
+      onchange="setPairStart('${nameAttr}', this.value)"
+      title="Начало счёта по этой паре. Приходы и выдачи раньше этой даты в расчёт не идут. По умолчанию — общая дата ${formatDateShort(handStart())}.">
+    ${свой ? `<button class="wds-date-clear" onclick="setPairStart('${nameAttr}', '')" title="Вернуть общую дату">✕</button>` : ''}
+  </div>`;
+}
+
 function pairPartialHtml(pair, scope) {
   const p = (pair || '').trim();
   if (!p) return '';
@@ -5362,6 +5447,7 @@ function renderWeekDebtSummary() {
         <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
         ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, 'current')}
       </details>
+    ${pairStartFieldHtml(r.name)}
     </div>`;
   }).join('');
 
@@ -5495,6 +5581,7 @@ function openDebtOutModal() {
             <summary>📋 Раскрыть базу: только неотданные приходы</summary>
             ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, 'current', true)}
           </details>
+          ${pairStartFieldHtml(r.name)}
           <div class="wds-date">
             <span class="wds-date-lbl">📅 Число отдачи:</span>
             <input type="date" class="wds-date-inp" value="${savedDate}"
