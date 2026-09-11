@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v234</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v235</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5505,6 +5505,26 @@ function pairStartFieldHtml(pair) {
   </div>`;
 }
 
+/* Снять выдачу с прихода (v235). Владелец 11.09.2026 про Мухтар-Ленина:
+   «280 100 убери из расчёта, оставь только 1 201 691, от этой суммы считай
+   проценты». 280 100 — это 1 039 500 минус выдача 759 400, привязанная
+   к приходу 28 августа. Убирается не формула, а привязка: выдача остаётся
+   в записях и в кассе, но перестаёт гасить приход, и проценты снова считаются
+   от полной базы. Обратно — через правку выдачи, там приход выбирается заново. */
+function unlinkPayout(dateStr, idx) {
+  const dd = state.days[dateStr];
+  const o = dd && Array.isArray(dd.out) ? dd.out[idx] : null;
+  if (!o) { showToast('Выдача не найдена'); return; }
+  if (!confirm('Снять выдачу ' + fmt(o.amount) + ' от ' + formatDateShort(dateStr) + ' с этого прихода?\n\n'
+    + 'Сумма останется в выдачах и в кассе, но перестанет его гасить —\n'
+    + 'приход вернётся в долг целиком, проценты пойдут от полной базы.\n\n'
+    + 'Выдача попадёт в «не отнесено»; привязать заново — правкой выдачи.')) return;
+  o.forIn = null;
+  saveState();
+  render();
+  showToast('Выдача снята с прихода');
+}
+
 function pairPartialHtml(pair, scope) {
   const p = (pair || '').trim();
   if (!p) return '';
@@ -5536,7 +5556,10 @@ function pairPartialHtml(pair, scope) {
       const выдано2 = (after2 !== null) ? after2 - остаток2 : null;
       const parts = ((PARTS[p + '#' + d + '#' + idx] || {}).parts) || [];
       const когда = parts.length
-        ? parts.map(x => fmt(x.amount) + ' <span style="opacity:.7">(' + formatDateShort(x.date) + ')</span>').join(' − ')
+        ? parts.map(x => fmt(x.amount) + ' <span style="opacity:.7">(' + formatDateShort(x.date) + ')</span>'
+            + '<span class="no-print" onclick="unlinkPayout(\'' + x.date + '\', ' + x.payIdx + ')"'
+            + ' title="Снять эту выдачу с прихода — она перестанет его гасить"'
+            + ' style="cursor:pointer;color:var(--muted);margin-left:4px;font-weight:700">✕</span>').join(' − ')
         : fmt(выдано1);
       const пц = (v) => (v === null || v === undefined) ? '' : String(v).replace('.', ',') + '%';
       строки.push(`
