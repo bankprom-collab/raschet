@@ -1477,7 +1477,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v237</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v238</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1500,18 +1500,11 @@
 <main>
   <!-- Summary -->
   <div class="summary-row">
-    <div class="stat-card s-carryover">
-      <div class="stat-label">Переходящий остаток</div>
-      <div class="stat-value neutral" id="s-carryover">—</div>
-    </div>
-    <div class="stat-card s-out">
-      <div class="stat-label">Получено на руки</div>
-      <div class="stat-value neg" id="s-out">—</div>
-    </div>
-    <div class="stat-card s-in">
-      <div class="stat-label">Приход от клиентов</div>
-      <div class="stat-value pos" id="s-in">—</div>
-    </div>
+    <!-- v238: три плитки убраны — каждая повторяла число, стоящее рядом.
+         «Переходящий остаток» был ещё и в заголовке панели под плитками,
+         «Приход от клиентов» и «Получено на руки» — в шапках своих таблиц,
+         и все три — в подписи под «Итого на конец дня». Владелец: «программа
+         перегружена излишней информацией, убери, если дублируется». -->
     <div class="stat-card s-balance">
       <div class="stat-label">Итого на конец дня</div>
       <div class="stat-value main" id="s-balance">—</div>
@@ -1540,8 +1533,8 @@
       <span style="margin-left:auto;color:var(--accent);font-size:11.5px">изменить</span>
     </summary>
     <div style="margin-top:10px">
-      <div class="carryover-label">Переходящий остаток на этот день <span id="carryover-mode" style="font-size:10px;color:var(--accent);margin-left:6px"></span></div>
-      <div class="carryover-value" id="carryover-display">0 ₽</div>
+      <!-- v238: сумма стоит в заголовке панели, второй раз внутри не нужна -->
+      <div class="carryover-label">Режим <span id="carryover-mode" style="font-size:10px;color:var(--accent);margin-left:6px"></span></div>
       <div id="carryover-mismatch" style="display:none;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:6px;background:rgba(255,183,77,.12);border:1px solid rgba(255,183,77,.3);color:#ffb74d;font-family:'JetBrains Mono',monospace;max-width:520px"></div>
     </div>
     <div class="carryover-input-row">
@@ -4009,7 +4002,8 @@ function render() {
   const day = getDay(currentDate);
   // Carryover
   const co = day.carryover || 0;
-  document.getElementById('carryover-display').textContent = fmt(co);
+  const coDisp = document.getElementById('carryover-display');   // убран в v238
+  if (coDisp) coDisp.textContent = fmt(co);
   document.getElementById('carryover-input').value = co || '';
   // Индикатор режима
   const modeEl = document.getElementById('carryover-mode');
@@ -7885,7 +7879,11 @@ function renderSummary(day) {
   // На руки = итог сделок − то, что идёт куратору
   const handT = dealsT - curatorT;
 
-  document.getElementById('s-carryover').textContent = fmt(co);
+  /* Плиток «Переходящий остаток», «Приход от клиентов» и «Получено на руки»
+     больше нет (v238) — записи оставлены под проверкой, чтобы их можно было
+     вернуть разметкой, не трогая расчёт. */
+  const coTile = document.getElementById('s-carryover');
+  if (coTile) coTile.textContent = fmt(co);
   const coSum = document.getElementById('carryover-summary');
   if (coSum) coSum.textContent = fmt(co);
   // Из чего сложился итог дня — читается за секунду, считать ничего не надо (v136)
@@ -7895,8 +7893,10 @@ function renderSummary(day) {
       + (inT ? ' + приход ' + fmt(inT) : '')
       + (outT ? ' − выдано ' + fmt(outT) : '');
   }
-  document.getElementById('s-out').textContent = fmt(outT);
-  document.getElementById('s-in').textContent = fmt(inT);
+  const outTile = document.getElementById('s-out');
+  if (outTile) outTile.textContent = fmt(outT);
+  const inTile = document.getElementById('s-in');
+  if (inTile) inTile.textContent = fmt(inT);
   document.getElementById('s-balance').textContent = fmt(balance);
   const curEl = document.getElementById('s-curator');
   if (curEl) curEl.textContent = fmt(curatorDebt(ledgerDay()));
