@@ -323,6 +323,15 @@
   .wds-row:last-of-type { border-bottom: none; }
   .wds-pair { font-family: 'JetBrains Mono', monospace; color: var(--text); }
   .wds-val { font-family: 'JetBrains Mono', monospace; color: var(--muted); white-space: nowrap; }
+  /* Строка пары: имя слева, «нам должны» крупно справа, остальное — под ними
+     приглушённой строкой (v237). Раньше в одну строку шли четыре цветные
+     цифры подряд, и зацепиться глазу было не за что. */
+  .wds-head-line {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 10px; width: 100%;
+  }
+  .wds-sum-lbl { font-family: var(--font-ui); font-size: 10px; color: var(--muted); margin-right: 4px; }
+  .wds-sum { font-family: var(--font-num); font-size: 17px; font-weight: 700; color: #ff8a4a; white-space: nowrap; }
   .wds-foot { font-family: var(--font-ui); }
   .wds-foot { font-size: 10px; color: var(--muted); font-style: italic; margin-top: 8px; opacity: .8; }
   /* Ряд долга с полем даты — переносим на две строки, чтобы дата не жалась */
@@ -1468,7 +1477,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v236</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v237</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4352,7 +4361,8 @@ function balanceReconcileHtml(dayStr) {
   const дата = formatDateShort(R.опорный);
   return `<div class="no-print" style="margin:8px 0 10px;padding:10px 12px;border-radius:10px;
       background:rgba(123,140,255,.08);border:1px solid rgba(123,140,255,.3);font-size:11.5px;line-height:1.5">
-      <div style="font-weight:700;color:var(--accent3);margin-bottom:5px">Откуда база и куда она уходит</div>
+      <details><summary style="cursor:pointer;font-weight:700;color:var(--accent3);margin-bottom:5px;list-style:none">
+        Откуда база и куда она уходит · разница ${fmt(R.разница)} — раскрыть</summary>
       <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;align-items:baseline">
         <span style="font-weight:700">база — приходы до процентов</span>
         <b style="font-family:var(--font-num);font-size:13px;white-space:nowrap">${fmt(R.база)}</b>
@@ -4380,6 +4390,7 @@ function balanceReconcileHtml(dayStr) {
           после этого они уйдут из строки «мимо приходов».</div>
         <button class="btn btn-ghost no-print" onclick="askAllocateAll()"
           style="font-size:11px;padding:5px 11px;border-color:#ff8a4a;color:#ff8a4a">разнести остатки</button></div>` : ''}
+      </details>
     </div>`;
 }
 
@@ -5053,11 +5064,15 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
       : '';
     return `<div class="wds-row wds-row-debt">
       <div class="wds-row-main">
-        <span class="wds-pair">⏰ ${escapeHtml(r.name)}</span>${
-          (state.pairStart && state.pairStart[r.name])
-            ? `<span style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-left:6px">счёт с ${formatDateShort(state.pairStart[r.name])}</span>`
-            : ''}
-        <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+        <div class="wds-head-line">
+          <span class="wds-pair">⏰ ${escapeHtml(r.name)}${
+            (state.pairStart && state.pairStart[r.name])
+              ? `<span style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-left:6px">счёт с ${formatDateShort(state.pairStart[r.name])}</span>`
+              : ''}</span>
+          <span><span class="wds-sum-lbl">${lbl1}</span><b class="wds-sum">${fmt(r.v1)}</b></span>
+        </div>
+        <span class="wds-val">${baseHtml}${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+        ${pairPartialHtml(r.name, 'overdue')}
       </div>
       <details class="wds-break-details" open>
         <summary>📋 Раскрыть базу: только неотданные приходы</summary>
@@ -5526,6 +5541,17 @@ function unlinkPayout(dateStr, idx) {
   showToast('Выдача снята с прихода');
 }
 
+/* Поиск по паре в блоке задолженности (v237). Появляется, когда пар больше
+   десяти: искать нужную прокруткой на телефоне неудобно. Только прячет строки,
+   ничего не пересчитывает; при следующей перерисовке фильтр сбрасывается. */
+function filterPairRows(q) {
+  const строка = (q || '').trim().toLowerCase();
+  document.querySelectorAll('.week-debt-block .wds-row-debt').forEach(el => {
+    const имя = el.querySelector('.wds-pair');
+    el.hidden = !!строка && !(имя && имя.textContent.toLowerCase().includes(строка));
+  });
+}
+
 function pairPartialHtml(pair, scope) {
   const p = (pair || '').trim();
   if (!p) return '';
@@ -5560,7 +5586,10 @@ function pairPartialHtml(pair, scope) {
         ? parts.map(x => fmt(x.amount) + ' <span style="opacity:.7">(' + formatDateShort(x.date) + ')</span>'
             + '<span class="no-print" onclick="unlinkPayout(\'' + x.date + '\', ' + x.payIdx + ')"'
             + ' title="Снять эту выдачу с прихода — она перестанет его гасить"'
-            + ' style="cursor:pointer;color:var(--muted);margin-left:4px;font-weight:700">✕</span>').join(' − ')
+            /* Крестик отделён рамкой: без неё он сливался с «=» и читался
+               как часть формулы — «500 000 (8 сен) × =» (v237). */
+            + ' style="cursor:pointer;color:var(--muted);margin-left:6px;padding:0 4px;'
+            + 'border:1px solid var(--border);border-radius:4px;font-size:9px">✕</span>').join(' − ')
         : fmt(выдано1);
       const пц = (v) => (v === null || v === undefined) ? '' : String(v).replace('.', ',') + '%';
       строки.push(`
@@ -5626,10 +5655,13 @@ function renderWeekDebtSummary() {
     const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
     return `<div class="wds-row wds-row-debt">
       <div class="wds-row-main">
-        <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${reop}${editBtn}
-          <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button>
-        </span>
-        <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
+        <div class="wds-head-line">
+          <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${reop}${editBtn}
+            <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button>
+          </span>
+          <span><span class="wds-sum-lbl">${lbl1}</span><b class="wds-sum">${fmt(r.v1)}</b></span>
+        </div>
+        <span class="wds-val">${baseHtml}${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
         ${pairPartialHtml(r.name, 'current')}
         ${pairDueHtml(r.name)}
         ${pairProgressHtml(r.name)}
@@ -5638,7 +5670,10 @@ function renderWeekDebtSummary() {
         <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
         ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, 'current')}
       </details>
-    ${pairStartFieldHtml(r.name)}
+      <details class="wds-break-details">
+        <summary>⚙ Настройки пары: дата начала счёта, число отдачи</summary>
+        ${pairStartFieldHtml(r.name)}
+      </details>
     </div>`;
   }).join('');
 
@@ -5652,6 +5687,10 @@ function renderWeekDebtSummary() {
       <span class="wds-total">${totalLine}</span>
     </div>
     ${balanceReconcileHtml(currentDate)}
+    ${rows.length > 10 ? `<input type="search" class="no-print" placeholder="поиск по паре"
+      oninput="filterPairRows(this.value)" style="width:100%;margin:6px 0;padding:7px 10px;
+      border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);
+      font-family:var(--font-ui);font-size:12px">` : ''}
     ${body}
     <details class="wds-foot"><summary style="cursor:pointer;list-style:none">Как это считается</summary>По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом ЗА ЭТУ НЕДЕЛЮ (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Долг с прошлых недель сюда не подмешивается — смотри блок «⏰ Просрочено» ниже.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</details>
   </div>` : '';
@@ -5765,7 +5804,7 @@ function openDebtOutModal() {
               <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс, напр. «-Авангард»)">🏷️</button>
             </span>
             <span class="wds-val">${baseHtml}${lbl1}: <b style="color:#ff8a4a">${fmt(r.v1)}</b> · ${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
-            ${pairPartialHtml(r.name, 'overdue')}
+            ${pairPartialHtml(r.name, 'current')}
             ${pairDueHtml(r.name)}
           </div>
           <details class="wds-break-details">
