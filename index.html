@@ -1468,7 +1468,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v235</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v236</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5518,7 +5518,8 @@ function unlinkPayout(dateStr, idx) {
   if (!confirm('Снять выдачу ' + fmt(o.amount) + ' от ' + formatDateShort(dateStr) + ' с этого прихода?\n\n'
     + 'Сумма останется в выдачах и в кассе, но перестанет его гасить —\n'
     + 'приход вернётся в долг целиком, проценты пойдут от полной базы.\n\n'
-    + 'Выдача попадёт в «не отнесено»; привязать заново — правкой выдачи.')) return;
+    + 'Выдача попадёт в плашку «указать приход» в окне «На руки» —\n'
+    + 'оттуда её можно привязать заново.')) return;
   o.forIn = null;
   saveState();
   render();
@@ -6330,7 +6331,12 @@ function collectPairBaseBreakdown(pair, scope) {
   else if (carryAllPairs) startWeek = PAIR_CARRY_START_DATE;
   else startWeek = targetWeek;              // старая логика: только текущая неделя
   const inRows = [], outRows = [];
-  const start = handStart();   // v195: старая история в разбор не идёт
+  /* Дата берётся ПО ПАРЕ (v236). Была общая handStart(), и «Раскрыть базу»
+     показывало приходы раньше собственной даты пары, которых нет в её шапке:
+     у Мухтар-Ленина со «Счёт с 28 авг» шапка давала базу 1 201 691, а разбор —
+     2 084 691, ровно на приход 21 августа больше. v195 («старая история
+     в разбор не идёт») этим не отменяется — граница просто своя у каждой пары. */
+  const start = pairStart(p);
   Object.keys(state.days).sort().forEach(d => {
     const wk = weekMondayStr(d);
     if (wk > targetWeek) return;
@@ -8063,7 +8069,10 @@ function pairUnpaidRows(pair, dayStr) {
      ошибкой. Деньги без указанного прихода висят отдельным списком
      (unlinkedPayouts) и ждут, когда их разнесут. */
   const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
-  const start = handStart();
+  /* Дата по паре (v236): со своей датой «Счёт с» список предлагал приходы
+     раньше неё, а pairPaidCoverage такие приходы не видит вовсе — привязанная
+     к ним выдача не гасила бы ничего и молча пропадала из расчёта. */
+  const start = pairStart(p);
   for (const d of Object.keys(state.days).sort()) {
     if (d > dayStr) break;
     /* Счёт идёт с этой даты, всё раньше владелец закрыл (v171). Такие приходы
