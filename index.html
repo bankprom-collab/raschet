@@ -1488,7 +1488,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v243</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v244</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1529,8 +1529,8 @@
       </div>
       <div id="curator-paid-line" style="display:none;font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
-    <div class="stat-card s-hand" title="Итог сделки минус доля куратора — по тем же сделкам, что показывает «Куратор ко мне». Рассчитались с куратором — сделка уходит с обеих плиток.">
-      <div class="stat-label">На руки</div>
+    <div class="stat-card s-hand" title="Сколько ещё осталось получить на руки: начислено по выданным сделкам минус уже полученное. Полученное уходит в архив окна «На руки».">
+      <div class="stat-label">На руки · осталось получить</div>
       <div class="stat-value" style="color:var(--accent)" id="s-hand">—</div>
       <div id="s-hand-line" style="font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
@@ -7953,12 +7953,20 @@ function renderSummary(day) {
   // Плитка «НА РУКИ» на дашборде — то же число + из чего оно сложилось
   const qbEl = document.getElementById('qb-balance');
   if (qbEl) qbEl.textContent = fmt(balance);
+  /* Плитка «На руки» показывает ОСТАТОК К ПОЛУЧЕНИЮ, а не всё начисленное
+     (v244). Владелец: «по выданным сделкам пишется 585 900 — эта сумма
+     не показывается. Показывается только та, что реально должна быть
+     получена, в данном случае 900. Остальные суммы уходят в архив».
+     Плитка «Куратор ко мне» так считала всегда: curatorDebt = начислено
+     минус отданное. Начисленное осталось подписью под цифрой и полностью
+     разбирается в окне. */
   const handTileEl = document.getElementById('s-hand');
-  if (handTileEl) handTileEl.textContent = fmt(hw.hand);
+  const остатокНаРуки = handRemain(ledgerDay());
+  if (handTileEl) handTileEl.textContent = fmt(остатокНаРуки);
   const handLineEl = document.getElementById('s-hand-line');
   if (handLineEl) {
-    handLineEl.textContent = (hw.deals || hw.curator)
-      ? 'сделки ' + fmt(hw.deals) + ' − куратор ' + fmt(hw.curator)
+    handLineEl.textContent = hw.hand
+      ? 'осталось получить · начислено ' + fmt(hw.hand)
       : 'по выданным сделкам';
   }
 }
