@@ -1454,7 +1454,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v249</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v250</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1468,7 +1468,7 @@
             style="background:#ffd54f;border-color:#ffd54f;color:#000;font-weight:700"
             title="Пересчитать всю программу, сохранить в браузере и отправить на Google Drive">💾 Сохранить</button>
     <button class="btn btn-ghost" onclick="toggleManualMode()" id="manualModeBtn" title="Поставить автопересчёт на паузу и править данные вручную">✋ Ручной режим</button>
-    <button class="btn btn-ghost" onclick="openSyncModal()" title="Google Drive и резервные копии">☁ Синхр.</button>
+    <button class="btn btn-ghost" id="sync-btn" onclick="openSyncModal()" title="Google Drive и резервные копии">☁ Синхр.</button>
     <!-- Остальные разделы (Пары, Выборка, Аналитика, База, Статистика, Аудит,
          Экспорт, Импорт, Markdown, пароль, блокировка) открываются с Доски (🏠) -->
   </div>
@@ -2710,7 +2710,56 @@ function saveState() {
     try { autoBackup(localStorage.getItem(STORAGE_KEY)); } catch (e) { console.warn('autoBackup:', e); }
   }
   state._modifiedAt = Date.now();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    saveOk();
+  } catch (e) {
+    // Хранилище переполнено или закрыто браузером. Молчать здесь нельзя:
+    // на экране записи есть, а в браузере их нет — закрыл вкладку и потерял
+    // день. Поэтому не тост на две секунды, а полоса, которая не уходит,
+    // пока сохранение не удастся.
+    saveBroken(e);
+  }
+}
+
+/* Полоса «не сохраняется». Живёт вне разметки: создаётся при первой беде,
+   чтобы не занимать место в обычной работе. */
+var _saveBar = null;
+
+function saveOk() {
+  if (_saveBar) { _saveBar.remove(); _saveBar = null; }
+}
+
+function saveBroken(err) {
+  console.error('saveState:', err);
+  var full = err && (err.name === 'QuotaExceededError'
+    || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22);
+  if (_saveBar) return;                      // уже висит — второй раз не плодим
+  var bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;'
+    + 'background:#c0261a;color:#fff;padding:12px 14px;'
+    + 'font:600 14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;'
+    + 'box-shadow:0 6px 24px rgba(0,0,0,.45);display:flex;gap:10px;'
+    + 'align-items:center;flex-wrap:wrap';
+  var txt = document.createElement('div');
+  txt.style.cssText = 'flex:1 1 220px';
+  txt.textContent = full
+    ? 'Записи НЕ сохраняются: память браузера переполнена. Скачайте копию, иначе данные пропадут при закрытии.'
+    : 'Записи НЕ сохраняются в этом браузере. Скачайте копию, иначе данные пропадут при закрытии.';
+  var btn = document.createElement('button');
+  btn.textContent = 'Скачать копию';
+  btn.style.cssText = 'flex:0 0 auto;border:0;border-radius:8px;padding:9px 14px;'
+    + 'background:#fff;color:#c0261a;font:600 14px -apple-system,Roboto,sans-serif;cursor:pointer';
+  btn.onclick = function () {
+    try {
+      downloadFile('расчёт-аварийная-копия-' + todayStr() + '.json',
+        JSON.stringify(state, null, 2));
+    } catch (e2) { console.error('аварийная выгрузка:', e2); }
+  };
+  bar.appendChild(txt);
+  bar.appendChild(btn);
+  document.body.appendChild(bar);
+  _saveBar = bar;
 }
 function getDay(d) {
   if (!state.days[d]) state.days[d] = { carryover: null, out: [], in: [], note: '', carryoverManual: false, curatorPaid: 0 };
@@ -11176,6 +11225,7 @@ function resetSyncConfig() {
 }
 
 function refreshSyncUI() {
+  markSyncStale();            // после ручной отправки кнопка гаснет сразу
   const connected = !!accessToken;
   document.getElementById('sync-not-connected').style.display = connected ? 'none' : 'block';
   document.getElementById('sync-connected').style.display = connected ? 'block' : 'none';
@@ -11617,11 +11667,35 @@ function startAutoSync(intervalMin) {
   autoSyncTimer = setInterval(async () => {
     // Токен мог истечь — ensureToken внутри smartSync продлит его молча.
     try { await smartSync({ silent: true }); } catch(e) { console.warn('Autosync failed:', e); }
+    markSyncStale();                          // получилось или нет — видно на кнопке
   }, intervalMin * 60 * 1000);
 }
 
 function stopAutoSync() {
   if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; }
+}
+
+/* Давно не было копии на Google Drive.
+   Автосинхронизация при сбое пишет только в консоль: истёк токен — и копии
+   перестают уходить, а на экране ни слова. Данные при этом остаются
+   в одном-единственном браузере. Поэтому кнопка «Синхр.» сама желтеет,
+   когда последняя удачная отправка была давно. */
+const SYNC_STALE_DAYS = 3;
+
+function markSyncStale() {
+  const btn = document.getElementById('sync-btn');
+  if (!btn) return;
+  if (!getClientId()) return;                 // Drive не настроен — упрекать не за что
+  const last = parseInt(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || '0', 10);
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const stale = (days === null) || days >= SYNC_STALE_DAYS;
+  btn.style.color = stale ? '#ffb74d' : '';
+  btn.textContent = stale ? '⚠ Синхр.' : '☁ Синхр.';
+  btn.title = stale
+    ? (days === null
+        ? 'Копии на Google Drive ещё не было. Данные только в этом браузере.'
+        : 'Последняя копия на Google Drive — ' + days + ' дн. назад. Нажмите, чтобы отправить.')
+    : 'Google Drive и резервные копии';
 }
 
 // При запуске — если включён автосинк, попробуй запустить
@@ -11656,6 +11730,7 @@ if (location.protocol.indexOf('http') === 0 && 'serviceWorker' in navigator) {
 restoreSavedToken();
 initLoginScreen();
 bootstrapAutoSync();
+markSyncStale();
 // Если токен ещё действует — заранее поднимаем Google API для тихой синхронизации
 if (accessToken && getClientId()) { initGoogleApis(); }
 
@@ -11663,6 +11738,7 @@ if (accessToken && getClientId()) { initGoogleApis(); }
 let lastVisibilitySync = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
+    markSyncStale();          // вернулся на вкладку — увидел, свежа ли копия
     // Не чаще раз в 30 секунд
     const now = Date.now();
     if (now - lastVisibilitySync < 30000) return;
