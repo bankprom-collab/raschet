@@ -1111,11 +1111,16 @@
     letter-spacing: .8px; text-transform: uppercase;
   }
   .qe-pairs { display: flex; flex-wrap: wrap; gap: 7px; }
-  /* Пары по группам — «Пр.Мира» и её получатели одним блоком (v240) */
-  .qe-group { width: 100%; margin-bottom: 10px; }
-  .qe-group-lbl {
-    font-family: var(--font-ui); font-size: 10.5px; color: var(--muted);
-    margin-bottom: 5px; padding-left: 2px;
+  /* Пары по группам — колонками, одна группа = одна колонка (v241).
+     Владелец нарисовал именно так: «Пр.Мира-…» столбиком слева,
+     «Мухтар-…» столбиком справа, имя в каждой строке целиком. */
+  .qe-cols {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px 10px; align-items: start;
+  }
+  .qe-cols .qe-group { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .qe-cols .qe-pair {
+    width: 100%; text-align: left; white-space: normal; word-break: break-word;
   }
   .qe-pair {
     padding: 11px 14px; border-radius: 10px; cursor: pointer;
@@ -1483,7 +1488,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v240</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v241</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -7959,7 +7964,10 @@ function groupedPairs() {
   });
   return [...карта.entries()]
     .map(([группа, items]) => ({ группа, items: items.sort((a, b) => a.name.localeCompare(b.name, 'ru')) }))
-    .sort((a, b) => a.группа.localeCompare(b.группа, 'ru'));
+    /* Крупные группы — первыми, то есть левее (v241): так «Пр.Мира» с четырьмя
+       получателями стоит слева, как владелец и нарисовал. При равном числе
+       пар — по алфавиту, чтобы порядок не прыгал. */
+    .sort((a, b) => b.items.length - a.items.length || a.группа.localeCompare(b.группа, 'ru'));
 }
 
 function renderClientSelects() {
@@ -8379,18 +8387,14 @@ function qeRenderPairs() {
   if (!wrap) return;
   const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
   const cur = sel ? sel.value : '';
-  /* Пары идут группами по первой части имени (v240) — внутри группы видно
-     только получателя, имя целиком осталось в подсказке. */
-  wrap.innerHTML = groupedPairs().map(g =>
-      `<div class="qe-group">
-        <div class="qe-group-lbl">${escapeHtml(g.группа)}</div>
-        <div class="qe-pairs">${g.items.map(x => {
-          const хвост = x.name.slice(g.группа.length).replace(/^\s*-\s*/, '') || x.name;
-          return `<button class="qe-pair${x.name === cur ? ' on' : ''}" onclick="qePickPair(${x.idx})"
-            title="${escapeHtml(x.name)}">${escapeHtml(хвост)}</button>`;
-        }).join('')}</div>
-      </div>`).join('')
-    + `<button class="qe-pair add" onclick="qeAddPair()">➕ Пара</button>`;
+  /* Каждая группа — своя колонка, имя пары в строке целиком (v241).
+     Владелец нарисовал: слева столбик «Пр.Мира-…», справа «Мухтар-…». */
+  wrap.innerHTML = `<div class="qe-cols">`
+    + groupedPairs().map(g =>
+      `<div class="qe-group">${g.items.map(x =>
+        `<button class="qe-pair${x.name === cur ? ' on' : ''}" onclick="qePickPair(${x.idx})">${escapeHtml(x.name)}</button>`
+      ).join('')}</div>`).join('')
+    + `</div><button class="qe-pair add" onclick="qeAddPair()" style="margin-top:10px">➕ Пара</button>`;
 }
 
 /** Выбрать пару по её месту в state.clients (индекс — чтобы не экранировать имя). */
