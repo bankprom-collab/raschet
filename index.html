@@ -1488,7 +1488,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v246</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v247</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5562,6 +5562,35 @@ function filterPairRows(q) {
     const имя = el.querySelector('.wds-pair');
     el.hidden = !!строка && !(имя && имя.textContent.toLowerCase().includes(строка));
   });
+}
+
+/* Даты приходов, из которых сложился долг пары (v247). Владелец про отчёт
+   за день: «ещё надо указать, когда эти суммы пришли, срок прихода».
+   Берём те же приходы, что и строка задолженности: с даты начала счёта пары,
+   в своём периоде (текущая неделя или просрочка), не закрытые целиком. */
+function pairDebtIncomeDates(pair, scope) {
+  const p = (pair || '').trim();
+  if (!p) return [];
+  const день = currentDate;
+  const cover = pairPaidCoverage(день, 'fifo', undefined, true);
+  const start = pairStart(p);
+  const thisWeek = weekMondayStr(день);
+  const даты = [];
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день) break;
+    if (d < start) continue;
+    const wk = weekMondayStr(d);
+    if (scope === 'current' && wk < thisWeek) continue;
+    if (scope === 'overdue' && wk >= thisWeek) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      if ((r.client || '').trim() !== p) return;
+      if ((cover[p + '#' + d + '#' + idx] || 0) >= 0.9995) return;   // выдан целиком
+      if (!даты.includes(d)) даты.push(d);
+    });
+  }
+  return даты;
 }
 
 function pairPartialHtml(pair, scope) {
@@ -10034,8 +10063,10 @@ function printDayReport() {
   const debtRows = [...D.rows, ...D.overdueRows].map(r => {
     const due = pairDueDates(r.name, d)[0];
     const share = Math.round(pairPaidShare(r.name, d) * 100);
+    /* v247: когда пришли деньги, из которых сложился этот долг */
+    const пришло = pairDebtIncomeDates(r.name, r.carry ? 'overdue' : 'current');
     return `<tr>
-      <td>${escapeHtml(r.name)}${due ? '<br><span class="bd">отдать до ' + formatDateShort(due.due) + '</span>' : ''}</td>
+      <td>${escapeHtml(r.name)}${пришло.length ? '<br><span class="bd">пришло ' + пришло.map(formatDateShort).join(', ') + '</span>' : ''}${due ? '<br><span class="bd">отдать до ' + formatDateShort(due.due) + '</span>' : ''}</td>
       <td style="text-align:right">${money(r.base || 0)}</td>
       <td style="text-align:right">${money(r.v1)}</td>
       <td style="text-align:right">${money(r.v2)}</td>
