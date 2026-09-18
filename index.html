@@ -1488,7 +1488,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v242</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v243</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5642,7 +5642,7 @@ function pairPartialHtml(pair, scope) {
 function renderWeekDebtSummary() {
   const box = document.getElementById('week-debt-summary');
   if (!box) return;
-  const isFri = new Date(currentDate + 'T12:00:00').getDay() === 5;
+  // v243: признак пятницы здесь больше не нужен — блок одинаков в любой день
 
   // Подпись процента: 13 → «13», 15.5 → «15,5»
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
@@ -5700,10 +5700,12 @@ function renderWeekDebtSummary() {
   const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(G.grandBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(G.grandTotal)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(G.grandTotal2)}</b> · разница: <b style="color:var(--accent)">${fmt(G.grandDiff)}</b>`
     + (overdueRows.length ? ` <span style="font-size:10.5px;color:#f59e0b">(включая просрочку ${fmt(overdueTotal)})</span>` : '');
 
-  const mainBlock = rows.length ? `<div class="week-debt-block${isFri ? ' fri' : ''}">
+  /* v243: пятница из блока убрана совсем — ни подписи, ни подсветки.
+     Владелец: «Пятница нам в данном случае не нужна, нам нужна фактическая
+     на день задолженность». Блок выглядит одинаково в любой день. */
+  const mainBlock = rows.length ? `<div class="week-debt-block">
     <div class="wds-head">
-      <!-- v242: владелец попросил заголовок «на текущий период» и дату -->
-      <span>📋 Задолженность по парам на текущий период · на ${formatDateShort(currentDate)}${isFri ? ' · ПЯТНИЦА' : ''}</span>
+      <span>📋 Задолженность по парам на текущий период · на ${formatDateShort(currentDate)}</span>
       <span class="wds-total">${totalLine}</span>
     </div>
     ${balanceReconcileHtml(currentDate)}
