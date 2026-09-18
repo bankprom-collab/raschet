@@ -273,19 +273,7 @@
     transition: opacity .15s;
   }
   tr:hover .debt-rem { opacity: 1; }
-  /* Задолженность по паре за неделю в приходах — «блеклый удалённый свет» */
-  .pair-week-debt {
-    font-size: 11px; font-weight: 600; margin-top: 3px;
-    color: #c98a5e; opacity: .32;
-    transition: opacity .18s;
-  }
-  tr:hover .pair-week-debt { opacity: .7; }
-  /* В пятницу долг подсвечивается заметно — конец недели, видно кому сколько должны */
-  .pair-week-debt.fri {
-    opacity: .9; color: #ff8a4a;
-    text-shadow: 0 0 10px rgba(255,138,74,.35);
-  }
-  tr:hover .pair-week-debt.fri { opacity: 1; }
+  /* v248: правила .pair-week-debt убраны — класс нигде не выводится. */
   /* Сводный блок задолженностей по парам за неделю */
   .week-debt-block {
     margin: 0 14px 14px; padding: 12px 14px;
@@ -302,11 +290,7 @@
   @media (hover: none), (pointer: coarse) {
     .week-debt-block { opacity: 1; }
   }
-  .week-debt-block.fri {
-    opacity: 1; border-color: rgba(255,138,74,.5);
-    background: rgba(255,138,74,.07);
-    box-shadow: 0 0 22px rgba(255,138,74,.16);
-  }
+  /* v248: подсветка блока по пятницам убрана вслед за самой пометкой (v243). */
   .wds-head {
     display: flex; justify-content: space-between; align-items: center;
     font-family: var(--font-ui);
@@ -1041,26 +1025,8 @@
   .chip-ok   { background: rgba(0,229,176,.13); color: var(--accent); }
   .chip-info { background: rgba(123,140,255,.14); color: var(--accent3); }
 
-  /* ── ЛИПКАЯ ПАНЕЛЬ ВВОДА (v136) ── */
-  #quick-bar { display: none; }
+  /* v248: стили липкой панели убраны вслед за самой панелью (v239). */
   @media(max-width: 600px) {
-    #quick-bar {
-      display: flex; align-items: center; gap: 12px;
-      position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
-      padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
-      background: rgba(22,25,32,.96); border-top: 1px solid var(--border);
-      backdrop-filter: blur(8px);
-    }
-    #quick-bar .qb-sum { display: flex; flex-direction: column; min-width: 0; }
-    #quick-bar .qb-sum .l { font-family: var(--font-ui); font-size: 10.5px; color: var(--muted); }
-    #quick-bar .qb-sum b { font-family: var(--font-num); font-size: 17px; color: var(--accent); }
-    #quick-bar .qb-add {
-      margin-left: auto; flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%;
-      border: none; background: var(--accent); color: #000;
-      font-size: 26px; font-weight: 700; line-height: 1; cursor: pointer;
-      box-shadow: 0 6px 18px rgba(0,229,176,.28);
-    }
-    /* v239: отступ под липкую панель больше не нужен — панели нет */
     main { padding-bottom: 16px; }
   }
 
@@ -1488,7 +1454,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v247</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v248</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2824,10 +2790,6 @@ function weekMondayStr(dateStr) {
    фильтры по дню недели сняты. Оставлено на случай, если правило вернётся —
    тогда его надо ставить одновременно в pairDebtByIncomes, pairPaidCoverage,
    pairReportRows и во всех накопителях недели, иначе блоки разойдутся. */
-function isWeekday(dateStr) {
-  const dow = new Date(dateStr + 'T12:00:00').getDay();
-  return dow >= 1 && dow <= 5;
-}
 // У строки задан второй процент?
 function hasSecondPct(r) {
   return (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
@@ -3322,9 +3284,6 @@ function curatorPaidTotal(dayStr) {
   return sum;
 }
 // Текущий остаток «КУРАТОР КО МНЕ» за неделю: накоплено (пн–пт) − отдано.
-function curatorRunningBalance(dayStr) {
-  return curatorWeeklyAccrued(dayStr) - curatorPaidTotal(dayStr);
-}
 
 /* ── ДОЛГ КУРАТОРУ СКВОЗНОЙ ────────────────────────────────────────────────
    Правило владельца остаётся прежним: невыданное куратору не начисляется.
@@ -3655,29 +3614,6 @@ function curatorResetUndo() {
 // «На руки» считают через `dealsAccruedTotal` — то же правило «только с
 // выданной части», но без границы недели, чтобы приход, выданный позже, не
 // пропадал между неделями (v121). Оставлена как запись недельного варианта.
-function dealsWeeklyAccrued(dayStr) {
-  let sum = 0;
-  const thisWeek = weekMondayStr(dayStr);
-  const allDays = Object.keys(state.days).sort();
-  const cover = pairPaidCoverage(dayStr);   // доля выданности каждого прихода
-  for (const d of allDays) {
-    if (d > dayStr) break;
-    if (weekMondayStr(d) !== thisWeek) continue; // только текущая неделя
-    const dd = state.days[d];
-    if (!dd || !Array.isArray(dd.in)) continue;
-    dd.in.forEach((r, idx) => {
-      const hasP1 = (r.pct !== null && r.pct !== undefined && r.pct > 0);
-      const hasP2 = (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
-                     && r.total2 !== null && r.total2 !== undefined);
-      if (hasP1 && hasP2) {
-        // Итог сделок — только по ВЫДАННОЙ на руки части прихода.
-        const frac = cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
-        if (frac > 0) sum += r100((r100(r.total) - r100(r.total2)) * frac);
-      }
-    });
-  }
-  return sum;
-}
 
 /* Когда приход был реально выдан (v160).
    Разносит выдачи по приходам ТЕМ ЖЕ порядком, что и `pairPaidCoverage`
@@ -3785,35 +3721,6 @@ function handTotals(dayStr) {
 
 // Кнопка «Отдана»: записывает, что часть или вся накопленная сумма куратора
 // отдана. Отданное вычитается из нарастающего итога «КУРАТОР КО МНЕ».
-function markCuratorPaid() {
-  const balance = curatorDebt(ledgerDay());
-  if (balance <= 0) {
-    alert('Накопленная сумма куратора уже нулевая — отдавать нечего.');
-    return;
-  }
-  const whole = confirm(
-    'КУРАТОР КО МНЕ — накоплено: ' + fmt(balance) + '\n\n' +
-    'OK — отдана ВСЯ сумма\n' +
-    'Отмена — указать часть');
-  let amount;
-  if (whole) {
-    amount = balance;
-  } else {
-    const raw = prompt('Какая ЧАСТЬ суммы отдана? (₽)', '');
-    if (raw === null) return;
-    const cleaned = (raw || '').trim().replace(/\s/g, '').replace(',', '.');
-    amount = parseFloat(cleaned);
-    if (isNaN(amount) || amount <= 0) { alert('Введите корректную сумму больше нуля.'); return; }
-    if (amount > balance) {
-      if (!confirm('Указано больше, чем накоплено (' + fmt(balance) + '). Всё равно записать?')) return;
-    }
-  }
-  const day = getDay(currentDate);
-  day.curatorPaid = (day.curatorPaid || 0) + amount;
-  saveState();
-  render();
-  if (typeof showToast === 'function') showToast('Отдано куратору: ' + fmt(amount));
-}
 
 // Убрать отметку «отдано» за текущий день.
 function clearCuratorPaidToday() {
@@ -3827,13 +3734,6 @@ function clearCuratorPaidToday() {
 }
 
 // Возвращает точное (не округлённое) значение финального итога — для отображения
-function calcInRowFinalExact(r) {
-  if (r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0
-      && r.total2 !== null && r.total2 !== undefined) {
-    return r.total2;
-  }
-  return r.total;
-}
 
 // ── FORMAT ─────────────────────────────────────────────────────────────────
 // Округление до сотен по математическому правилу (≥50 → вверх, <50 → вниз).
@@ -4806,49 +4706,6 @@ function pairWeekReceived(dayStr, pairName) {
 // (по будням, как и везде) за вычетом выдач строго позже afterDate. Формулы —
 // те же, что в pairWeekAccruals/pairWeekReceived, расчётная логика не меняется.
 // Возвращает объект-строку (как в rows) либо null, если после отдачи остатка нет.
-function pairRemainingAfterGivenDate(dayStr, pairName, afterDate) {
-  const pair = (pairName || '').trim();
-  if (!pair || !afterDate) return null;
-  const thisWeek = weekMondayStr(dayStr);
-  let acc1 = 0, acc2 = 0, accBase = 0, rec = 0;
-  let has2 = false, pct1 = null, pct2 = null;
-  const cov = pairPaidCoverage(dayStr, 'fifo', undefined, true);   // v228: для базы
-  const allDays = Object.keys(state.days).sort();
-  for (const d of allDays) {
-    if (d > dayStr || weekMondayStr(d) !== thisWeek) continue;
-    if (d <= afterDate) continue;           // по дату отдачи включительно — закрыто
-    const dd = state.days[d];
-    if (!dd) continue;
-    if (Array.isArray(dd.in)) {   // v224: приход считается в любой день недели
-      dd.in.forEach((r, idx) => {
-        if ((r.client || '').trim() !== pair) return;
-        // В базу — полная сумма прихода, если он закрыт не целиком (v228)
-        if ((cov[pair + '#' + d + '#' + idx] || 0) < 0.9995) accBase += (r.amount || 0);
-        acc1 += calcInRowFinal(r);
-        if (r.pct !== null && r.pct !== undefined && r.pct > 0) pct1 = r.pct;
-        if (hasSecondPct(r)) { acc2 += r100(r.total2); has2 = true; pct2 = r.pct2; }
-      });
-    }
-    if (Array.isArray(dd.out)) {                  // выдача — в любой день
-      dd.out.forEach(o => { if ((o.client || '').trim() === pair) rec += (o.amount || 0); });
-    }
-  }
-  const net = acc1 - rec;
-  const remaining = r100(net);
-  if (remaining <= 0) return null;
-  const frac = acc1 > 0 ? Math.max(0, net / acc1) : 0;
-  const v2 = (has2 && net > 0) ? r100(acc2 * frac) : null;   // v214
-  return {
-    name: pair,
-    base: accBase,   // v228: полные суммы, без округления и без доли
-    v1: remaining,
-    v2: v2,
-    has2: has2 && v2 !== null && v2 > 0,
-    pct1: pct1, pct2: pct2,
-    carry: false,
-    reopenedAfterGiven: true
-  };
-}
 
 // ЕДИНЫЙ расчёт «Задолженность по парам за неделю»: для каждой пары — начислено
 // за текущую неделю (пн–пт, после %) минус реально выдано ей на руки за эту же
@@ -5754,7 +5611,6 @@ function renderWeekDebtSummary() {
 // Показывает ровно то же, что блок «Задолженность по парам за неделю»: по
 // каждой паре — сумму после 1-го % («нам должны»), после 2-го % («мы должны
 // отдать») и разницу между ними.
-function computeDebtOut() { return computeWeekPairDebt(); }
 
 function renderDebtOutTile() {
   const body = document.getElementById('tileDebtOutBody');
@@ -6880,34 +6736,6 @@ function curatorMineTotals(dayStr) {
   return { accrued, paid, remain: accrued - paid };
 }
 
-function collectCuratorMineRows(dayStr) {
-  const rows = [];
-  const M = curatorWeekMaps(dayStr);
-  for (const d of M.allDays) {
-    if (d > dayStr) break;
-    const wk = weekMondayStr(d);
-    if (!M.isShownWeek(wk)) continue;
-    const dd = state.days[d];
-    if (!dd || !Array.isArray(dd.in)) continue;
-    dd.in.forEach((r, idx) => {
-      if (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0) {
-        const frac = M.cover[(r.client || '').trim() + '#' + d + '#' + idx] || 0;
-        if (frac > 0) {
-          rows.push({
-            date: d,
-            pair: r.client || '—',
-            amount: r.amount || 0,
-            pctCur: r.pctCur,
-            frac: frac,                                 // доля выданности (для пометки)
-            curatorSum: floor100((r.amount || 0) * r.pctCur / 100 * frac),
-            idx: idx,
-          });
-        }
-      }
-    });
-  }
-  return rows;
-}
 
 /* Плитка «На руки» на Доске — рядом с «Куратор ко мне» (v119).
    Считает то же, что строка «= НА РУКИ» под приходами и плитка на дашборде:
@@ -8982,85 +8810,6 @@ function deleteRow(type, i) {
   showToast('Запись удалена');
 }
 
-function editRow(type, i) {
-  const day = getDay(currentDate);
-  const r = day[type][i];
-  if (!r) return;
-  if (type === 'out') {
-    const newAmt = prompt(`Редактировать сумму для ${r.client}:`, r.amount);
-    if (newAmt === null) return;
-    const v = parseFloat(String(newAmt).replace(',', '.'));
-    if (isNaN(v) || v <= 0) { showToast('Неверная сумма', true); return; }
-    r.amount = v;
-    const newNote = prompt('Примечание (пусто = убрать, на расчёт не влияет):', r.note || '');
-    if (newNote !== null) {
-      r.note = newNote.trim();
-    }
-  } else {
-    const cur = r.parts ? r.parts.join('+') : String(r.amount);
-    const newAmt = prompt(`Сумма для ${r.client} (можно "5000+3000"):`, cur);
-    if (newAmt === null) return;
-    const parsed = parseSumString(newAmt);
-    if (!parsed || parsed.sum <= 0) { showToast('Неверная сумма', true); return; }
-    const newAmount = parsed.sum;
-    const newParts = parsed.parts.length > 1 ? parsed.parts : null;
-    const newPct = prompt('Первый процент комиссии (например 13):', r.pct || '');
-    if (newPct === null) return;
-    const p1 = parseDecimal(newPct);
-    if (isNaN(p1) || p1 <= 0) { showToast('Неверный первый процент', true); return; }
-    const newPct2 = prompt('Второй процент комиссии (пусто = без второго процента):', r.pct2 || '');
-    if (newPct2 === null) return;
-    let p2 = null;
-    if (String(newPct2).trim() !== '') {
-      p2 = parseDecimal(newPct2);
-      if (isNaN(p2) || p2 <= 0) { showToast('Неверный второй процент', true); return; }
-    }
-    // Всё провалидировано — только теперь мутируем строку (иначе отмена/ошибка
-    // на промпте процента оставила бы сумму новой, а %/итог старыми — рассинхрон).
-    r.amount = newAmount;
-    r.parts = newParts;
-    r.pct = p1;
-    r.pct2 = p2;
-    r.total = r.amount * (1 - p1/100);
-    r.total2 = (p2 !== null) ? r.amount * (1 - p2/100) : null;
-    const newPctCur = prompt('Процент куратору (пусто = не считать):', r.pctCur || '');
-    if (newPctCur !== null) {
-      const pc = parseDecimal(newPctCur);
-      r.pctCur = (isNaN(pc) || pc <= 0) ? null : pc;
-    }
-    // Имя пары (что участвует в расчёте). Обычный формат «Клиент-Получатель».
-    // Пример: если было «Вейс(рук)-Ленин-Авангард» и «Авангард» — просто пометка,
-    // то здесь оставляем «Вейс(рук)-Ленин», а «Авангард» вбиваем в метку ниже.
-    const newClient = prompt(
-      'Название пары (что участвует в расчёте):\n\n' +
-      'Пример: если было «Вейс(рук)-Ленин-Авангард» и «Авангард» — только пометка,\n' +
-      'здесь оставь «Вейс(рук)-Ленин», а «Авангард» вбей в поле «Метка» на следующем шаге.',
-      r.client || ''
-    );
-    if (newClient !== null) {
-      const nc = newClient.trim();
-      if (nc) r.client = nc;
-    }
-    // Метка/примечание к приходу — НЕ участвует в расчёте, только для отображения.
-    const newTag = prompt(
-      'Метка (примечание к приходу, НЕ участвует в расчёте, пусто = убрать):\n\n' +
-      'Пример: «Авангард» — покажется рядом с парой, но в расчёте пары не участвует.',
-      r.tag || ''
-    );
-    if (newTag !== null) {
-      const t = newTag.trim();
-      r.tag = t || null;
-    }
-    const newNote = prompt('Дополнительное примечание к сумме (пусто = убрать):', r.note || '');
-    if (newNote !== null) {
-      r.note = newNote.trim();
-    }
-  }
-  recalcCarryoversAfter(currentDate);
-  saveState();
-  render();
-  showToast('Запись обновлена');
-}
 
 function saveNote() {
   getDay(currentDate).note = document.getElementById('day-note').value;
@@ -11203,12 +10952,6 @@ async function pickItogoFolder() {
   }
 }
 
-async function resetItogoFolder() {
-  if (!confirm('Забыть сохранённую папку? При следующем экспорте программа спросит её заново.')) return;
-  await idbDel(FOLDER_HANDLE_KEY);
-  await updateExportBtnTitle();
-  showToast('Папка забыта');
-}
 
 // Меню по правому клику на кнопку экспорта
 async function changeItogoFolder(e) {
@@ -11299,9 +11042,6 @@ async function exportData() {
   showToast('Данные скачаны в «Загрузки»');
 }
 
-function saveToGDriveHint() {
-  openSyncModal();
-}
 
 // ── TOAST ──────────────────────────────────────────────────────────────────
 function showToast(msg, isError) {
