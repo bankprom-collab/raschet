@@ -1111,6 +1111,12 @@
     letter-spacing: .8px; text-transform: uppercase;
   }
   .qe-pairs { display: flex; flex-wrap: wrap; gap: 7px; }
+  /* Пары по группам — «Пр.Мира» и её получатели одним блоком (v240) */
+  .qe-group { width: 100%; margin-bottom: 10px; }
+  .qe-group-lbl {
+    font-family: var(--font-ui); font-size: 10.5px; color: var(--muted);
+    margin-bottom: 5px; padding-left: 2px;
+  }
   .qe-pair {
     padding: 11px 14px; border-radius: 10px; cursor: pointer;
     background: var(--card); border: 1px solid var(--border);
@@ -1477,7 +1483,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v239</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v240</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -7931,11 +7937,39 @@ function renderSummary(day) {
   }
 }
 
+/* Группа пары — то, что стоит до первого дефиса (v240). Владелец 18.09.2026:
+   «Пр.Мира-Ленин, Пр.Мира-Испин, Пр.Мира-Дима ВПБ химия, Пр.Мира-Кирилл ВВ —
+   группируй „Пр.Мира“ вместе, чтобы легко выбирать». Дефис ПЕРВЫЙ: в именах
+   получателей дефисы тоже встречаются («Вейс(рук)-Рынок»). */
+function pairGroupName(name) {
+  const s = (name || '').trim();
+  const i = s.indexOf('-');
+  return i > 0 ? s.slice(0, i).trim() : s;
+}
+
+/* Пары, сгруппированные по этой части: [{ группа, items: [{ name, idx }] }].
+   idx — место в state.clients, по нему выбирает qePickPair. Порядок групп
+   и пар внутри — по алфавиту, чтобы список не прыгал. */
+function groupedPairs() {
+  const карта = new Map();
+  state.clients.forEach((c, idx) => {
+    const g = pairGroupName(c);
+    if (!карта.has(g)) карта.set(g, []);
+    карта.get(g).push({ name: c, idx });
+  });
+  return [...карта.entries()]
+    .map(([группа, items]) => ({ группа, items: items.sort((a, b) => a.name.localeCompare(b.name, 'ru')) }))
+    .sort((a, b) => a.группа.localeCompare(b.группа, 'ru'));
+}
+
 function renderClientSelects() {
   ['out-client','in-client'].forEach(id => {
     const sel = document.getElementById(id);
     const cur = sel.value;
-    sel.innerHTML = state.clients.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')
+    sel.innerHTML = groupedPairs().map(g =>
+        `<optgroup label="${escapeHtml(g.группа)}">`
+        + g.items.map(x => `<option value="${escapeHtml(x.name)}">${escapeHtml(x.name)}</option>`).join('')
+        + `</optgroup>`).join('')
       + `<option value="__addpair__">➕ Добавить пару…</option>`;
     if (cur && state.clients.includes(cur)) sel.value = cur;
     else if (state.clients.length) sel.value = state.clients[0];
@@ -8345,9 +8379,17 @@ function qeRenderPairs() {
   if (!wrap) return;
   const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
   const cur = sel ? sel.value : '';
-  wrap.innerHTML = state.clients.map((c, i) =>
-      `<button class="qe-pair${c === cur ? ' on' : ''}" onclick="qePickPair(${i})">${escapeHtml(c)}</button>`
-    ).join('')
+  /* Пары идут группами по первой части имени (v240) — внутри группы видно
+     только получателя, имя целиком осталось в подсказке. */
+  wrap.innerHTML = groupedPairs().map(g =>
+      `<div class="qe-group">
+        <div class="qe-group-lbl">${escapeHtml(g.группа)}</div>
+        <div class="qe-pairs">${g.items.map(x => {
+          const хвост = x.name.slice(g.группа.length).replace(/^\s*-\s*/, '') || x.name;
+          return `<button class="qe-pair${x.name === cur ? ' on' : ''}" onclick="qePickPair(${x.idx})"
+            title="${escapeHtml(x.name)}">${escapeHtml(хвост)}</button>`;
+        }).join('')}</div>
+      </div>`).join('')
     + `<button class="qe-pair add" onclick="qeAddPair()">➕ Пара</button>`;
 }
 
