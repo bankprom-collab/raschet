@@ -1488,7 +1488,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v244</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v245</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -6898,8 +6898,11 @@ function renderHandTile() {
     body.innerHTML = 'Выданных сделок пока нет.';
     return;
   }
+  /* Крупной цифрой — ОСТАТОК К ПОЛУЧЕНИЮ (v245). Владелец про 585 900:
+     «это уходит в архив, показывай только реальную сумму, которую я должен
+     получить». Начисленное осталось строкой «начислено» в разборе ниже. */
   body.innerHTML =
-    `<div style="font-family:var(--font-num);font-size:20px;font-weight:700;color:#00e5b0;line-height:1.2">${fmt(hw.hand)}</div>
+    `<div style="font-family:var(--font-num);font-size:20px;font-weight:700;color:#00e5b0;line-height:1.2">${fmt(handRemain(ledgerDay()))}</div>
      <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5;margin-top:4px">
        <span style="color:var(--muted-bright)">итог сделок</span>
        <span style="font-family:var(--font-num);color:var(--accent3);font-weight:700">${fmt(hw.deals)}</span>
@@ -6907,21 +6910,21 @@ function renderHandTile() {
      <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
        <span style="color:var(--muted-bright)">− куратору</span>
        <span style="font-family:var(--font-num);color:#ffb74d;font-weight:700">${fmt(hw.curator)}</span>
+     </div>
+     <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
+       <span style="color:var(--muted-bright)">= начислено</span>
+       <span style="font-family:var(--font-num);color:var(--muted-bright);font-weight:700">${fmt(hw.hand)}</span>
      </div>` + (() => {
        /* Получено и остаток — если владелец записывал получения (v212).
           Пока ничего не записано, плитка выглядит как раньше. */
        const HS = handSettlement(ledgerDay());
        const got = HS.pays.reduce((x, p) => x + p.amount, 0);
        if (!got && !HS.reset) return '';
-       const left = HS.open.reduce((x, a) => x + a.rest, 0);
+       /* Строки «осталось получить» здесь больше нет (v245): это и есть
+          крупная цифра наверху, второй раз её писать незачем. */
        return `<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5">
            <span style="color:var(--muted-bright)">− получено</span>
            <span style="font-family:var(--font-num);color:var(--muted-bright);font-weight:700">${fmt(got)}</span>
-         </div>
-         <div style="display:flex;justify-content:space-between;gap:8px;line-height:1.5;
-              margin-top:3px;padding-top:3px;border-top:1px dashed var(--border)">
-           <span style="color:var(--accent)">осталось получить</span>
-           <span style="font-family:var(--font-num);color:var(--accent);font-weight:700">${fmt(left)}</span>
          </div>`;
      })();
 }
