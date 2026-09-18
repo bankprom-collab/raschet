@@ -1454,7 +1454,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v248</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v249</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10123,11 +10123,21 @@ function ensureHtml2Pdf() {
     'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',
     'https://unpkg.com/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js'
   ];
+  /* Контрольная сумма файла (v249). Браузер сверяет её перед запуском: если
+     на стороне cdnjs или unpkg файл подменят, скрипт просто не выполнится,
+     и чужой код не получит доступ к данным на странице. Обе ссылки ведут
+     на один и тот же файл 0.10.1 — 905 956 байт, суммы совпадают побайтно,
+     проверено загрузкой с обоих источников.
+     ⚠️ Меняете версию html2pdf — пересчитайте сумму, иначе PDF перестанет
+     собираться: openssl dgst -sha384 -binary файл | openssl base64 -A */
+  const H2PDF_SRI = 'sha384-Yv5O+t3uE3hunW8uyrbpPW3iw6/5/Y7HitWJBLgqfMoA36NogMmy+8wWZMpn3HWc';
   _html2pdfLoading = new Promise((resolve, reject) => {
     const tryLoad = (i) => {
       if (i >= urls.length) { _html2pdfLoading = null; reject(new Error('не удалось загрузить html2pdf')); return; }
       const s = document.createElement('script');
       s.src = urls[i];
+      s.integrity = H2PDF_SRI;
+      s.crossOrigin = 'anonymous';   // без этого проверка суммы не работает
       s.onload = () => resolve();
       s.onerror = () => { s.remove(); tryLoad(i + 1); };
       document.head.appendChild(s);
