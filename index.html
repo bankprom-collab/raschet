@@ -1488,7 +1488,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v241</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v242</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5024,8 +5024,26 @@ function computeWeekPairDebt() {
     }
   }
 
-  rows.sort((x, y) => y.v1 - x.v1);
-  overdueRows.sort((x, y) => y.v1 - x.v1);
+  /* Пары одной группы идут подряд (v242). Владелец: «Пр.Мира-Кирил ВиВи,
+     Пр.Мира-Ленин, Пр.Мира-Дима ВПБ — они будут сгруппированы по парам
+     задолженности, то есть идут подряд». Группа — часть имени до первого
+     дефиса, та же, что в выборе пары (pairGroupName).
+     Порядок: сначала группы с большим долгом, внутри группы — тоже
+     по убыванию. Сортировка не трогает суммы, только показ. */
+  const поГруппам = (список) => {
+    const долгГруппы = {};
+    список.forEach(r => {
+      const g = pairGroupName(r.name);
+      долгГруппы[g] = (долгГруппы[g] || 0) + r.v1;
+    });
+    список.sort((x, y) => {
+      const gx = pairGroupName(x.name), gy = pairGroupName(y.name);
+      if (gx !== gy) return (долгГруппы[gy] - долгГруппы[gx]) || gx.localeCompare(gy, 'ru');
+      return y.v1 - x.v1;
+    });
+  };
+  поГруппам(rows);
+  поГруппам(overdueRows);
   const totalBase = rows.reduce((s, r) => s + (r.base || 0), 0); // сумма ДО процентов (для отображения)
   const total = rows.reduce((s, r) => s + r.v1, 0);       // сумма, которую нам должны (после 1-го %)
   const total2 = rows.reduce((s, r) => s + r.v2, 0);      // сумма, которую мы должны отдать (после 2-го %)
@@ -5684,7 +5702,8 @@ function renderWeekDebtSummary() {
 
   const mainBlock = rows.length ? `<div class="week-debt-block${isFri ? ' fri' : ''}">
     <div class="wds-head">
-      <span>📋 Задолженность по парам за неделю${isFri ? ' · ПЯТНИЦА' : ''}</span>
+      <!-- v242: владелец попросил заголовок «на текущий период» и дату -->
+      <span>📋 Задолженность по парам на текущий период · на ${formatDateShort(currentDate)}${isFri ? ' · ПЯТНИЦА' : ''}</span>
       <span class="wds-total">${totalLine}</span>
     </div>
     ${balanceReconcileHtml(currentDate)}
