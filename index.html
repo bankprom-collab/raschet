@@ -1508,7 +1508,7 @@
   <div class="kb-wrap">
     <div class="kb-top">
       <nav class="kb-crumbs" id="kbCrumbs" aria-label="Где вы в книге"></nav>
-      <button class="kb-close" onclick="closeBook()">Закрыть</button>
+      <button class="kb-close" onclick="closeBook()" title="Доска и все остальные разделы">Доска</button>
     </div>
     <div class="kb-book">
       <div class="kb-binding" id="kbBinding" aria-hidden="true"></div>
@@ -1638,7 +1638,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v257</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v258</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2415,7 +2415,11 @@ function unlock() {
   render();
   updateExportBtnTitle();
   if (typeof updateManualModeBtn === 'function') updateManualModeBtn();
-  showBoard();   // после входа — домашний экран-доска
+  showBoard();   // Доска лежит под книгой — туда ведёт кнопка «Доска»
+  /* v258: главный экран — книга месяца. Владелец 26.09.2026: «книгу месяца
+     сделай главной, чтобы в первую очередь открывалась; доску и всё
+     остальное — дополнительным, по мере необходимости». */
+  try { openBook(); } catch (e) { console.warn('Книга не открылась:', e); }
   // Если подключён Google Drive — проверим, есть ли свежие данные
   // (тихо, на фоне; пользователь увидит результат через toast)
   setTimeout(() => {
@@ -4196,6 +4200,9 @@ function render() {
   renderInBody(day);
   renderSummary(day);
   renderClientSelects();
+  // Книга открыта (с v258 — сразу после входа) — держим её в синхроне:
+  // синхронизация с Диском подтягивает данные уже после того, как она открылась
+  try { kbRefreshIfOpen(); } catch (e) {}
 }
 
 /* Правка срока отдачи прямо из строки дня (v144).
@@ -10229,6 +10236,23 @@ function openBook() {
   kbDraw();
 }
 function closeBook() { document.getElementById('kbOverlay').classList.remove('open'); }
+
+/* Пересчитать открытую книгу, не сбивая место: глава и тетрадь ищутся
+   по имени пары и неделе — после пересчёта порядок глав может смениться. */
+function kbRefreshIfOpen() {
+  const o = document.getElementById('kbOverlay');
+  if (!kbSt || !kbData || !o || !o.classList.contains('open')) return;
+  const глава = kbSt.lvl >= 2 ? kbData.chapters[kbSt.c] : null;
+  const тетрадь = (глава && kbSt.lvl >= 3) ? глава.weeks[kbSt.w] : null;
+  kbData = kbMonthData(kbSt.ym);
+  const c = глава ? kbData.chapters.findIndex(x => x.name === глава.name) : -1;
+  const w = (c >= 0 && тетрадь) ? kbData.chapters[c].weeks.findIndex(x => тетрадь.carry ? x.carry : x.mon === тетрадь.mon) : -1;
+  if (kbSt.lvl >= 2 && c < 0) kbSt = { ym: kbSt.ym, lvl: 1 };
+  else if (kbSt.lvl >= 3 && w < 0) kbSt = { ym: kbSt.ym, lvl: 2, c };
+  else if (kbSt.lvl >= 2) kbSt = Object.assign({}, kbSt, { c }, kbSt.lvl >= 3 ? { w } : {});
+  kbDepth = kbSt.lvl;
+  kbDraw();
+}
 
 function kbGo(next) {
   kbDepth = kbSt.lvl;
