@@ -1638,7 +1638,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v256</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v257</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2572,6 +2572,13 @@ const DEFAULT_PAIRS = ['Аркадий2-Самв','Карапуз-Рома','П�
 // обращается на старте (иначе обращение в «мёртвой зоне» рушит загрузку и
 // данные молча сбрасываются в пустое состояние).
 const MIGRATION_VERSION = 9;
+/* Когда приход считается выданным целиком (v257). Владелец 26.09.2026:
+   «всё, что не додано, обязательно должно учитываться и показываться, что эти
+   деньги не выданы». До v257 порог был 0,05 % прихода: приход 758 300,
+   выдано 758 000 — 300 ₽ считались «выдано целиком» и пропадали из долга.
+   Теперь граница — только погрешность вычислений (доли копейки): закрыт
+   приход, по которому выдано всё до копейки. */
+const ДОЛЯ_EPS = 1e-9;
 let state = loadState();
 let currentDate = todayStr();
 
@@ -3149,7 +3156,7 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
       if ((r.client || '').trim() !== pair) return;
       const frac = cover[pair + '#' + d + '#' + idx] || 0;
       const left = 1 - frac;
-      if (left <= 0.0005) return;
+      if (left <= ДОЛЯ_EPS) return;
       const box = (wk >= weekStart) ? cur : ovd;
       if (gd && d <= gd) box.markedGiven = gd;   // отметка стоит, а деньги висят
       const after1 = calcInRowFinal(r) || 0;
@@ -4775,11 +4782,11 @@ function renderInBody(day) {
         const curOfRow = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
           ? floor100((r.amount || 0) * r.pctCur / 100 * frac) : 0;
         const handOfRow = r100(dealResult * frac) - curOfRow;
-        const waiting = inCount && frac < 0.9995;
+        const waiting = inCount && frac < 1 - ДОЛЯ_EPS;
         const waitNote = waiting
           ? `<div style="font-family:var(--font-ui);font-size:9px;color:var(--muted);
-               text-align:right;margin-top:2px">${frac > 0.0005
-                 ? 'выдано ' + Math.round(frac * 100) + '% — остальное после выдачи'
+               text-align:right;margin-top:2px">${frac > ДОЛЯ_EPS
+                 ? 'выдано ' + Math.floor(frac * 100) + '% — остальное после выдачи'
                  : 'в счёт пойдёт после выдачи: ' + fmt(dealResult - curFull)}</div>`
           : (inCount ? '' : `<div style="font-family:var(--font-ui);font-size:9px;color:var(--muted);
                text-align:right;margin-top:2px">до начала счёта — не участвует</div>`);
@@ -5278,13 +5285,13 @@ function closedByDateButUnpaid(dayStr) {
       const gd = dOut[wk + '::' + p];
       if (!gd || d > gd) return;                 // отметка эти приходы не закрывает
       const frac = cover[p + '#' + d + '#' + idx] || 0;
-      if (frac >= 0.9995) return;                // выдан целиком — вопросов нет
+      if (frac >= 1 - ДОЛЯ_EPS) return;          // выдан целиком — вопросов нет
       const after1 = calcInRowFinal(r) || 0;
       const остаток1 = r100(after1 * (1 - frac));
       if (остаток1 <= 0) return;
       const box = поПарам[p] || (поПарам[p] = { pair: p, rows: [], base: 0, v1: 0, v2: 0, has2: false });
       box.rows.push({ date: d, week: wk, gd: gd, amount: r.amount || 0,
-                      after1: after1, left1: остаток1, part: frac > 0.0005 });
+                      after1: after1, left1: остаток1, part: frac > ДОЛЯ_EPS });
       box.base += (r.amount || 0);
       box.v1 += остаток1;
       if (hasSecondPct(r)) { box.v2 += r100(r100(r.total2) * (1 - frac)); box.has2 = true; }
@@ -5644,7 +5651,7 @@ function pairDebtIncomeDates(pair, scope) {
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
       if ((r.client || '').trim() !== p) return;
-      if ((cover[p + '#' + d + '#' + idx] || 0) >= 0.9995) return;   // выдан целиком
+      if ((cover[p + '#' + d + '#' + idx] || 0) >= 1 - ДОЛЯ_EPS) return;   // выдан целиком
       if (!даты.includes(d)) даты.push(d);
     });
   }
@@ -5673,7 +5680,7 @@ function pairPartialHtml(pair, scope) {
     dd.in.forEach((r, idx) => {
       if ((r.client || '').trim() !== p) return;
       const frac = cover[p + '#' + d + '#' + idx] || 0;
-      if (frac <= 0.0005 || frac >= 0.9995) return;   // только частично выданные
+      if (frac <= ДОЛЯ_EPS || frac >= 1 - ДОЛЯ_EPS) return;   // только частично выданные
       const after1 = calcInRowFinal(r) || 0;
       const остаток1 = r100(after1 * (1 - frac));
       const выдано1 = after1 - остаток1;
@@ -6619,8 +6626,8 @@ function renderPairBaseBreakdownHtml(pair, remain, scope, onlyUnpaid) {
   inRows.forEach(r => {
     const frac = cover[p + '#' + r.date + '#' + r.idx] || 0;   // доля выдано
     const uf = 1 - frac;                                        // доля не выдано
-    const paidFull = uf <= 0.0005;
-    const whole = frac <= 0.0005;                              // приход выдача не тронула
+    const paidFull = uf <= ДОЛЯ_EPS;
+    const whole = frac <= ДОЛЯ_EPS;                              // приход выдача не тронула
     const a1 = r.after1 || 0;
     const a2 = (r.after2 === null || r.after2 === undefined) ? null : r.after2;
     allRows.push({
@@ -7050,7 +7057,7 @@ function handExcludedBlockHtml(dayStr) {
           <span style="color:var(--muted-bright)">${formatDateShort(r.date)} · ${escapeHtml(r.pair)} · ${fmt(r.amount)}</span>
           <span style="text-align:right;white-space:nowrap">
             <span style="color:var(--accent3)">${fmt(r.deal)}</span><br>
-            <span style="color:#ff8a4a;font-size:10.5px">${escapeHtml(r.why)}${r.frac > 0 && r.frac < 0.9995 ? ' · выдано ' + Math.round(r.frac * 100) + '%' : ''}</span>
+            <span style="color:#ff8a4a;font-size:10.5px">${escapeHtml(r.why)}${r.frac > 0 && r.frac < 1 - ДОЛЯ_EPS ? ' · выдано ' + Math.floor(r.frac * 100) + '%' : ''}</span>
           </span>
         </div>`).join('')}
       ${ex.length > shown.length ? `<div style="color:var(--muted);font-size:11px;padding-top:6px">…и ещё ${ex.length - shown.length} раньше</div>` : ''}
@@ -7157,8 +7164,8 @@ function openHandModal() {
         : (cov && cov.byDate ? cov.byDate : null);
       const partsNote = (cov && cov.parts && cov.parts.length > 1)
         ? `<div style="font-size:9.5px;color:var(--muted);font-family:var(--font-ui)">в ${cov.parts.length} приёма</div>` : '';
-      const part = (r.frac < 0.9995)
-        ? ` <span style="color:#ff8a4a;font-size:10.5px">выдано ${Math.round(r.frac * 100)}%</span>` : '';
+      const part = (r.frac < 1 - ДОЛЯ_EPS)
+        ? ` <span style="color:#ff8a4a;font-size:10.5px">выдано ${Math.floor(r.frac * 100)}%</span>` : '';
       const noDeal = (!r.deal && r.curator)
         ? `<div style="color:var(--expense);font-size:10px;font-family:var(--font-ui)">второй % не задан — прибыли нет</div>` : '';
       const gotNote = (r.gotPart > 0.5)
@@ -7412,8 +7419,8 @@ function openCuratorMineModal() {
     let acc = 0;
     const trs = list.map((r, i) => {
       const seq = rowSeq++;
-      const partial = (r.frac !== undefined && r.frac < 0.999)
-        ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.round(r.frac * 100)}%</span>` : '';
+      const partial = (r.frac !== undefined && r.frac < 1 - ДОЛЯ_EPS)
+        ? ` <span style="color:var(--muted);font-size:10.5px">· выдано ${Math.floor(r.frac * 100)}%</span>` : '';
       const partPaid = r.partPaid
         ? ` <span style="color:#ffb74d;font-size:10.5px">· частично отдано ${fmt(r.partPaid)}</span>` : '';
       acc += r.curatorSum;
@@ -7634,7 +7641,7 @@ function curatorPendingRows(dayStr) {
       const row = { date: d, pair: r.client || '—', amount: r.amount || 0,
                     pctCur: r.pctCur, curFull: cur, frac: frac };
       if (d < start) before.push(row);
-      else if (frac < 0.9995) after.push(row);
+      else if (frac < 1 - ДОЛЯ_EPS) after.push(row);
     });
   }
   return { before: before, after: after };
@@ -7670,8 +7677,8 @@ function curatorPendingHtml(dayStr) {
         на ${fmt(sum(P.after))} — встанут в счёт, когда деньги будут выданы
         и приход указан.</div>
       <div style="max-height:34vh;overflow-y:auto">${
-        P.after.map(r => rowHtml(r, r.frac > 0.0005
-          ? '· выдано ' + Math.round(r.frac * 100) + '%'
+        P.after.map(r => rowHtml(r, r.frac > ДОЛЯ_EPS
+          ? '· выдано ' + Math.floor(r.frac * 100) + '%'
           : '· не выдан')).join('')}</div>
     </div>` : '';
   return `<div class="no-print" style="margin:10px 0 4px;padding:10px 12px;border-radius:10px;
@@ -8299,13 +8306,13 @@ function pairUnpaidRows(pair, dayStr) {
       if ((r.client || '').trim() !== p) return;
       const frac = cover[p + '#' + d + '#' + idx] || 0;
       const unpaidPart = 1 - frac;
-      if (unpaidPart <= 0.0005) return;     // выдан целиком
+      if (unpaidPart <= ДОЛЯ_EPS) return;   // выдан целиком
       const after1 = (r.pct !== null && r.pct !== undefined && r.pct > 0
                       && r.total !== null && r.total !== undefined)
         ? r100(r.total) : (r.total || 0);
-      const left = (frac <= 0.0005) ? after1 : r100(after1 * unpaidPart);
+      const left = (frac <= ДОЛЯ_EPS) ? after1 : r100(after1 * unpaidPart);
       if (left <= 0) return;
-      rows.push({ date: d, idx: idx, left: left, full: after1, partial: frac > 0.0005,
+      rows.push({ date: d, idx: idx, left: left, full: after1, partial: frac > ДОЛЯ_EPS,
                   amount: r.amount || 0, pct: r.pct, dueDate: r.dueDate || null });   // v201
     });
   }
