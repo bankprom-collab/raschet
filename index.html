@@ -1513,7 +1513,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v253</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v254</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5070,30 +5070,6 @@ function renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, ove
     ${body}
     <div class="wds-foot">Долг с недель ДО текущей, который так и не погашен. Входит в общий итог «к отдаче» выше (с v132). Здесь показано отдельно, чтобы видеть, что именно висит с прошлых недель: проверь, отдано фактически или нет (реальная выдача уменьшит его сама; «Раскрыть базу» ниже показывает, каким именно приходам он соответствует).</div>
   </div>`;
-}
-
-/* Доля выданного по паре (v138) — для полоски в блоке задолженности.
-   Ничего не пересчитывает: берёт `pairPaidCoverage` и взвешивает по суммам
-   после 1-го %. Чисто показ. */
-function pairPaidShare(pair, dayStr) {
-  const p = (pair || '').trim();
-  if (!p) return 0;
-  const day = dayStr || currentDate;
-  const cover = pairPaidCoverage(day, 'fifo');
-  let all = 0, paid = 0;
-  for (const d of Object.keys(state.days).sort()) {
-    if (d > day) break;
-    const dd = state.days[d];
-    if (!dd || !Array.isArray(dd.in)) continue;
-    dd.in.forEach((r, idx) => {
-      if ((r.client || '').trim() !== p) return;
-      const a1 = calcInRowFinal(r);
-      if (!(a1 > 0)) return;
-      all += a1;
-      paid += a1 * (cover[p + '#' + d + '#' + idx] || 0);
-    });
-  }
-  return all > 0 ? Math.max(0, Math.min(1, paid / all)) : 0;
 }
 
 /* Сроки отдачи по паре (v133). Смотрим невыданные приходы пары и берём их
@@ -9965,7 +9941,6 @@ function printDayReport() {
   const D = computeWeekPairDebt();
   const debtRows = [...D.rows, ...D.overdueRows].map(r => {
     const due = pairDueDates(r.name, d)[0];
-    const share = Math.round(pairPaidShare(r.name, d) * 100);
     /* v247: когда пришли деньги, из которых сложился этот долг */
     const пришло = pairDebtIncomeDates(r.name, r.carry ? 'overdue' : 'current');
     return `<tr>
@@ -9973,20 +9948,18 @@ function printDayReport() {
       <td style="text-align:right">${money(r.base || 0)}</td>
       <td style="text-align:right">${money(r.v1)}</td>
       <td style="text-align:right">${money(r.v2)}</td>
-      <td style="text-align:right">${share}%</td>
     </tr>`;
   }).join('');
   const debtBlock = debtRows ? `
     <h2>Задолженность по парам</h2>
     <table>
       <tr><th>Пара</th><th style="text-align:right">База</th><th style="text-align:right">Нам должны</th>
-          <th style="text-align:right">Мы должны отдать</th><th style="text-align:right">Выдано</th></tr>
+          <th style="text-align:right">Мы должны отдать</th></tr>
       ${debtRows}
       <tr><td><b>Итого</b></td>
           <td style="text-align:right"><b>${money(D.grandBase)}</b></td>
           <td style="text-align:right"><b>${money(D.grandTotal)}</b></td>
-          <td style="text-align:right"><b>${money(D.grandTotal2)}</b></td>
-          <td></td></tr>
+          <td style="text-align:right"><b>${money(D.grandTotal2)}</b></td></tr>
     </table>
     ${D.overdueRows.length ? '<p class="bd">Из них просрочено: ' + money(D.overdueTotal) + '</p>' : ''}` : '';
 
