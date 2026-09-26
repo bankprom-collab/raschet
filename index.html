@@ -1638,7 +1638,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v255</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v256</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10117,8 +10117,11 @@ function printDayReport() {
    без второго процента «отдаём» = «нам должны». Приходы раньше «Счёт с»
    пары видны, но в суммы не входят — как и в задолженности.
 
-   ⚠️ Итог книги — только приходы ЭТОГО месяца. Весь долг по парам (за все
-   месяцы) стоит на обложке отдельной строкой из computeWeekPairDebt. */
+   v256: в каждой главе есть тетрадь «С прошлых месяцев» — приходы раньше
+   этого месяца, которые до сих пор не выданы. Без неё глава показывала
+   только приходы месяца, и владелец не нашёл у Вейс(рук)-Рынок
+   августовские 1 268 100 из долга 3 144 400. Теперь «нам должны» в главе
+   текущего месяца — весь долг пары, как в задолженности. */
 const KB_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 let kbSt = null, kbData = null, kbSlip = -1, kbDepth = 0;
 const kbMonthName = ym => KB_MONTHS[+ym.slice(5, 7) - 1];
@@ -10136,6 +10139,8 @@ function kbWeekLabel(mon) {
   return a[1] === b[1] ? a[0] + '–' + b.join(' ') : a.join(' ') + ' – ' + b.join(' ');
 }
 
+const kbNbLabel = w => w.carry ? 'с прошлых месяцев' : kbWeekLabel(w.mon);
+
 function kbMonths() {
   const set = new Set([currentDate.slice(0, 7)]);
   for (const d of Object.keys(state.days)) {
@@ -10150,8 +10155,11 @@ function kbMonthData(ym) {
   const cover = pairPaidCoverage(день, 'fifo', undefined, true);
   const PARTS = incomeCoverParts(день, true);
   const map = {};
+  const начало = ym + '-01';
   for (const d of Object.keys(state.days).sort()) {
-    if (d.slice(0, 7) !== ym || d > день) continue;
+    if (d > день) break;
+    const свой = d.slice(0, 7) === ym;
+    if (!свой && d >= начало) continue;   // более поздние месяцы
     const dd = state.days[d];
     if (!dd || !Array.isArray(dd.in)) continue;
     dd.in.forEach((r, idx) => {
@@ -10164,19 +10172,23 @@ function kbMonthData(ym) {
       const after2 = hasSecondPct(r) ? r100(r.total2) : null;
       const left1 = counted ? r100(after1 * (1 - frac)) : 0;
       const left2 = !counted ? 0 : (after2 !== null ? r100(after2 * (1 - frac)) : left1);
-      const ch = map[p] || (map[p] = { name: p, group: pairGroupName(p), start: pairStart(p), weeks: {} });
-      const wk = weekMondayStr(d);
-      (ch.weeks[wk] || (ch.weeks[wk] = [])).push({
+      // С прошлых месяцев берём только то, что в счёте и ещё не выдано
+      if (!свой && !(counted && left1 > 0)) return;
+      const ch = map[p] || (map[p] = { name: p, group: pairGroupName(p), start: pairStart(p), weeks: {}, carry: [] });
+      const inc = {
         date: d, amount: r.amount || 0, parts: r.parts || null, pct: r.pct, pct2: r.pct2,
         after1, after2, left1, left2, counted, note: r.note || '', due: r.dueDate || null,
         late: left1 > 0 && !!r.dueDate && r.dueDate < день,
         pays: ((PARTS[key] || {}).parts) || [],
-      });
+      };
+      if (свой) { const wk = weekMondayStr(d); (ch.weeks[wk] || (ch.weeks[wk] = [])).push(inc); }
+      else ch.carry.push(inc);
     });
   }
   const sum = (a, k) => a.reduce((t, x) => t + (x[k] || 0), 0);
   const chapters = Object.values(map).map(ch => {
     const weeks = Object.keys(ch.weeks).sort().reverse().map(mon => ({ mon, incomes: ch.weeks[mon] }));
+    if (ch.carry.length) weeks.push({ carry: true, incomes: ch.carry });   // самая старая — последней
     const all = weeks.flatMap(w => w.incomes);
     const open = all.filter(i => i.left1 > 0);
     const один = k => {
@@ -10184,7 +10196,8 @@ function kbMonthData(ym) {
       return v.length === 1 ? v[0] : null;
     };
     return Object.assign(ch, {
-      weeks, owe: sum(all, 'left1'), give: sum(all, 'left2'), base: sum(open, 'amount'), came: sum(all, 'amount'),
+      weeks, owe: sum(all, 'left1'), give: sum(all, 'left2'), base: sum(open, 'amount'),
+      came: sum(weeks.filter(w => !w.carry).flatMap(w => w.incomes), 'amount'), carried: sum(ch.carry, 'left1'),
       counted: all.some(i => i.counted), outside: all.some(i => !i.counted),
       late: all.some(i => i.late), dues: open.filter(i => i.due), p1: один('pct'), p2: один('pct2'),
     });
@@ -10197,6 +10210,7 @@ function kbMonthData(ym) {
     : (y.owe - x.owe) || x.name.localeCompare(y.name, 'ru'));
   const allInc = chapters.flatMap(c => c.weeks.flatMap(w => w.incomes));
   return { chapters, owe: sum(chapters, 'owe'), give: sum(chapters, 'give'), came: sum(chapters, 'came'),
+    carried: sum(chapters, 'carried'),
     late: sum(allInc.filter(i => i.late), 'left1'), weeks: chapters.reduce((t, c) => t + c.weeks.length, 0) };
 }
 
@@ -10236,16 +10250,17 @@ const KB_VIEWS = {
     return `
       <div class="kb-eyebrow">Книга учёта · ${st.ym.slice(0, 4)}</div>
       <div class="kb-title xl">${kbMonthName(st.ym)}</div>
-      <div class="kb-hint">на ${formatDateShort(currentDate)} · приходы по парам за этот месяц</div>
+      <div class="kb-hint">на ${formatDateShort(currentDate)} · приходы месяца и невыданное с прошлых</div>
       <div class="kb-rule"></div>
       ${D.chapters.length ? `
-        <div><div class="kb-lbl">Нам должны по приходам месяца</div><div class="kb-big"${D.owe ? '' : ' style="color:var(--kb-ok)"'}>${D.owe ? fmt(D.owe) : 'всё выдано'}</div></div>
+        <div><div class="kb-lbl">Нам должны</div><div class="kb-big"${D.owe ? '' : ' style="color:var(--kb-ok)"'}>${D.owe ? fmt(D.owe) : 'всё выдано'}</div></div>
         <div class="kb-pair">
           <div><span class="kb-lbl">Отдаём</span><b>${fmt(D.give)}</b></div>
           <div><span class="kb-lbl">Разница</span><b>${fmt(D.owe - D.give)}</b></div>
         </div>
         <div class="kb-chips">
-          <span class="kb-chip">пришло ${fmt(D.came)}</span>
+          <span class="kb-chip">пришло за месяц ${fmt(D.came)}</span>
+          ${D.carried ? `<span class="kb-chip">с прошлых месяцев ${fmt(D.carried)}</span>` : ''}
           <span class="kb-chip">${kbPl(D.chapters.length, 'глава', 'главы', 'глав')}</span>
           <span class="kb-chip">${kbPl(D.weeks, 'тетрадь', 'тетради', 'тетрадей')}</span>
           ${D.late ? `<span class="kb-chip late">просрочка ${fmt(D.late)}</span>` : ''}
@@ -10253,7 +10268,8 @@ const KB_VIEWS = {
         <button class="kb-pill" data-kb-go='{"lvl":1}'>Открыть книгу</button>`
       : '<div class="kb-hint">В этом месяце приходов по парам нет.</div>'}
       <div class="kb-rule"></div>
-      <div class="kb-hint">Весь долг по парам сейчас, за все месяцы: <b>${fmt(G.grandTotal)}</b> — как в блоке «Задолженность по парам».</div>
+      ${(st.ym === currentDate.slice(0, 7) && Math.abs(G.grandTotal - D.owe) >= 1)
+        ? `<div class="kb-hint">В блоке «Задолженность по парам» — <b>${fmt(G.grandTotal)}</b>: там стоят ручные суммы пар ✏️.</div>` : ''}
       <div class="kb-lbl">На полке</div>
       <div class="kb-shelf">${полка}</div>
       <div class="kb-hint">Каждый месяц — отдельная книга. Нажмите на корешок, чтобы открыть.</div>`;
@@ -10271,7 +10287,7 @@ const KB_VIEWS = {
         <span class="dots"></span>${сумма}</button>`;
     }).join('');
     return `<div class="kb-title">Оглавление</div><div class="kb-toc">${rows}</div>
-      <div class="kb-hint">Глава — пара. Рядом — сколько она должна по приходам этого месяца. Красная закладка — просрочка.</div>`;
+      <div class="kb-hint">Глава — пара. Рядом — сколько она должна, включая невыданное с прошлых месяцев. Красная закладка — просрочка.</div>`;
   },
   2(D, st) {
     const c = D.chapters[st.c];
@@ -10280,7 +10296,7 @@ const KB_VIEWS = {
       const вСчёте = w.incomes.some(i => i.counted);
       return `<button class="kb-nb" data-kb-go='{"lvl":3,"c":${st.c},"w":${k}}'>
         <span class="kb-nb-ico${left ? ' open' : ''}"></span>
-        <span><span class="kb-nb-name">${kbWeekLabel(w.mon)}</span><br><span class="kb-nb-sub">${kbPl(w.incomes.length, 'вкладыш', 'вкладыша', 'вкладышей')} · пришло ${fmt(w.incomes.reduce((t, i) => t + i.amount, 0))}</span><br>
+        <span><span class="kb-nb-name">${w.carry ? 'С прошлых месяцев' : kbWeekLabel(w.mon)}</span><br><span class="kb-nb-sub">${kbPl(w.incomes.length, 'вкладыш', 'вкладыша', 'вкладышей')} · ${w.carry ? 'не выдано с ' + formatDateShort(w.incomes[0].date) : 'пришло ' + fmt(w.incomes.reduce((t, i) => t + i.amount, 0))}</span><br>
           <span class="kb-nb-st${left ? '' : вСчёте ? ' done' : ' out'}">${left ? 'осталось ' + fmt(left) : вСчёте ? 'закрыта' : 'вне счёта'}</span></span>
       </button>`;
     }).join('');
@@ -10328,7 +10344,8 @@ const KB_VIEWS = {
     }).join('');
     return `
       <div class="kb-eyebrow">Глава ${st.c + 1} · ${escapeHtml(c.name)}</div>
-      <div class="kb-title">Тетрадь ${kbWeekLabel(w.mon)}</div>
+      <div class="kb-title">Тетрадь ${w.carry ? '«С прошлых месяцев»' : kbWeekLabel(w.mon)}</div>
+      ${w.carry ? '<div class="kb-hint">Приходы прошлых месяцев, которые до сих пор не выданы. Они входят в долг пары.</div>' : ''}
       <div class="kb-hint">Вкладыш — один приход. Нажмите, чтобы развернуть расчёт.</div>
       <div class="kb-slips">${slips}</div>
       <div class="kb-nav">
@@ -10343,7 +10360,7 @@ function kbDraw() {
   const путь = [[kbMonthName(st.ym), { lvl: 0 }]];
   if (st.lvl >= 1) путь.push(['Оглавление', { lvl: 1 }]);
   if (st.lvl >= 2) путь.push([escapeHtml(D.chapters[st.c].name), { lvl: 2, c: st.c }]);
-  if (st.lvl >= 3) путь.push(['тетрадь ' + kbWeekLabel(D.chapters[st.c].weeks[st.w].mon), { lvl: 3, c: st.c, w: st.w }]);
+  if (st.lvl >= 3) путь.push(['тетрадь ' + kbNbLabel(D.chapters[st.c].weeks[st.w]), { lvl: 3, c: st.c, w: st.w }]);
   document.getElementById('kbCrumbs').innerHTML = путь.map((x, k) => k < путь.length - 1
     ? `<button data-kb-go='${JSON.stringify(x[1])}'>${x[0]}</button><span aria-hidden="true">›</span>`
     : `<span class="here" aria-current="page">${x[0]}</span>`).join('');
