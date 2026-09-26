@@ -1664,7 +1664,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v260</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v261</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4721,13 +4721,19 @@ function allocateOutRow(i, silent) {
   pairUnpaidRows(pair, ledgerDay()).forEach(r => {
     if (left <= 0.5) return;
     if (r.date + '#' + r.idx === row.forIn) return;      // свой приход уже закрыт
+    /* Выдача не закрывает приход, который пришёл ПОЗЖЕ неё (v261). Владелец
+       26.09.2026: «да, запрети». Так 1 039 500 от 15 сен ушла на приход
+       Мухтар-Самв от 24 сен. currentDate здесь — день выдачи
+       (askAllocateAll подставляет его на время разноски). */
+    if (r.date > currentDate) return;
     const take = Math.min(left, r.left);
     if (take <= 0.5) return;
     targets.push({ date: r.date, idx: r.idx, amount: take });
     left -= take;
   });
   if (!targets.length) {
-    if (!silent) alert('Некуда разнести ' + fmt(extra) + ': у пары «' + pair + '» нет других невыданных приходов.\n\n'
+    if (!silent) alert('Некуда разнести ' + fmt(extra) + ': у пары «' + pair + '» нет других невыданных приходов '
+      + 'на ' + formatDateShort(currentDate) + ' или раньше — приход, пришедший позже выдачи, ею не закрывается.\n\n'
       + 'Проверьте сумму выдачи — возможно, она введена с ошибкой.');
     return;
   }
