@@ -1506,6 +1506,12 @@
     background:var(--kb-raise); border:1.5px solid transparent; font-size:13.5px; color:var(--kb-soft); }
   .kb .kbf-pick.on { border-color:var(--kb-owe); }
   .kbf-pick b { color:var(--kb-text); white-space:nowrap; }
+  .kb .kb-danger { border-color:rgba(255,143,143,.45); color:var(--kb-late); }
+  .kb-slip-act { flex-direction:column; align-items:stretch; gap:6px; }
+  .kb-payrow { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--kb-wash);
+    border-radius:12px; padding:9px 12px; font-size:13.5px; color:var(--kb-soft); }
+  .kb-payrow b { color:var(--kb-text); }
+  .kb .kb-payrow .kb-ghost { padding:6px 12px; font-size:13px; flex:none; }
 </style>
 </head>
 <body>
@@ -1658,7 +1664,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v259</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v260</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -9085,6 +9091,29 @@ function addRow(type) {
   showToast('Запись добавлена');
 }
 
+/* После удаления прихода номера соседей в том же дне сдвигаются, а привязки
+   выдач («дата#номер») — нет (v260). Так пропала пара Мухтар-Самв: приход
+   8 сен №2 удалили, выдача 1 039 500 осталась со ссылкой в никуда, её сумма
+   стала «не отнесена», и «разнести остатки» переложила её на приход 24 сен.
+   Хуже того, выдачи приходов, стоявших ПОСЛЕ удалённого, молча начинали
+   гасить соседний приход. Теперь: выдача удалённого прихода теряет привязку
+   (видна как «без прихода»), номера после него сдвигаются вместе с записью —
+   так же, как при «удалить записи до даты» (v233). */
+function forInПослеУдаления(dateStr, idx) {
+  for (const d of Object.keys(state.days)) {
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach(o => {
+      if (!o || !o.forIn) return;
+      const [дд, нн] = String(o.forIn).split('#');
+      if (дд !== dateStr) return;
+      const n = +нн;
+      if (n === idx) o.forIn = null;
+      else if (n > idx) o.forIn = дд + '#' + (n - 1);
+    });
+  }
+}
+
 function deleteRow(type, i) {
   const day = getDay(currentDate);
   const r = day[type][i];
@@ -9093,6 +9122,7 @@ function deleteRow(type, i) {
   const sumStr = type === 'out' ? fmt(r.amount) : fmt(r.amount);
   if (!confirm(`Удалить запись?\n\n${label}: ${r.client} — ${sumStr}`)) return;
   day[type].splice(i, 1);
+  if (type === 'in') forInПослеУдаления(currentDate, i);   // v260
   recalcCarryoversAfter(currentDate);
   saveState();
   render();
@@ -10219,6 +10249,28 @@ function kbMonthData(ym) {
       else ch.carry.push(inc);
     });
   }
+  /* Выдачи месяца, которые ни к какому приходу этой пары не отнесены (v260):
+     без привязки, со ссылкой на удалённый приход или на приход другой пары.
+     В разборе вкладышей их не видно — показываем в главе, чтобы их можно
+     было привязать или удалить. */
+  for (const d of Object.keys(state.days).sort()) {
+    if (d > день) break;
+    if (d.slice(0, 7) !== ym) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.out)) continue;
+    dd.out.forEach((o, idx) => {
+      const p = (o.client || '').trim();
+      if (!p || !map[p] || d < pairStart(p)) return;
+      let why = 'без привязки к приходу';
+      if (o.forIn) {
+        const [дд, нн] = String(o.forIn).split('#');
+        const r = ((state.days[дд] || {}).in || [])[+нн];
+        if (r && (r.client || '').trim() === p && дд >= pairStart(p)) return;   // привязана как надо
+        why = !r ? 'приход, к которому была привязана, удалён' : 'привязана к приходу другой пары или вне счёта';
+      }
+      (map[p].loose || (map[p].loose = [])).push({ date: d, idx, amount: o.amount || 0, why });
+    });
+  }
   const sum = (a, k) => a.reduce((t, x) => t + (x[k] || 0), 0);
   const chapters = Object.values(map).map(ch => {
     const weeks = Object.keys(ch.weeks).sort().reverse().map(mon => ({ mon, incomes: ch.weeks[mon] }));
@@ -10230,6 +10282,7 @@ function kbMonthData(ym) {
       return v.length === 1 ? v[0] : null;
     };
     return Object.assign(ch, {
+      loose: ch.loose || [],
       weeks, owe: sum(all, 'left1'), give: sum(all, 'left2'), base: sum(open, 'amount'),
       came: sum(weeks.filter(w => !w.carry).flatMap(w => w.incomes), 'amount'), carried: sum(ch.carry, 'left1'),
       counted: all.some(i => i.counted), outside: all.some(i => !i.counted),
@@ -10377,6 +10430,12 @@ const KB_VIEWS = {
       </div>
       <div class="kb-lbl">Тетради · ${c.weeks.length}</div>
       <div class="kb-notebooks">${nbs}</div>
+      ${c.loose.length ? `<div class="kb-lbl" style="color:var(--kb-late)">Выдачи без прихода · ${c.loose.length}</div>
+      <div class="kb-hint">Эти выдачи ни один приход пары не гасят. Привяжите к нужному приходу или удалите.</div>
+      <div class="kb-notebooks">${c.loose.map(x => `<div class="kb-payrow">
+        <span><b>${formatDateShort(x.date)}</b> · выдача ${fmt(x.amount)}<br><span class="kb-nb-sub">${x.why}</span></span>
+        <button class="kb-ghost" data-kb-form='{"t":"out","edit":"${x.date}#${x.idx}"}'>изменить</button>
+      </div>`).join('')}</div>` : ''}
       <div class="kb-nav">
         <button class="kb-ghost" ${st.c ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c - 1}}'>‹ Глава ${st.c}</button>
         <button class="kb-ghost" ${st.c < D.chapters.length - 1 ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c + 1}}'>Глава ${st.c + 2} ›</button>
@@ -10402,8 +10461,17 @@ const KB_VIEWS = {
           ${!i.counted ? `<div class="memo"><span>счёт по паре — с ${formatDateShort(c.start)}</span></div>` : ''}
           ${i.note ? `<div class="memo"><span>${escapeHtml(i.note)}</span></div>` : ''}
         </span>` : ''}
-      </button>${(раскрыт && i.counted && i.left1 > 0) ? `
-      <div class="kb-slip-act"><button class="kb-ghost" data-kb-form='{"t":"out","c":${st.c},"aim":"${i.date}#${i.idx}"}'>Выдать по этому приходу</button></div>` : ''}`;
+      </button>${раскрыт ? `
+      <div class="kb-slip-act">
+        <div class="kb-actions">
+          <button class="kb-ghost" data-kb-form='{"t":"in","edit":"${i.date}#${i.idx}"}'>Изменить приход</button>
+          ${(i.counted && i.left1 > 0) ? `<button class="kb-ghost" data-kb-form='{"t":"out","c":${st.c},"aim":"${i.date}#${i.idx}"}'>Выдать по этому приходу</button>` : ''}
+        </div>
+        ${i.pays.map(x => { const o = ((state.days[x.date] || {}).out || [])[x.payIdx]; return o ? `<div class="kb-payrow">
+          <span>выдача <b>${formatDateShort(x.date)}</b> · ${fmt(o.amount || 0)}</span>
+          <button class="kb-ghost" data-kb-form='{"t":"out","edit":"${x.date}#${x.payIdx}"}'>изменить</button>
+        </div>` : ''; }).join('')}
+      </div>` : ''}`;
     }).join('');
     return `
       <div class="kb-eyebrow">Глава ${st.c + 1} · ${escapeHtml(c.name)}</div>
@@ -10454,6 +10522,7 @@ function kbDraw() {
    Запись идёт в открытый день программы (currentDate) — он подписан
    на бланке. */
 function kbOpenForm(o) {
+  if (o.edit) return kbOpenEdit(o.t, o.edit);
   const pair = (o.c != null && kbData.chapters[o.c]) ? kbData.chapters[o.c].name
     : ((document.getElementById(o.t === 'in' ? 'in-client' : 'out-client') || {}).value || state.clients[0] || '');
   const aim = (o.aim && pairUnpaidRows(pair, currentDate).some(r => r.date + '#' + r.idx === o.aim)) ? o.aim : null;
@@ -10461,6 +10530,80 @@ function kbOpenForm(o) {
   kbDraw();
   document.getElementById('kbOverlay').scrollTop = 0;
   if (aim) { const r = pairUnpaidRows(pair, currentDate).find(x => x.date + '#' + x.idx === aim); document.getElementById('kbfSum').value = fmtExact(r.left); }
+}
+
+/* Правка записи в книге (v260). Бланк тот же, поля заполнены записью;
+   сохраняет kbFormSave → ветка f.edit — те же поля и формулы, что qeSaveEdit
+   (оба процента от ИСХОДНОЙ суммы). Правишь одно — правь другое. */
+function kbOpenEdit(type, ключ) {
+  const [дата, н] = String(ключ).split('#');
+  const r = ((state.days[дата] || {})[type] || [])[+н];
+  if (!r) { showToast('Запись не найдена — обновите книгу'); return; }
+  kbForm = { type, pair: (r.client || '').trim(), aim: type === 'out' ? (r.forIn || null) : null,
+             edit: { date: дата, idx: +н }, orig: { forIn: r.forIn || null, amount: r.amount || 0 } };
+  kbDraw();
+  document.getElementById('kbOverlay').scrollTop = 0;
+  const g = id => document.getElementById(id), пц = v => (v > 0) ? String(v).replace('.', ',') : '';
+  g('kbfSum').value = (r.parts && r.parts.length > 1) ? r.parts.map(fmtExact).join('+') : fmtExact(r.amount || 0);
+  if (type === 'in') { g('kbfP1').value = пц(r.pct); g('kbfP2').value = пц(r.pct2); g('kbfPc').value = пц(r.pctCur); g('kbfPctNote').textContent = ''; }
+  g('kbfDue').value = r.dueDate || '';
+  g('kbfNote').value = r.note || '';
+  kbFormPreview();
+}
+
+// Удаление из книги — с тем же исправлением привязок, что deleteRow
+function kbDelete() {
+  const f = kbForm;
+  if (!f || !f.edit) return;
+  const { date, idx } = f.edit;
+  const dd = state.days[date], r = dd && dd[f.type] && dd[f.type][idx];
+  if (!r) return;
+  const строки = [(f.type === 'in' ? 'Удалить приход ' : 'Удалить выдачу ') + formatDateShort(date) + '?', '',
+    (r.client || '') + ' — ' + fmt(r.amount || 0)];
+  if (f.type === 'in') {
+    let привязано = 0;
+    for (const d of Object.keys(state.days)) ((state.days[d] || {}).out || []).forEach(o => { if (o && o.forIn === date + '#' + idx) привязано += o.amount || 0; });
+    if (привязано > 0.5) строки.push('', 'К нему привязаны выдачи на ' + fmt(привязано) + '. Они останутся, но без прихода —',
+      'их будет видно в главе в разделе «Выдачи без прихода».');
+  }
+  строки.push('', 'Отменить удаление нельзя.');
+  if (!confirm(строки.join('\n'))) return;
+  dd[f.type].splice(idx, 1);
+  if (f.type === 'in') forInПослеУдаления(date, idx);
+  recalcCarryoversAfter(date);
+  saveState();
+  render();
+  showToast('Запись удалена');
+  kbSlip = -1;
+  kbCloseForm();
+}
+
+function kbUnlinkFromForm() {
+  const f = kbForm;
+  if (!f || !f.edit) return;
+  const dd = state.days[f.edit.date], o = dd && dd.out && dd.out[f.edit.idx];
+  if (!o || !o.forIn) { showToast('Эта выдача и так ни к какому приходу не привязана'); return; }
+  unlinkPayout(f.edit.date, f.edit.idx);   // сама спросит подтверждение
+  if (!o.forIn) kbCloseForm();
+}
+
+/* Приходы для бланка выдачи. При правке в список возвращается и тот приход,
+   к которому выдача уже привязана, а её сумма считается свободной — иначе
+   правка «на те же деньги» ругалась бы на переплату. */
+function kbUnpaidRowsForForm() {
+  const rows = pairUnpaidRows(kbForm.pair, currentDate).map(r => Object.assign({}, r));
+  const o = kbForm.orig;
+  if (o && o.forIn) {
+    const был = rows.find(x => x.date + '#' + x.idx === o.forIn);
+    if (был) { был.left += o.amount; был.текущий = true; }
+    else {
+      const [дд, нн] = String(o.forIn).split('#');
+      const r = ((state.days[дд] || {}).in || [])[+нн];
+      if (r && (r.client || '').trim() === kbForm.pair)
+        rows.unshift({ date: дд, idx: +нн, amount: r.amount || 0, left: Math.min(calcInRowFinal(r) || 0, o.amount), dueDate: r.dueDate || null, текущий: true });
+    }
+  }
+  return rows;
 }
 
 function kbCloseForm() {
@@ -10485,10 +10628,11 @@ function kbLastPct(pair) {
 }
 
 function kbUnpaidHtml() {
-  const rows = pairUnpaidRows(kbForm.pair, currentDate);
+  const rows = kbUnpaidRowsForForm();
   if (!rows.length) return '<div class="kb-hint">Невыданных приходов у пары нет — выдача запишется без привязки.</div>';
-  return rows.map(r => `<button type="button" class="kbf-pick${kbForm.aim === r.date + '#' + r.idx ? ' on' : ''}" onclick="kbFormAim('${r.date}#${r.idx}')">
-      <span><b>${formatDateShort(r.date)}</b> · приход ${fmt(r.amount)}</span>
+  return (kbForm.edit ? '<div class="kb-hint">Остатки — без учёта этой выдачи.</div>' : '')
+    + rows.map(r => `<button type="button" class="kbf-pick${kbForm.aim === r.date + '#' + r.idx ? ' on' : ''}" onclick="kbFormAim('${r.date}#${r.idx}')">
+      <span><b>${formatDateShort(r.date)}</b> · приход ${fmt(r.amount)}${r.текущий ? ' · <b>сейчас привязана</b>' : ''}</span>
       <span>осталось <b>${fmt(r.left)}</b>${r.dueDate ? ' · отдать до ' + formatDateShort(r.dueDate) : ''}</span>
     </button>`).join('');
 }
@@ -10501,8 +10645,9 @@ function kbFormHtml() {
   const прошлые = isIn ? kbLastPct(f.pair) : null;
   const пц = v => (v > 0) ? String(v).replace('.', ',') : '';
   return `
-    <div class="kb-eyebrow">${isIn ? 'Бланк прихода' : 'Бланк выдачи'} · запись в день ${formatDateShort(currentDate)}</div>
-    <div class="kb-title">${isIn ? 'Новый приход' : 'Новая выдача'}</div>
+    <div class="kb-eyebrow">${f.edit ? (isIn ? 'Правка прихода' : 'Правка выдачи') + ' · запись от ' + formatDateShort(f.edit.date)
+      : (isIn ? 'Бланк прихода' : 'Бланк выдачи') + ' · запись в день ' + formatDateShort(currentDate)}</div>
+    <div class="kb-title">${f.edit ? (isIn ? 'Изменить приход' : 'Изменить выдачу') : (isIn ? 'Новый приход' : 'Новая выдача')}</div>
     <label class="kbf"><span>Пара</span><select id="kbfPair" onchange="kbFormPair(this.value)">${варианты}</select></label>
     ${isIn ? '' : `<div class="kbf"><span>За какой приход</span><div id="kbfUnpaid">${kbUnpaidHtml()}</div></div>`}
     <label class="kbf"><span>${isIn ? 'Сумма прихода' : 'Сумма выдачи'}</span>
@@ -10520,8 +10665,12 @@ function kbFormHtml() {
     <div class="kbf-err" id="kbfErr" role="alert"></div>
     <div class="kb-nav">
       <button type="button" class="kb-ghost" onclick="kbCloseForm()">Отмена</button>
-      <button type="button" class="kb-pill" onclick="kbFormSave()">Записать в книгу</button>
-    </div>`;
+      <button type="button" class="kb-pill" onclick="kbFormSave()">${f.edit ? 'Сохранить изменения' : 'Записать в книгу'}</button>
+    </div>
+    ${f.edit ? `<div class="kb-actions">
+      ${!isIn ? '<button type="button" class="kb-ghost" onclick="kbUnlinkFromForm()">Снять с прихода</button>' : ''}
+      <button type="button" class="kb-ghost kb-danger" onclick="kbDelete()">${isIn ? 'Удалить приход' : 'Удалить выдачу'}</button>
+    </div>` : ''}`;
 }
 
 function kbFormPair(v) {
@@ -10546,7 +10695,7 @@ function kbFormPair(v) {
 // набранную не трогаем (владелец часто выдаёт не весь остаток, v169)
 function kbFormAim(key) {
   kbForm.aim = kbForm.aim === key ? null : key;
-  const r = pairUnpaidRows(kbForm.pair, currentDate).find(x => x.date + '#' + x.idx === key);
+  const r = kbUnpaidRowsForForm().find(x => x.date + '#' + x.idx === key);
   const поле = document.getElementById('kbfSum');
   if (kbForm.aim && r && !поле.value.trim()) поле.value = fmtExact(r.left);
   document.getElementById('kbfUnpaid').innerHTML = kbUnpaidHtml();
@@ -10568,6 +10717,57 @@ function kbFormPreview() {
     + (pc > 0 ? `<br>куратору ${kbPc(pc)} — <b>${fmt(floor100(a * pc / 100))}</b> (после выдачи)` : '');
 }
 
+// Правка — те же поля и формулы, что qeSaveEdit
+function kbSaveEdit(pair, сумма) {
+  const f = kbForm, g = id => document.getElementById(id);
+  const ошибка = t => { g('kbfErr').textContent = t; };
+  const r = ((state.days[f.edit.date] || {})[f.type] || [])[f.edit.idx];
+  if (!r) { kbCloseForm(); return; }
+  if (f.type === 'in') {
+    const parsed = parseSumString(сумма);
+    if (!parsed || !(parsed.sum > 0)) { g('kbfSum').focus(); return ошибка('Введите сумму прихода.'); }
+    const p1 = parseDecimal(g('kbfP1').value);
+    if (isNaN(p1) || p1 <= 0) { g('kbfP1').focus(); return ошибка('Введите первый процент.'); }
+    let p2 = null;
+    if (String(g('kbfP2').value).trim() !== '') {
+      p2 = parseDecimal(g('kbfP2').value);
+      if (isNaN(p2) || p2 <= 0) { g('kbfP2').focus(); return ошибка('Второй процент указан неверно.'); }
+    }
+    const pc = parseDecimal(g('kbfPc').value);
+    r.client = pair;
+    r.amount = parsed.sum;
+    r.parts = parsed.parts.length > 1 ? parsed.parts : null;
+    r.pct = p1;
+    r.pct2 = p2;
+    r.pctCur = (isNaN(pc) || pc <= 0) ? null : pc;
+    r.total = r.amount * (1 - p1 / 100);
+    r.total2 = (p2 !== null) ? r.amount * (1 - p2 / 100) : null;
+    r.note = g('kbfNote').value.trim();
+    r.dueDate = g('kbfDue').value || null;
+    if (!isNaN(pc) && pc > 0) state.lastPctCur = pc;
+  } else {
+    const amount = parseDecimal(сумма);
+    if (!(amount > 0)) { g('kbfSum').focus(); return ошибка('Введите сумму выдачи.'); }
+    const rows = kbUnpaidRowsForForm();
+    if (rows.length && !f.aim) return ошибка('Укажите приход, за который выдача, — нажмите на него в списке.');
+    const x = rows.find(y => y.date + '#' + y.idx === f.aim);
+    if (x && amount > x.left + 0.5 && !confirm(
+        'Выдача ' + fmt(amount) + ' больше остатка прихода от ' + formatDateShort(x.date)
+        + ' — там осталось ' + fmt(x.left) + '.\n\nЛишние ' + fmt(amount - x.left)
+        + ' ни к какому приходу не отнесутся.\n\nВсё равно сохранить?')) return;
+    r.client = pair;
+    r.amount = amount;
+    r.note = g('kbfNote').value.trim();
+    r.dueDate = g('kbfDue').value || null;
+    r.forIn = f.aim || null;
+  }
+  recalcCarryoversAfter(f.edit.date);
+  saveState();
+  render();
+  showToast('Изменения сохранены');
+  kbCloseForm();
+}
+
 function kbFormSave() {
   const f = kbForm, g = id => document.getElementById(id);
   const ошибка = t => { g('kbfErr').textContent = t; };
@@ -10576,6 +10776,7 @@ function kbFormSave() {
   if (!pair || pair === '__add__') return ошибка('Выберите пару.');
   const сумма = g('kbfSum').value.replace(/\s/g, '');
   renderClientSelects();   // пара должна быть в списках компактной формы
+  if (f.edit) return kbSaveEdit(pair, сумма);
   const day = getDay(currentDate);
   if (f.type === 'in') {
     const parsed = parseSumString(сумма);
