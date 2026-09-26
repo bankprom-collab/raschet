@@ -1755,7 +1755,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v268</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v269</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -6601,6 +6601,12 @@ function renamePairEverywhere(oldName, newName) {
   state.debtOutDates = remapKeys(state.debtOutDates);
   state.weekDebtOverrides = remapKeys(state.weekDebtOverrides);
   state.tagWeekCorrections = remapKeys(state.tagWeekCorrections);
+  /* 4. Своя дата начала счёта (v269). Без этого переименованная пара теряла
+     «Счёт с»: вся её история до этой даты снова попадала в долг. */
+  if (state.pairStart && state.pairStart[oldN]) {
+    if (!state.pairStart[newN]) state.pairStart[newN] = state.pairStart[oldN];
+    delete state.pairStart[oldN];
+  }
   return { renamed };
 }
 
@@ -6659,9 +6665,18 @@ function clearRowTag(rowIdx) {
 }
 
 // UI: вызвать переименование через prompt.
+/* Вейс(рук)-Рынок программа находит по имени — отдельные таблицы куратора
+   и «На руки», своя дата счёта (18 мест в коде). Переименование молча
+   развалило бы их, поэтому оно запрещено (v269). */
+const ПАРА_ПО_ИМЕНИ = 'Вейс(рук)-Рынок';
+
 function editPairName(oldName) {
   const oldN = (oldName || '').trim();
   if (!oldN) return;
+  if (oldN === ПАРА_ПО_ИМЕНИ) {
+    alert('Эту пару переименовать нельзя: у неё отдельные таблицы куратора и «На руки», и программа находит её по имени.');
+    return;
+  }
   const raw = prompt(
     'Переименовать пару\n\n' +
     'Текущее имя: «' + oldN + '»\n\n' +
@@ -10586,6 +10601,7 @@ const KB_VIEWS = {
       <div class="kb-actions">
         <button class="kb-ghost" data-kb-form='{"t":"in"}'>＋ Приход</button>
         <button class="kb-ghost" data-kb-form='{"t":"out"}'>＋ Выдача</button>
+        <button class="kb-ghost" data-kb-form='{"t":"pairs"}'>Пары</button>
       </div>
       ${D.chapters.length ? `<div class="kb-wide-only">
         <div class="kb-rule"></div>
@@ -10606,7 +10622,11 @@ const KB_VIEWS = {
     const rows = kbTocRows(D);
     return `<div class="kb-l"><div class="kb-title">Оглавление</div></div>
       <div class="kb-full kb-toc">${rows}</div>
-      <div class="kb-l"><div class="kb-hint">Глава — пара. Рядом — сколько она должна, включая невыданное с прошлых месяцев. Красная закладка — просрочка.</div></div>`;
+      <div class="kb-l"><div class="kb-hint">Глава — пара. Рядом — сколько она должна, включая невыданное с прошлых месяцев. Красная закладка — просрочка.</div>
+        <div class="kb-actions">
+          <button class="kb-ghost" data-kb-form='{"t":"pair"}'>＋ Новая пара</button>
+          <button class="kb-ghost" data-kb-form='{"t":"pairs"}'>Все пары</button>
+        </div></div>`;
   },
   2(D, st) {
     const c = D.chapters[st.c];
@@ -10635,6 +10655,7 @@ const KB_VIEWS = {
       <div class="kb-actions">
         <button class="kb-ghost" data-kb-form='{"t":"in","c":${st.c}}'>＋ Приход по паре</button>
         <button class="kb-ghost" data-kb-form='{"t":"out","c":${st.c}}'>＋ Выдача по паре</button>
+        <button class="kb-ghost" data-kb-form='{"t":"pair","c":${st.c}}'>Изменить пару</button>
       </div>
       </div><div class="kb-r">
       <div class="kb-lbl">Тетради · ${c.weeks.length}</div>
@@ -10703,7 +10724,7 @@ function kbDraw() {
   if (st.lvl >= 1) путь.push(['Оглавление', { lvl: 1 }]);
   if (st.lvl >= 2) путь.push([escapeHtml(D.chapters[st.c].name), { lvl: 2, c: st.c }]);
   if (st.lvl >= 3) путь.push(['тетрадь ' + kbNbLabel(D.chapters[st.c].weeks[st.w]), { lvl: 3, c: st.c, w: st.w }]);
-  if (kbForm) путь.push([kbForm.type === 'in' ? 'новый приход' : 'новая выдача', null]);
+  if (kbForm) путь.push([kbFormLabel(kbForm), null]);
   document.getElementById('kbCrumbs').innerHTML = путь.map((x, k) => k < путь.length - 1
     ? `<button data-kb-go='${JSON.stringify(x[1])}'>${x[0]}</button><span aria-hidden="true">›</span>`
     : `<span class="here" aria-current="page">${x[0]}</span>`).join('');
@@ -10722,6 +10743,117 @@ function kbDraw() {
   if (глубина !== kbDepth) v.classList.add(глубина > kbDepth ? 'in-deep' : 'in-back');
   kbDepth = глубина;
   if (kbForm) kbFormPreview();
+  if (kbForm && kbForm.type === 'pair') kbPairPreview();
+}
+
+const kbFormLabel = f => f.type === 'pairs' ? 'пары'
+  : f.type === 'pair' ? (f.old ? 'правка пары' : 'новая пара')
+  : f.edit ? (f.type === 'in' ? 'правка прихода' : 'правка выдачи')
+  : (f.type === 'in' ? 'новый приход' : 'новая выдача');
+
+/* ── ПАРЫ В КНИГЕ (v269) ─────────────────────────────────────────────────────
+   Владелец 26.09.2026: «ещё добавить возможность добавлять новые пары,
+   корректировать их». Список всех пар (state.clients, как в выборе пары),
+   бланк новой пары и правка имени. Добавление — addClientPair, переименование —
+   renamePairEverywhere (записи, ключи недель, «Счёт с»), убрать из списка —
+   как deleteClient: записи остаются, пара только пропадает из выбора. */
+function kbPairsHtml() {
+  const группы = groupedPairs();
+  return `
+    <div class="kb-eyebrow">Список пар</div>
+    <div class="kb-title">Пары · ${state.clients.length}</div>
+    <div class="kb-hint">Пара — «кто присылает − кому». Здесь можно добавить новую пару или исправить имя.</div>
+    <div class="kb-actions"><button type="button" class="kb-pill" data-kb-form='{"t":"pair"}'>＋ Новая пара</button></div>
+    ${группы.map(g => `<div class="kb-part">Часть «${escapeHtml(g.группа)}»</div>
+      <div class="kb-notebooks">${g.items.map(x => `<div class="kb-payrow">
+        <span class="kb-nb-name">${escapeHtml(x.name)}</span>
+        <button type="button" class="kb-ghost" data-kb-form='{"t":"pair","i":${x.idx}}'>изменить</button>
+      </div>`).join('')}</div>`).join('')}
+    <div class="kb-nav"><button type="button" class="kb-ghost" onclick="kbCloseForm()">‹ Назад</button></div>`;
+}
+
+function kbPairHtml() {
+  const old = kbForm.old || '';
+  const i = old.indexOf('-');
+  const a = i > 0 ? old.slice(0, i) : old, b = i > 0 ? old.slice(i + 1) : '';
+  const группы = [...new Set(state.clients.map(pairGroupName))].sort((x, y) => x.localeCompare(y, 'ru'));
+  if (old === ПАРА_ПО_ИМЕНИ) return `
+    <div class="kb-eyebrow">Правка пары</div>
+    <div class="kb-title">${escapeHtml(old)}</div>
+    <div class="kbf-err">Эту пару переименовать нельзя: у неё отдельные таблицы куратора и «На руки», и программа находит её по имени.</div>
+    <div class="kb-nav"><button type="button" class="kb-ghost" onclick="kbCloseForm()">‹ Назад</button></div>`;
+  return `
+    <div class="kb-eyebrow">${old ? 'Правка пары' : 'Бланк пары'}</div>
+    <div class="kb-title">${old ? escapeHtml(old) : 'Новая пара'}</div>
+    <label class="kbf"><span>Кто присылает — до дефиса</span>
+      <input id="kbpA" list="kbpGroups" autocomplete="off" value="${escapeHtml(a)}" oninput="kbPairPreview()" placeholder="Пр.Мира"></label>
+    <datalist id="kbpGroups">${группы.map(g => `<option value="${escapeHtml(g)}">`).join('')}</datalist>
+    <label class="kbf"><span>Кому — после дефиса</span>
+      <input id="kbpB" autocomplete="off" value="${escapeHtml(b)}" oninput="kbPairPreview()" placeholder="Ленин"></label>
+    <div class="kbf-preview" id="kbpPreview"></div>
+    <div class="kbf-err" id="kbfErr" role="alert"></div>
+    <div class="kb-nav">
+      <button type="button" class="kb-ghost" onclick="kbCloseForm()">Отмена</button>
+      <button type="button" class="kb-pill" onclick="kbPairSave()">${old ? 'Сохранить имя' : 'Добавить пару'}</button>
+    </div>
+    ${old ? `<div class="kb-actions"><button type="button" class="kb-ghost kb-danger" onclick="kbPairRemove()">Убрать из списка пар</button></div>` : ''}`;
+}
+
+function kbPairName() {
+  const a = (document.getElementById('kbpA') || {}).value || '', b = (document.getElementById('kbpB') || {}).value || '';
+  return { a: a.trim(), b: b.trim(), имя: a.trim() + '-' + b.trim() };
+}
+const kbPairHasRecords = имя => Object.values(state.days || {}).some(day =>
+  ['in', 'out'].some(k => (day[k] || []).some(r => (r.client || '').trim() === имя)));
+
+function kbPairPreview() {
+  const box = document.getElementById('kbpPreview');
+  if (!box) return;
+  const { a, b, имя } = kbPairName();
+  if (!a || !b) { box.innerHTML = ''; return; }
+  const есть = имя !== kbForm.old && (state.clients.includes(имя) || kbPairHasRecords(имя));
+  box.innerHTML = 'Будет: <b>' + escapeHtml(имя) + '</b>'
+    + (есть ? (kbForm.old ? '<br>Такая пара уже есть — записи двух пар сольются.' : '<br>Такая пара уже есть.') : '');
+}
+
+function kbPairSave() {
+  const f = kbForm, err = document.getElementById('kbfErr');
+  const ошибка = t => { err.textContent = t; };
+  const { a, b, имя } = kbPairName();
+  if (!a || !b) return ошибка('Нужны обе части пары: кто присылает и кому.');
+  if (a.includes('-')) return ошибка('В первой части не должно быть дефиса — он разделяет части пары.');
+  if (!f.old) {
+    if (state.clients.includes(имя)) return ошибка('Такая пара уже есть.');
+    addClientPair(имя);   // сохраняет, обновляет списки выбора, пишет сообщение
+    kbCloseForm();
+    return;
+  }
+  if (имя === f.old) { kbCloseForm(); return; }
+  if (f.old === ПАРА_ПО_ИМЕНИ) return;
+  if ((state.clients.includes(имя) || kbPairHasRecords(имя)) && !confirm(
+      'Пара «' + имя + '» уже есть.\n\nВсе записи «' + f.old + '» перейдут в неё и сольются с её записями.\n\nПродолжить?')) return;
+  const { renamed } = renamePairEverywhere(f.old, имя);
+  // книга ищет главу по имени — подменяем, чтобы остаться на той же странице
+  if (kbData) kbData.chapters.forEach(c => { if (c.name === f.old) c.name = имя; });
+  saveState();
+  render();
+  showToast('Переименовано в «' + имя + '»: записей — ' + renamed);
+  kbCloseForm();
+}
+
+function kbPairRemove() {
+  const f = kbForm, i = state.clients.indexOf(f.old);
+  if (i < 0) { showToast('Этой пары нет в списке выбора'); kbCloseForm(); return; }
+  const записей = Object.values(state.days || {}).reduce((t, day) =>
+    t + ['in', 'out'].reduce((u, k) => u + (day[k] || []).filter(r => (r.client || '').trim() === f.old).length, 0), 0);
+  if (!confirm(записей
+      ? 'У пары «' + f.old + '» ' + записей + ' записей. Они останутся и будут видны в книге,\nно пары не будет в списке для новых приходов и выдач.\n\nУбрать?'
+      : 'Убрать пару «' + f.old + '» из списка?')) return;
+  state.clients.splice(i, 1);
+  saveState();
+  renderClientSelects();
+  showToast('Пара убрана из списка');
+  kbCloseForm();
 }
 
 /* ── БЛАНК ПРИХОДА И ВЫДАЧИ В КНИГЕ (v259) ──────────────────────────────────
@@ -10738,6 +10870,15 @@ function kbDraw() {
    на бланке. */
 function kbOpenForm(o) {
   if (o.edit) return kbOpenEdit(o.t, o.edit);
+  if (o.t === 'pairs' || o.t === 'pair') {
+    const old = o.t !== 'pair' ? null
+      : (o.c != null && kbData.chapters[o.c]) ? kbData.chapters[o.c].name
+      : (o.i != null ? state.clients[o.i] : null);
+    kbForm = { type: o.t, old, back: (kbForm && kbForm.type === 'pairs') ? kbForm : null };
+    kbDraw();
+    document.getElementById('kbOverlay').scrollTop = 0;
+    return;
+  }
   const pair = (o.c != null && kbData.chapters[o.c]) ? kbData.chapters[o.c].name
     : ((document.getElementById(o.t === 'in' ? 'in-client' : 'out-client') || {}).value || state.clients[0] || '');
   const aim = (o.aim && pairUnpaidRows(pair, currentDate).some(r => r.date + '#' + r.idx === o.aim)) ? o.aim : null;
@@ -10823,6 +10964,7 @@ function kbUnpaidRowsForForm() {
 
 function kbCloseForm() {
   if (!kbForm) return;
+  if (kbForm.back) { kbForm = kbForm.back; kbDraw(); document.getElementById('kbOverlay').scrollTop = 0; return; }
   kbForm = null;
   kbRefreshIfOpen();   // пересчитать с новой записью и вернуться на то же место
   document.getElementById('kbOverlay').scrollTop = 0;
@@ -10853,6 +10995,8 @@ function kbUnpaidHtml() {
 }
 
 function kbFormHtml() {
+  if (kbForm.type === 'pairs') return kbPairsHtml();
+  if (kbForm.type === 'pair') return kbPairHtml();
   const f = kbForm, isIn = f.type === 'in';
   const варианты = groupedPairs().map(g => `<optgroup label="${escapeHtml(g.группа)}">`
       + g.items.map(x => `<option value="${escapeHtml(x.name)}"${x.name === f.pair ? ' selected' : ''}>${escapeHtml(x.name)}</option>`).join('')
