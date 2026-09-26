@@ -25,7 +25,11 @@
     --accent: #00e5b0;
     --accent2: #ff6b4a;
     --accent3: #7b8cff;
-    --text: #f2f3f5;
+    /* v263: вместо почти чистого белого — «слоновая кость», главная цифра
+       мятная. Владелец 26.09.2026: «белый смотрится очень резко… чтобы хорошо
+       было видно, но не резало глаза» — выбрал вариант «Мята + кость». */
+    --text: #e9e3d6;
+    --main-num: #8fe8c9;
     --muted: #8e9099;       /* нейтральный серый для подписей (v251, было с синевой) */
     --muted-bright: #c2c4cc; /* посветлее — для второстепенного контента (суммы, проценты, числа) */
     --income: #00e5b0;
@@ -878,7 +882,7 @@
   }
   /* Итог дня — прямо на фоне, без карточки, самой крупной цифрой (1a) */
   .stat-card.s-balance { grid-column: 1 / -1; order: -1; padding: 6px 2px 10px; background: transparent; }
-  .stat-card.s-balance .stat-value { font-size: 44px; font-weight: 700; letter-spacing: -1px; }
+  .stat-card.s-balance .stat-value { font-size: 44px; font-weight: 700; letter-spacing: -1px; color: var(--main-num); }
   .stat-card.s-balance .stat-label { font-size: 15px; color: var(--muted); }
 
   /* ── SECTION ── */
@@ -1664,7 +1668,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v262</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v263</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
