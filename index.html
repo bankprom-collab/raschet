@@ -1668,7 +1668,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v263</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v264</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2660,7 +2660,7 @@ function migrateState(s) {
       // В общий итог идёт сумма ПОСЛЕ ПЕРВОГО процента (округлённая)
       if (r.pct !== null && r.pct !== undefined && r.pct > 0
           && r.total !== null && r.total !== undefined) {
-        return sum + Math.round(r.total / 100) * 100;
+        return sum + r100(r.total);   // то же округление, что в calcBalance (v264)
       }
       return sum + r.total;
     }, 0);
@@ -4019,6 +4019,13 @@ function clearCuratorPaidToday() {
 // Все остальные суммы (приход, сложение, итоги, касса) — точные.
 function r100(n) {
   if (n === null || n === undefined || isNaN(n)) return 0;
+  /* v264: ровно «полсотни» не округляем. Владелец 26.09.2026: «если сумма
+     кратна половине (750, 150, 250, 350) — оставляешь без округления; если
+     больше (752, 753) — в большую сторону; 749, 748, 746 — в меньшую».
+     До v264 …750 уходило вверх: 1 575 000 − 23 % = 1 212 750 показывалось
+     1 212 800. Допуск в полкопейки — на погрешность вычислений. */
+  const ост = ((n % 100) + 100) % 100;
+  if (Math.abs(ост - 50) < 0.005) return Math.round(n * 100) / 100;
   return Math.round(n / 100) * 100;
 }
 // floor100 — округление ВНИЗ до сотен. Используется ТОЛЬКО для суммы куратора:
@@ -4196,7 +4203,33 @@ function разоваяПравкаДанных() {
   saveState();
 }
 
+/* Переходящие остатки хранятся посчитанными. После v264 приход с «ровно
+   полсотни» после 1-го % даёт на 50 ₽ меньше, и сохранённые авто-остатки
+   следующих дней разошлись бы с пересчётом. Сдвигаем их один раз ровно
+   на разницу округления — больше ничего не пересчитываем, чтобы не задеть
+   чужие расхождения. Ручной остаток обрывает цепочку, как в
+   recalcCarryoversAfter. В ручном режиме — не трогаем, попробуем позже. */
+function сдвигОстатковПолсотни() {
+  if (!state || state._r50Shift || state.manualMode === true) return;
+  let сдвиг = 0, менялось = false;
+  for (const d of Object.keys(state.days || {}).sort()) {
+    const day = state.days[d];
+    if (!day) continue;
+    if (day.carryoverManual === true) сдвиг = 0;
+    else if (сдвиг) { day.carryover = (day.carryover || 0) + сдвиг; менялось = true; }
+    (day.in || []).forEach(r => {
+      if (r.pct !== null && r.pct !== undefined && r.pct > 0 && r.total !== null && r.total !== undefined)
+        сдвиг += r100(r.total) - Math.round(r.total / 100) * 100;   // новое округление минус старое
+    });
+  }
+  state._r50Shift = true;
+  if (менялось) saveState();
+}
+
 function render() {
+  // Сдвиг — ПЕРВЫМ: он переводит остатки, посчитанные старым округлением.
+  // Правка ниже пересчитывает их уже новым — в обратном порядке 50 ₽ ушли бы дважды.
+  try { сдвигОстатковПолсотни(); } catch (e) { console.warn('Сдвиг остатков:', e); }
   try { разоваяПравкаДанных(); } catch (e) { console.warn('Разовая правка:', e); }
   renderDateLabel();
   const day = getDay(currentDate);
