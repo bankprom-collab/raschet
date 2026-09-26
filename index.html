@@ -1571,7 +1571,15 @@
     .kb.kb-cover .kb-view .kb-l { min-height:0; overflow-y:auto; }
     .kb.kb-cover .kb-view .kb-r { min-height:0; }
     .kb.kb-cover .kb-r .kb-wide-only { flex:1; min-height:0; display:flex; flex-direction:column; }
-    .kb.kb-cover .kb-r .kb-wide-only .kb-toc { flex:1; min-height:0; overflow-y:auto; padding-right:8px; }
+    .kb.kb-cover .kb-r .kb-wide-only .kb-toc { flex:1; min-height:0; overflow-y:auto;
+      margin-right:-48px; padding-right:18px;               /* шире — до края страницы (v267) */
+      scrollbar-width:thin; scrollbar-color:var(--kb-band2) transparent; }
+    /* Тонкая полоса прокрутки у самого края, без дорожки (v267). Владелец:
+       «чтобы прокрутка была потоньше, правее и давала больше места парам» */
+    .kb.kb-cover .kb-r .kb-toc::-webkit-scrollbar { width:6px; }
+    .kb.kb-cover .kb-r .kb-toc::-webkit-scrollbar-track { background:transparent; }
+    .kb.kb-cover .kb-r .kb-toc::-webkit-scrollbar-thumb { background:var(--kb-band2); border-radius:99px; }
+    .kb.kb-cover .kb-r .kb-toc::-webkit-scrollbar-thumb:hover { background:var(--kb-dots); }
     .kb.kb-cover .kb-shelf-l { padding-top:16px; }
   }
   /* Невысокий экран ноутбука: обложка должна встать целиком — мельче и плотнее */
@@ -1735,7 +1743,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v266</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v267</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
