@@ -440,8 +440,6 @@
   .wd2-list { background: rgba(255,255,255,.035); border-radius: var(--radius); padding: 0 14px; }
   .pl-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.06); }
   .pl-row:last-child { border-bottom: none; }
-  .pl-ring { flex: none; width: 44px; height: 44px; position: relative; color: var(--text); }
-  .pl-ring span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
   .pl-mid { flex: 1; min-width: 0; }
   .pl-top, .pl-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .pl-top .wds-pair { font-family: var(--font-ui); font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1515,7 +1513,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v252</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v253</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -5685,13 +5683,13 @@ function renderWeekDebtSummary() {
   if (шторка && шторка.classList.contains('open')) fillPairSheet();
 }
 
-/* Строка пары в коротком списке (v252). Кольцо — та же доля выданного,
-   что раньше показывала полоска (pairPaidShare); срок — ближайший из
-   pairDueDates, как в чипе «отдать до». */
+/* Строка пары в коротком списке (v252). Срок — ближайший из pairDueDates,
+   как в чипе «отдать до».
+   v253: кольцо «выдано N %» убрано по решению владельца. Оно считало долю
+   выданного за всю историю пары, а не по нынешнему долгу: у пары с целиком
+   невыданным приходом стояло 86 %. */
 function pairListRowHtml(r, scope) {
   const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
-  const pct = Math.round(pairPaidShare(r.name, currentDate) * 100);
-  const C = 2 * Math.PI * 19;
   const срок = pairDueDates(r.name, currentDate)[0];
   let sub = r.base > 0 ? 'база ' + fmt(r.base) : '';
   if (срок) {
@@ -5702,11 +5700,6 @@ function pairListRowHtml(r, scope) {
   }
   const имя = encodeURIComponent(r.name).replace(/'/g, '%27');
   return `<div class="pl-row${scope === 'overdue' ? ' late' : ''}" onclick="openPairSheet('${имя}', '${scope}')">
-    <div class="pl-ring"><svg viewBox="0 0 44 44" width="44" height="44">
-      <circle cx="22" cy="22" r="19" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="3.5"/>
-      ${pct > 0 ? `<circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"
-        stroke-dasharray="${(C * pct / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 22 22)"/>` : ''}
-    </svg><span>${pct}%</span></div>
     <div class="pl-mid">
       <div class="pl-top"><span class="wds-pair">${escapeHtml(r.name)}</span><b class="pl-sum">${fmt(r.v1)}</b></div>
       <div class="pl-sub"><span>${sub}</span><span>${r.pct1 != null ? '−' + pf(r.pct1) + '%' : '−13%'}</span></div>
