@@ -1664,7 +1664,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v261</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v262</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4171,7 +4171,29 @@ function renderDateLabel() {
 }
 
 // ── RENDER ─────────────────────────────────────────────────────────────────
+/* Разовая правка данных владельца (v262). 26.09.2026 он подтвердил прямо:
+   «15 сентября, подтверждаю удаление, его не учитывай» — выдачу Мухтар-Самв
+   1 039 500 от 15 сен (приход, за который она была, удалён, а «разнести
+   остатки» переложила её на приход 24 сен) и её пустой остаток 0 ₽.
+   Данные живут в его браузере, поэтому правка — кодом, один раз, только
+   по точному совпадению записей. Перед ней — резервная копия
+   «Синхронизация → Резервные копии → До удаления выдачи 15 сен».
+   Стоит в render(): срабатывает после входа и после загрузки с Диска. */
+function разоваяПравкаДанных() {
+  if (!state || state._samv15Removed) return;
+  const dd = state.days && state.days['2026-09-15'];
+  const лишняя = o => o && (o.client || '').trim() === 'Мухтар-Самв'
+    && (o.amount === 1039500 || (o.amount === 0 && o.forIn === '2026-09-08#2'));
+  if (!dd || !Array.isArray(dd.out) || !dd.out.some(лишняя)) return;
+  backupSlot('pre-fix-samv15');
+  dd.out = dd.out.filter(o => !лишняя(o));
+  state._samv15Removed = true;
+  recalcCarryoversAfter('2026-09-15');
+  saveState();
+}
+
 function render() {
+  try { разоваяПравкаДанных(); } catch (e) { console.warn('Разовая правка:', e); }
   renderDateLabel();
   const day = getDay(currentDate);
   // Carryover
@@ -11840,6 +11862,7 @@ function backupKeyLabel(key) {
   if (suffix === 'pre-import') return 'До импорта из файла';
   if (suffix === 'pre-restore') return 'До восстановления из копии';
   if (suffix === 'pre-purge') return 'До удаления записей пары';
+  if (suffix === 'pre-fix-samv15') return 'До удаления выдачи 15 сен (Мухтар-Самв)';
   if (/^\d{4}-\d{2}-\d{2}$/.test(suffix)) {
     return 'Копия за ' + (typeof formatDateShort === 'function' ? formatDateShort(suffix) : suffix);
   }
