@@ -13,36 +13,35 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Расчёт">
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;600;700&family=JetBrains+Mono:wght@300;400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://apis.google.com/js/api.js"></script>
 <script src="https://accounts.google.com/gsi/client"></script>
 <style>
   :root {
-    --bg: #0d0f14;
-    --surface: #161920;
-    --card: #1e2230;
-    --border: #2a2f3f;
+    --bg: #111214;
+    --surface: #1a1b1f;
+    --card: #1c1d21;
+    --border: #2a2b30;
     --accent: #00e5b0;
     --accent2: #ff6b4a;
     --accent3: #7b8cff;
-    --text: #e8ecf4;
-    --muted: #8590b3;       /* холодный серебристо-синий — для подписей-заголовков */
-    --muted-bright: #b4bdd9; /* посветлее — для второстепенного контента (суммы, проценты, числа) */
+    --text: #f2f3f5;
+    --muted: #8e9099;       /* нейтральный серый для подписей (v251, было с синевой) */
+    --muted-bright: #c2c4cc; /* посветлее — для второстепенного контента (суммы, проценты, числа) */
     --income: #00e5b0;
     --expense: #ff6b4a;
-    --radius: 12px;
-    --font-ui: 'Inter', -apple-system, system-ui, sans-serif;
-    --font-num: 'JetBrains Mono', monospace;
+    --radius: 18px;
+    /* v251: один шрифт на всё. Цифры — тот же Golos Text с моноширинными
+       цифрами (tabular-nums на body), поэтому столбцы сумм не пляшут. */
+    --font-ui: 'Golos Text', -apple-system, system-ui, sans-serif;
+    --font-num: 'Golos Text', -apple-system, system-ui, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     background: var(--bg);
-    background-image:
-      radial-gradient(900px 500px at 15% -8%, rgba(0,229,176,.07), transparent 60%),
-      radial-gradient(800px 500px at 100% 0%, rgba(123,140,255,.06), transparent 55%);
-    background-attachment: fixed;
     color: var(--text);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-ui);
+    font-variant-numeric: tabular-nums;   /* цифры одной ширины — столбцы сумм ровные */
     font-size: 14px;
     min-height: 100vh;
   }
@@ -60,7 +59,7 @@
     position: sticky; top: 0; z-index: 100;
   }
   .logo {
-    font-family: 'Unbounded', sans-serif;
+    font-family: var(--font-ui);
     font-size: 15px;
     font-weight: 700;
     letter-spacing: -0.5px;
@@ -81,7 +80,7 @@
   }
   .date-nav button:hover { opacity: .7; }
   #currentDate {
-    font-family: 'Unbounded', sans-serif;
+    font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 600;
     min-width: 120px; text-align: center;
@@ -123,7 +122,7 @@
     margin-bottom: 10px;
   }
   .cal-head span {
-    font-family: 'Unbounded', sans-serif; font-size: 13px; font-weight: 600;
+    font-family: var(--font-ui); font-size: 13px; font-weight: 600;
     flex: 1; text-align: center;
   }
   .cal-head button {
@@ -139,7 +138,7 @@
   .cal-day {
     position: relative; text-align: center; padding: 7px 0;
     border-radius: 7px; cursor: pointer; font-size: 12px;
-    font-family: 'JetBrains Mono', monospace; transition: background .12s;
+    font-family: var(--font-num); transition: background .12s;
   }
   .cal-day:hover { background: var(--surface); }
   .cal-we { color: var(--muted); }
@@ -159,12 +158,12 @@
     font-size: 12px; color: var(--muted-bright);
   }
   .an-grand > div:first-child {
-    font-family: 'Unbounded', sans-serif; font-weight: 600;
+    font-family: var(--font-ui); font-weight: 600;
     color: var(--text); width: 100%;
   }
   .an-day { margin-bottom: 16px; }
   .an-day-head {
-    font-family: 'Unbounded', sans-serif; font-size: 12px; font-weight: 600;
+    font-family: var(--font-ui); font-size: 12px; font-weight: 600;
     color: var(--text); margin-bottom: 6px;
   }
   .an-table { width: 100%; border-collapse: collapse; }
@@ -176,7 +175,7 @@
   .an-table td {
     font-size: 12px; padding: 6px 8px;
     border-bottom: 1px solid var(--border);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-num);
   }
   .an-table tfoot .an-total td {
     font-weight: 700; color: var(--text);
@@ -186,7 +185,7 @@
   .an-pct { font-size: 10px; color: var(--muted); }
   .an-week { margin-bottom: 22px; }
   .an-week-head {
-    font-family: 'Unbounded', sans-serif; font-size: 12px; font-weight: 700;
+    font-family: var(--font-ui); font-size: 12px; font-weight: 700;
     color: #5fc9b4; padding: 7px 10px; margin-bottom: 10px;
     background: var(--card); border-left: 3px solid #5fc9b4; border-radius: 6px;
   }
@@ -195,16 +194,16 @@
     background: var(--card); border: 1px dashed #5fc9b4; border-radius: 8px;
     padding: 9px 12px; margin-top: 6px; font-size: 11px; color: var(--muted-bright);
   }
-  .an-week-sub b { font-family: 'JetBrains Mono', monospace; }
+  .an-week-sub b { font-family: var(--font-num); }
   .an-week-sub .lbl {
-    font-family: 'Unbounded', sans-serif; font-weight: 600;
+    font-family: var(--font-ui); font-weight: 600;
     color: var(--text); width: 100%; font-size: 11px;
   }
   /* Аналитика база — зелёные суммы с разбором */
   .ab-week { margin-bottom: 20px; }
   .ab-week-head {
     display: flex; align-items: center; justify-content: space-between;
-    font-family: 'Unbounded', sans-serif; font-size: 12px; font-weight: 700;
+    font-family: var(--font-ui); font-size: 12px; font-weight: 700;
     color: #00e5b0; padding: 7px 10px; margin-bottom: 8px;
     background: var(--card); border-left: 3px solid #00e5b0; border-radius: 6px;
   }
@@ -228,7 +227,7 @@
     color: var(--muted);
   }
   .ab-daystats b {
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    font-family: var(--font-num); font-size: 12px;
   }
   .ab-row {
     display: flex; justify-content: space-between; align-items: center;
@@ -237,11 +236,11 @@
   .ab-row.ab-sub { font-weight: 700; border-bottom: none; background: var(--card); border-radius: 6px; }
   .ab-give-head { font-size: 10px; color: #ff6b4a; margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .04em; }
   .ab-row.ab-give { padding: 4px 10px; background: rgba(255,107,74,.06); border-bottom: 1px solid rgba(255,107,74,.12); }
-  .ab-pair { font-family: 'JetBrains Mono', monospace; }
+  .ab-pair { font-family: var(--font-num); }
   /* Зелёная сумма с всплывающим разбором */
   .gsum {
     position: relative; cursor: help; color: var(--accent);
-    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+    font-weight: 700; font-family: var(--font-num);
     border-bottom: 1px dotted var(--accent);
   }
   .gtip {
@@ -249,7 +248,7 @@
     background: var(--surface); border: 1px solid var(--accent);
     border-radius: 8px; padding: 9px 12px; z-index: 50;
     font-size: 11px; font-weight: 400; color: var(--text);
-    font-family: 'JetBrains Mono', monospace; white-space: nowrap;
+    font-family: var(--font-num); white-space: nowrap;
     box-shadow: 0 8px 26px rgba(0,0,0,.6); line-height: 1.6;
     text-align: left;
   }
@@ -264,7 +263,7 @@
     background: var(--surface); border: 1px solid var(--expense);
     border-radius: 8px; padding: 9px 12px; z-index: 50;
     font-size: 11px; font-weight: 400; color: var(--text);
-    font-family: 'JetBrains Mono', monospace; white-space: nowrap;
+    font-family: var(--font-num); white-space: nowrap;
     box-shadow: 0 8px 26px rgba(0,0,0,.6); line-height: 1.6; text-align: left;
   }
   .debt-pair:hover .debt-tip { display: block; }
@@ -305,8 +304,8 @@
     font-size: 12px;
   }
   .wds-row:last-of-type { border-bottom: none; }
-  .wds-pair { font-family: 'JetBrains Mono', monospace; color: var(--text); }
-  .wds-val { font-family: 'JetBrains Mono', monospace; color: var(--muted); white-space: nowrap; }
+  .wds-pair { font-family: var(--font-num); color: var(--text); }
+  .wds-val { font-family: var(--font-num); color: var(--muted); white-space: nowrap; }
   /* Строка пары: имя слева, «нам должны» крупно справа, остальное — под ними
      приглушённой строкой (v237). Раньше в одну строку шли четыре цветные
      цифры подряд, и зацепиться глазу было не за что. */
@@ -336,7 +335,7 @@
   .wds-date-inp {
     background: rgba(255,183,77,.06); border: 1px solid rgba(255,183,77,.25);
     color: var(--text); border-radius: 6px; padding: 3px 7px;
-    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    font-family: var(--font-num); font-size: 11px;
     color-scheme: dark;
   }
   .wds-date-inp:hover { border-color: rgba(255,183,77,.5); }
@@ -361,7 +360,7 @@
   .wds-break {
     padding: 10px 12px; margin: 4px 0 6px;
     background: rgba(255,138,74,.04); border: 1px solid rgba(255,138,74,.15);
-    border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
+    border-radius: 8px; font-family: var(--font-num); font-size: 11.5px;
   }
   .wds-break-head {
     display: grid; grid-template-columns: 1.1fr 1fr 62px 1fr 1fr 1fr; gap: 8px;
@@ -463,7 +462,7 @@
   /* Куратор ко мне — модалка */
   .cm-head { margin-bottom: 12px; }
   .cm-period {
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    font-family: var(--font-num); font-size: 13px;
     color: #ffb74d; font-weight: 700; margin-bottom: 4px;
   }
   .cm-note { font-size: 11px; color: var(--muted); font-style: italic; }
@@ -524,7 +523,7 @@
     display: flex; align-items: center; gap: 10px;
     padding: 6px 8px; border-radius: 6px;
     background: rgba(255,255,255,.02);
-    font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    font-family: var(--font-num); font-size: 12.5px;
   }
   .cm-pay-row:hover { background: rgba(255,183,77,.06); }
   .cm-pay-date { color: var(--muted); min-width: 68px; }
@@ -542,7 +541,7 @@
     display: flex; justify-content: space-between; align-items: center;
     padding: 8px 8px 4px; margin-top: 4px;
     border-top: 1px dashed rgba(255,183,77,.25);
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted-bright);
+    font-family: var(--font-num); font-size: 12px; color: var(--muted-bright);
   }
   .cm-paid-total b { color: #ffb74d; font-size: 13px; }
   .cm-paid-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,183,77,.15); }
@@ -554,7 +553,7 @@
   .cm-paid-inp {
     background: rgba(255,183,77,.06); border: 1px solid rgba(255,183,77,.25);
     color: var(--text); border-radius: 6px; padding: 6px 10px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    font-family: var(--font-num); font-size: 12.5px;
     color-scheme: dark;
   }
   .cm-paid-inp:focus { outline: none; border-color: #ffb74d; box-shadow: 0 0 0 2px rgba(255,183,77,.15); }
@@ -571,7 +570,7 @@
     background: rgba(167,139,250,.06);
     border: 1px solid rgba(167,139,250,.25);
     color: var(--text); border-radius: 8px;
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    font-family: var(--font-num); font-size: 13px;
   }
   .ps-inp:focus { outline: none; border-color: #a78bfa; box-shadow: 0 0 0 2px rgba(167,139,250,.15); }
   .ps-preview-block {
@@ -584,7 +583,7 @@
   }
   .ps-pair-row {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 4px 0; font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    padding: 4px 0; font-family: var(--font-num); font-size: 12.5px;
     border-bottom: 1px dashed rgba(255,255,255,.04);
   }
   .ps-pair-row:last-child { border-bottom: none; }
@@ -635,7 +634,7 @@
   .ab-grand {
     background: var(--card); border: 1px solid #00e5b0; border-radius: 10px;
     padding: 12px 14px; margin-bottom: 14px;
-    font-family: 'Unbounded', sans-serif; font-size: 13px; font-weight: 700;
+    font-family: var(--font-ui); font-size: 13px; font-weight: 700;
     display: flex; justify-content: space-between; align-items: center;
   }
   .ab-balance {
@@ -645,7 +644,7 @@
   .ab-balance > div {
     display: flex; justify-content: space-between; padding: 2px 0;
   }
-  .ab-balance b { font-family: 'JetBrains Mono', monospace; }
+  .ab-balance b { font-family: var(--font-num); }
   .ab-bal-end {
     border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px !important;
     font-weight: 700;
@@ -665,12 +664,12 @@
     padding: 10px 18px; gap: 12px;
   }
   .ab-print-name {
-    font-family: 'Unbounded', sans-serif; font-size: 13px; font-weight: 600;
+    font-family: var(--font-ui); font-size: 13px; font-weight: 600;
   }
   .ab-pb {
     border: none; border-radius: 7px; padding: 9px 15px; font-size: 13px;
     cursor: pointer; font-weight: 600; margin-left: 8px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-num);
   }
   .ab-pb-print { background: #3d4564; color: #fff; }
   .ab-pb-pdf { background: #00a884; color: #fff; }
@@ -742,8 +741,8 @@
     .header-btns { width: 100%; }
     .header-btns .btn { flex: 1 1 auto; padding: 10px 6px; }
     .summary-row { grid-template-columns: 1fr 1fr; gap: 8px; }
-    .stat-card { padding: 12px 14px; }
-    .stat-value { font-size: 17px; }
+    .stat-card { padding: 14px; }
+    .stat-value { font-size: 20px; }
     main { padding: 16px 10px 60px; }
     .carryover-input-row { flex-wrap: wrap; }
     .carryover-input-row input { width: 100% !important; }
@@ -781,16 +780,15 @@
     gap: 8px;
     margin-bottom: 12px;
   }
+  /* v251, вариант 1a: плитки — ровные карточки без рамки и тени,
+     отличаются от фона только тоном. */
   .stat-card {
     background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 10px 12px;
+    border: none;
+    border-radius: var(--radius);
+    padding: 16px;
     position: relative; overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0,0,0,.16);
-    transition: transform .18s, box-shadow .18s;
   }
-  .stat-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,.26); border-color: var(--muted); }
   .stat-card::before {
     content: '';
     position: absolute; top: 0; left: 0; right: 0; height: 2px;
@@ -798,27 +796,22 @@
   /* Полоска осталась только у главной плитки — когда подчёркнуто всё,
      не подчёркнуто ничего (v134). */
   .stat-card::before { background: transparent; }
-  .stat-card.s-balance::before { background: var(--accent); height: 3px; }
   .stat-label {
     font-family: var(--font-ui);
-    font-size: 10.5px; text-transform: none;      /* КАПС читается медленнее (v134) */
-    letter-spacing: .1px; color: var(--muted); margin-bottom: 5px; font-weight: 500;
+    font-size: 13px; text-transform: none;      /* КАПС читается медленнее (v134) */
+    color: var(--muted); margin-bottom: 8px; font-weight: 400;
   }
+  /* Цифры белые — в 1a ни одна сумма на плитке не окрашена: цвет отвлекает,
+     а смысл уже в подписи. */
   .stat-value {
     font-family: var(--font-num);
-    font-size: 16px; font-weight: 600;
-    line-height: 1.15;
+    font-size: 24px; font-weight: 700;
+    line-height: 1.15; color: var(--text);
   }
-  /* Итог дня — единственное по-настоящему главное число на экране (v134) */
-  .stat-card.s-balance { grid-column: 1 / -1; order: -1; padding: 14px 16px; }
-  .stat-card.s-balance .stat-value { font-size: 30px; font-weight: 700; letter-spacing: -.5px; }
-  .stat-card.s-balance .stat-label { font-size: 11px; color: var(--muted-bright); }
-  /* Остальные — тише */
-  .stat-card:not(.s-balance) .stat-value { font-size: 15px; }
-  .stat-value.pos { color: var(--income); }
-  .stat-value.neg { color: var(--expense); }
-  .stat-value.neutral { color: var(--accent3); }
-  .stat-value.main { color: var(--accent); }
+  /* Итог дня — прямо на фоне, без карточки, самой крупной цифрой (1a) */
+  .stat-card.s-balance { grid-column: 1 / -1; order: -1; padding: 6px 2px 10px; background: transparent; }
+  .stat-card.s-balance .stat-value { font-size: 44px; font-weight: 700; letter-spacing: -1px; }
+  .stat-card.s-balance .stat-label { font-size: 15px; color: var(--muted); }
 
   /* ── SECTION ── */
   .section {
@@ -873,11 +866,10 @@
   /* ── CARRY-OVER PANEL ── */
   .carryover-panel {
     background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 10px 14px;
+    border: none;
+    border-radius: var(--radius);
+    padding: 14px 16px;
     margin-bottom: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,.16);
   }
   .carryover-panel > summary::-webkit-details-marker { display: none; }
   .carryover-panel[open] > summary { margin-bottom: 4px; }
@@ -886,7 +878,7 @@
   .carryover-input-row .btn { padding: 6px 12px !important; font-size: 11.5px !important; box-shadow: none !important; }
   .carryover-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); }
   .carryover-value {
-    font-family: 'Unbounded', sans-serif;
+    font-family: var(--font-ui);
     font-size: 17px; font-weight: 700; color: var(--accent3);
     margin-top: 0;
   }
@@ -899,7 +891,7 @@
     color: var(--text);
     border-radius: 9px;
     padding: 10px 13px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-num);
     font-size: 13px;
     transition: border-color .18s, box-shadow .18s, background .18s;
     outline: none;
@@ -972,8 +964,7 @@
     .logo span:first-of-type { display: none; }        /* «/ daily ledger» */
     .header-btns { gap: 6px; }
     .header-btns .btn { font-size: 11px; padding: 7px 10px; }
-    .summary-row { gap: 7px; }
-    .stat-card { padding: 10px 12px; }
+    .summary-row { gap: 8px; }
   }
   @media(max-width: 600px) {
     /* Колонки формы заданы inline прямо в разметке — под широкий экран.
@@ -1007,7 +998,7 @@
   }
   .modal-overlay.open .modal { transform: translateY(0); }
   .modal h2 {
-    font-family: 'Unbounded', sans-serif;
+    font-family: var(--font-ui);
     font-size: 14px; margin-bottom: 20px; color: var(--accent3);
   }
   .form-group { margin-bottom: 14px; }
@@ -1232,7 +1223,7 @@
     box-shadow: 0 8px 24px rgba(0,229,176,.25);
   }
   .login-card h2 {
-    font-family: 'Unbounded', sans-serif;
+    font-family: var(--font-ui);
     font-size: 20px; font-weight: 700;
     margin-bottom: 6px;
   }
@@ -1246,7 +1237,7 @@
     color: var(--text);
     padding: 12px 14px;
     border-radius: 10px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-num);
     font-size: 14px;
     margin-bottom: 10px;
     outline: none;
@@ -1277,7 +1268,7 @@
   #boardOverlay.hidden { display: none; }
   .board-wrap { max-width: 1080px; margin: 0 auto; }
   .board-top { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; flex-wrap:wrap; }
-  .board-hello { font-family:'Unbounded',sans-serif; font-size:26px; font-weight:800; letter-spacing:.5px; line-height:1.1; }
+  .board-hello { font-family:var(--font-ui); font-size:26px; font-weight:800; letter-spacing:.5px; line-height:1.1; }
   .board-hello span { color:var(--accent); }
   .board-date { font-size:13px; color:var(--muted-bright); margin-top:6px; }
   .board-stats { display:flex; gap:10px; flex-wrap:wrap; }
@@ -1311,7 +1302,7 @@
   .board-zone-head { font-family: var(--font-ui); text-transform: none; letter-spacing: .1px; }
   .board-zone-head {
     display:flex; align-items:center; gap:10px;
-    font-family:'Unbounded',sans-serif; font-weight:600;
+    font-family:var(--font-ui); font-weight:600;
     font-size:10.5px; text-transform:uppercase; letter-spacing:1.4px;
     color:var(--zone-c,var(--muted));
   }
@@ -1319,7 +1310,7 @@
     content:''; flex:1; height:1px;
     background:color-mix(in srgb, var(--zone-c,var(--border)) 30%, transparent);
   }
-  .board-zone-note { font-size:10.5px; color:var(--muted); letter-spacing:0; text-transform:none; font-family:'JetBrains Mono',monospace; }
+  .board-zone-note { font-size:10.5px; color:var(--muted); letter-spacing:0; text-transform:none; font-family:var(--font-num); }
 </style>
 </head>
 <body>
@@ -1454,7 +1445,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v250</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v251</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1485,34 +1476,34 @@
     <div class="stat-card s-balance">
       <div class="stat-label">Итого на конец дня</div>
       <div class="stat-value main" id="s-balance">—</div>
-      <div id="s-balance-parts" style="font-size:11.5px;color:var(--muted);margin-top:6px;font-family:var(--font-ui)"></div>
+      <div id="s-balance-parts" style="font-size:13px;color:var(--muted);margin-top:6px;font-family:var(--font-ui)"></div>
     </div>
     <div class="stat-card s-curator">
       <div class="stat-label">Куратор ко мне</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
-        <div class="stat-value" style="color:#ffb74d" id="s-curator">—</div>
-        <button class="btn btn-ghost" onclick="openCuratorMineModal()" style="border-color:var(--border);color:var(--muted);font-size:10.5px;padding:2px 9px;line-height:1.3" title="Открыть расчёты с куратором">Открыть</button>
+        <div class="stat-value" id="s-curator">—</div>
+        <button class="btn btn-ghost" onclick="openCuratorMineModal()" style="background:var(--border);border:none;color:var(--muted-bright);font-size:12px;padding:5px 12px;border-radius:999px;line-height:1.3" title="Открыть расчёты с куратором">Открыть</button>
       </div>
       <div id="curator-paid-line" style="display:none;font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
     <div class="stat-card s-hand" title="Сколько ещё осталось получить на руки: начислено по выданным сделкам минус уже полученное. Полученное уходит в архив окна «На руки».">
       <div class="stat-label">На руки · осталось получить</div>
-      <div class="stat-value" style="color:var(--accent)" id="s-hand">—</div>
+      <div class="stat-value" id="s-hand">—</div>
       <div id="s-hand-line" style="font-size:10px;color:var(--muted);margin-top:3px"></div>
     </div>
   </div>
 
   <!-- Carry-over -->
   <details class="carryover-panel" id="carryover-panel">
-    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-family:var(--font-ui);font-size:12px;color:var(--muted)">
-      <span>Переходящий остаток на день</span>
-      <b style="font-family:var(--font-num);color:var(--accent3);font-size:13px" id="carryover-summary">—</b>
-      <span style="margin-left:auto;color:var(--accent);font-size:11.5px">изменить</span>
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:var(--font-ui);font-size:13px;color:var(--muted)">
+      <span style="flex-basis:100%">Переходящий остаток на день</span>
+      <b style="font-family:var(--font-num);color:var(--text);font-size:20px;font-weight:700" id="carryover-summary">—</b>
+      <span style="margin-left:auto;color:var(--muted-bright);font-size:12px;border:1px solid var(--border);border-radius:999px;padding:4px 12px">изменить</span>
     </summary>
     <div style="margin-top:10px">
       <!-- v238: сумма стоит в заголовке панели, второй раз внутри не нужна -->
       <div class="carryover-label">Режим <span id="carryover-mode" style="font-size:10px;color:var(--accent);margin-left:6px"></span></div>
-      <div id="carryover-mismatch" style="display:none;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:6px;background:rgba(255,183,77,.12);border:1px solid rgba(255,183,77,.3);color:#ffb74d;font-family:'JetBrains Mono',monospace;max-width:520px"></div>
+      <div id="carryover-mismatch" style="display:none;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:6px;background:rgba(255,183,77,.12);border:1px solid rgba(255,183,77,.3);color:#ffb74d;font-family:var(--font-num);max-width:520px"></div>
     </div>
     <div class="carryover-input-row">
       <input type="text" id="carryover-input" placeholder="Сумма остатка" inputmode="decimal" oninput="numericInputFilter(event)" style="width:200px">
@@ -1594,7 +1585,7 @@
     <div style="padding:12px 16px">
       <textarea id="day-note" placeholder="Введите заметку..." rows="2"
         style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);
-               border-radius:8px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:13px;
+               border-radius:8px;padding:10px;font-family:var(--font-num);font-size:13px;
                resize:vertical;outline:none;transition:border-color .2s"
         oninput="saveNote()"
         onfocus="this.style.borderColor='var(--accent)'"
@@ -1781,15 +1772,15 @@
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <div style="display:flex;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:3px">
         <button class="stats-tab-btn" id="stats-tab-week" onclick="setStatsPeriod('week')"
-                style="background:#ffb74d;color:#000;border:none;padding:7px 14px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;cursor:pointer">По неделям</button>
+                style="background:#ffb74d;color:#000;border:none;padding:7px 14px;border-radius:6px;font-family:var(--font-num);font-size:12px;font-weight:600;cursor:pointer">По неделям</button>
         <button class="stats-tab-btn" id="stats-tab-month" onclick="setStatsPeriod('month')"
-                style="background:transparent;color:var(--muted);border:none;padding:7px 14px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;cursor:pointer">По месяцам</button>
+                style="background:transparent;color:var(--muted);border:none;padding:7px 14px;border-radius:6px;font-family:var(--font-num);font-size:12px;font-weight:600;cursor:pointer">По месяцам</button>
         <button class="stats-tab-btn" id="stats-tab-year" onclick="setStatsPeriod('year')"
-                style="background:transparent;color:var(--muted);border:none;padding:7px 14px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;cursor:pointer">По годам</button>
+                style="background:transparent;color:var(--muted);border:none;padding:7px 14px;border-radius:6px;font-family:var(--font-num);font-size:12px;font-weight:600;cursor:pointer">По годам</button>
       </div>
       <div style="display:flex;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:3px;align-items:center" id="stats-year-row">
         <button onclick="changeStatsYear(-1)" style="background:none;border:none;color:var(--accent);font-size:16px;cursor:pointer;padding:0 8px">‹</button>
-        <span id="stats-year-label" style="font-family:'Unbounded',sans-serif;font-size:13px;font-weight:700;min-width:50px;text-align:center"></span>
+        <span id="stats-year-label" style="font-family:var(--font-ui);font-size:13px;font-weight:700;min-width:50px;text-align:center"></span>
         <button onclick="changeStatsYear(+1)" style="background:none;border:none;color:var(--accent);font-size:16px;cursor:pointer;padding:0 8px">›</button>
       </div>
     </div>
@@ -1799,15 +1790,15 @@
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;text-align:center">
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px">Всего за период</div>
-          <div id="stats-total" style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;color:#ffb74d">—</div>
+          <div id="stats-total" style="font-family:var(--font-ui);font-size:18px;font-weight:700;color:#ffb74d">—</div>
         </div>
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px">Сделок</div>
-          <div id="stats-count" style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;color:var(--accent3)">—</div>
+          <div id="stats-count" style="font-family:var(--font-ui);font-size:18px;font-weight:700;color:var(--accent3)">—</div>
         </div>
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px">В среднем</div>
-          <div id="stats-avg" style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;color:var(--accent)">—</div>
+          <div id="stats-avg" style="font-family:var(--font-ui);font-size:18px;font-weight:700;color:var(--accent)">—</div>
         </div>
       </div>
     </div>
@@ -1833,15 +1824,15 @@
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;text-align:center">
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px">Проверено дней</div>
-          <div id="audit-total-days" style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;color:var(--text)">—</div>
+          <div id="audit-total-days" style="font-family:var(--font-ui);font-size:18px;font-weight:700;color:var(--text)">—</div>
         </div>
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px">Расхождений</div>
-          <div id="audit-issues-count" style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;color:#ffb74d">—</div>
+          <div id="audit-issues-count" style="font-family:var(--font-ui);font-size:18px;font-weight:700;color:#ffb74d">—</div>
         </div>
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px">Суммарно</div>
-          <div id="audit-issues-total" style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;color:#ffb74d">—</div>
+          <div id="audit-issues-total" style="font-family:var(--font-ui);font-size:18px;font-weight:700;color:#ffb74d">—</div>
         </div>
       </div>
     </div>
@@ -1863,7 +1854,7 @@
     </p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
       <select id="an-filter-pair" onchange="renderAnalytics()"
-        style="background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:12px;font-family:'JetBrains Mono',monospace">
+        style="background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:12px;font-family:var(--font-num)">
         <option value="">Все пары</option>
       </select>
       <input type="date" id="an-filter-from" onchange="renderAnalytics()" title="Период: с"
@@ -1920,7 +1911,7 @@
   .cp-chip:hover { border-color:#818cf8; }
   .cp-chip.active { background:#818cf8; border-color:#818cf8; color:#0b1030; }
   .ca-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
-  .ca-title { font-family:'Unbounded',sans-serif; font-size:18px; font-weight:700; }
+  .ca-title { font-family:var(--font-ui); font-size:18px; font-weight:700; }
   .ca-sum { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-bottom:16px; }
   .ca-card { background:var(--card); border:1px solid var(--border); border-radius:10px;
              padding:10px 12px; display:flex; flex-direction:column; gap:4px; }
@@ -1997,9 +1988,9 @@
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
           <input type="radio" name="md-scope" value="range">
           <span>Диапазон:</span>
-          <input type="date" id="md-from" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px">
+          <input type="date" id="md-from" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-family:var(--font-num);font-size:12px">
           <span>—</span>
-          <input type="date" id="md-to" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px">
+          <input type="date" id="md-to" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-family:var(--font-num);font-size:12px">
         </label>
       </div>
     </div>
@@ -2052,7 +2043,7 @@
       </p>
       <input type="text" id="sync-client-id" placeholder="xxx.apps.googleusercontent.com"
         style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--text);
-               padding:10px 12px;border-radius:8px;font-family:'JetBrains Mono',monospace;
+               padding:10px 12px;border-radius:8px;font-family:var(--font-num);
                font-size:12px;margin-bottom:10px;outline:none">
       <button class="btn btn-primary" onclick="saveSyncClientId()" style="width:100%">Сохранить Client ID</button>
     </div>
@@ -2092,7 +2083,7 @@
             <span>Автосинхронизация каждые</span>
             <select id="autosync-interval" onchange="toggleAutoSync()" style="background:var(--surface);
               border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:6px;
-              font-family:'JetBrains Mono',monospace;font-size:11px">
+              font-family:var(--font-num);font-size:11px">
               <option value="2">2 мин</option>
               <option value="5" selected>5 мин</option>
               <option value="15">15 мин</option>
@@ -7819,9 +7810,10 @@ function renderSummary(day) {
   // Из чего сложился итог дня — читается за секунду, считать ничего не надо (v136)
   const partsEl = document.getElementById('s-balance-parts');
   if (partsEl) {
-    partsEl.textContent = 'остаток ' + fmt(co)
-      + (inT ? ' + приход ' + fmt(inT) : '')
-      + (outT ? ' − выдано ' + fmt(outT) : '');
+    const b = v => '<b style="color:var(--muted-bright);font-weight:500">' + fmt(v) + '</b>';
+    partsEl.innerHTML = 'остаток ' + b(co)
+      + (inT ? ' + приход ' + b(inT) : '')
+      + (outT ? ' − выдано ' + b(outT) : '');
   }
   const outTile = document.getElementById('s-out');
   if (outTile) outTile.textContent = fmt(outT);
@@ -9395,11 +9387,11 @@ function renderStats() {
       <div style="border-bottom:1px solid var(--border);padding:12px 14px">
         <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleStatsGroup(this)">
           <div>
-            <div style="font-family:'Unbounded',sans-serif;font-size:12px;font-weight:600;color:var(--text)">${g.label}</div>
+            <div style="font-family:var(--font-ui);font-size:12px;font-weight:600;color:var(--text)">${g.label}</div>
             <div style="font-size:10px;color:var(--muted);margin-top:2px">${g.count} ${pluralizeDeals(g.count)}</div>
           </div>
           <div style="text-align:right">
-            <div style="font-family:'Unbounded',sans-serif;font-size:15px;font-weight:700;color:#ffb74d">${fmt(g.sum)}</div>
+            <div style="font-family:var(--font-ui);font-size:15px;font-weight:700;color:#ffb74d">${fmt(g.sum)}</div>
             <div style="width:120px;height:4px;background:var(--border);border-radius:2px;margin-top:4px;margin-left:auto;overflow:hidden">
               <div style="width:${pct}%;height:100%;background:#ffb74d"></div>
             </div>
@@ -10258,7 +10250,7 @@ function renderAudit() {
       <div style="border-bottom:1px solid var(--border);padding:14px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
           <div style="flex:1;min-width:200px">
-            <div style="font-family:'Unbounded',sans-serif;font-size:13px;font-weight:600;color:var(--text)">
+            <div style="font-family:var(--font-ui);font-size:13px;font-weight:600;color:var(--text)">
               ${formatDateLong(i.date)}
             </div>
             <div style="font-size:11px;color:var(--muted-bright);margin-top:4px;line-height:1.5">
@@ -10267,7 +10259,7 @@ function renderAudit() {
             </div>
           </div>
           <div style="text-align:right">
-            <div style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;color:#ffb74d">
+            <div style="font-family:var(--font-ui);font-size:18px;font-weight:700;color:#ffb74d">
               ${sign}${fmt(absDiff)}
             </div>
             <div style="display:flex;gap:6px;margin-top:8px">
