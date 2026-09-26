@@ -415,6 +415,76 @@
   }
   .wds-break-net b { color: var(--accent); }
   .wds-break-empty { color: var(--muted); font-style: italic; padding: 4px 0; }
+  /* ── v252, вариант 2b: сводка крупно, пары коротким списком,
+     всё остальное по паре — в шторке по нажатию ── */
+  .week-debt-block.wd2 { border: none; background: transparent; padding: 8px 2px 4px; }
+  .wd2-title { font-size: 20px; font-weight: 700; color: var(--text); }
+  .wd2-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .wd2-lbl { font-size: 14px; color: var(--muted); margin-top: 16px; }
+  .wd2-big { font-family: var(--font-num); font-size: 40px; font-weight: 700; letter-spacing: -1px; line-height: 1.1; color: var(--text); }
+  .wd2-bar-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-top: 14px; font-size: 14px; color: var(--muted-bright); }
+  .wd2-bar-row b { font-family: var(--font-num); font-size: 17px; white-space: nowrap; color: var(--text); }
+  .wd2-bar { height: 6px; border-radius: 99px; background: rgba(255,255,255,.08); margin-top: 6px; overflow: hidden; }
+  .wd2-bar i { display: block; height: 100%; border-radius: 99px; }
+  .wd2-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 12px; }
+  .wd2-chip { font-family: var(--font-num); font-size: 13px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.06); color: var(--muted-bright); }
+  .wd2-chip.late { background: rgba(255,82,82,.14); color: #ff8a80; cursor: pointer; }
+  .wd2-link { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; font-size: 14px; color: var(--text); }
+  .wd2-link::-webkit-details-marker { display: none; }
+  .wd2-link b { margin-left: auto; font-family: var(--font-num); white-space: nowrap; }
+  .wd2-link .chev { color: var(--muted); transition: transform .15s; }
+  details[open] > .wd2-link { margin-bottom: 10px; }
+  details[open] > .wd2-link .chev { transform: rotate(90deg); }
+  .wd2-sec { font-size: 15px; font-weight: 700; color: var(--text); margin: 18px 0 8px; }
+  .wd2-sec.late { color: #ff8a80; }
+  .wd2-list { background: rgba(255,255,255,.035); border-radius: var(--radius); padding: 0 14px; }
+  .pl-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .pl-row:last-child { border-bottom: none; }
+  .pl-ring { flex: none; width: 44px; height: 44px; position: relative; color: var(--text); }
+  .pl-ring span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+  .pl-mid { flex: 1; min-width: 0; }
+  .pl-top, .pl-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .pl-top .wds-pair { font-family: var(--font-ui); font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-sum { font-family: var(--font-num); font-size: 17px; font-weight: 700; color: #ff8a4a; white-space: nowrap; }
+  .pl-row.late .pl-sum { color: #ff8a80; }
+  .pl-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .pl-sub span:last-child { white-space: nowrap; }
+  /* Шторка пары: выезжает снизу, на всю ширину телефона */
+  .modal-overlay.pair-sheet { align-items: flex-end; padding: 0; }
+  .pair-sheet .modal { max-width: 560px; border: none; border-radius: 22px 22px 0 0; padding: 10px 18px 24px;
+    max-height: 92vh; background: var(--surface); transform: translateY(100%); }
+  .sh-grab { width: 40px; height: 4px; border-radius: 99px; background: rgba(255,255,255,.2); margin: 0 auto 14px; cursor: pointer; }
+  .sh-name { font-size: 22px; font-weight: 700; color: var(--text); }
+  .sh-lbl { font-size: 14px; color: var(--muted); margin-top: 14px; }
+  .sh-big { font-family: var(--font-num); font-size: 38px; font-weight: 700; letter-spacing: -1px; line-height: 1.15; color: #ff8a4a; }
+  .sh-card { background: rgba(255,255,255,.04); border-radius: var(--radius); padding: 2px 16px; margin-top: 14px; }
+  .sh-line { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 12px 0; font-size: 14px; color: var(--muted-bright); border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sh-line:last-child { border-bottom: none; font-weight: 700; color: var(--text); }
+  .sh-line b { font-family: var(--font-num); white-space: nowrap; color: var(--text); }
+  .sh-sec { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin: 20px 0 8px; }
+  /* Разбор базы в шторке — карточкой на приход, а не таблицей в шесть колонок.
+     Разметка та же (renderPairBaseBreakdownHtml), меняется только раскладка. */
+  .pair-sheet .wds-break { background: none; border: none; padding: 0; margin: 0; font-size: 13px; }
+  .pair-sheet .wds-break-head { display: none; }
+  .pair-sheet .wds-break-row { grid-template-columns: 1fr auto; gap: 3px 10px; padding: 12px 14px; margin-bottom: 8px;
+    border: none; border-radius: 14px; background: rgba(255,255,255,.04); align-items: baseline; }
+  .pair-sheet .wds-break-row > :nth-child(1) { grid-column: 1; grid-row: 1; font-size: 15px; font-weight: 700; color: var(--text); }
+  .pair-sheet .wds-break-row > :nth-child(2) { grid-column: 2; grid-row: 1; text-align: right; }
+  .pair-sheet .wds-break-row > :nth-child(3) { grid-column: 1; grid-row: 2; }
+  .pair-sheet .wds-break-row > :nth-child(4) { grid-column: 2; grid-row: 2; text-align: right; }
+  .pair-sheet .wds-break-row > :nth-child(6) { grid-column: 1; grid-row: 3; }
+  .pair-sheet .wds-break-row > :nth-child(5) { grid-column: 2; grid-row: 3; text-align: right; }
+  .pair-sheet .wds-break-row > :nth-child(6)::before { content: 'разница '; color: var(--muted); font-weight: 400; }
+  .pair-sheet .wds-break-all, .pair-sheet .wds-break-net { display: block; padding: 8px 4px 0; border-top: none; margin: 0; font-size: 13px; }
+  .pair-sheet .wds-break-all > *, .pair-sheet .wds-break-net > * { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+  .pair-sheet .wds-break-all > :first-child, .pair-sheet .wds-break-net > :first-child { font-weight: 700; color: var(--text); padding-top: 6px; }
+  .pair-sheet .wds-break-all > :nth-child(3), .pair-sheet .wds-break-net > :nth-child(3),
+  .pair-sheet .wds-break-all > :empty, .pair-sheet .wds-break-net > :empty,
+  .pair-sheet .wds-break-all > :has(> b:empty), .pair-sheet .wds-break-net > :has(> b:empty) { display: none; }
+  .pair-sheet .wds-break-all > :nth-child(2)::before, .pair-sheet .wds-break-net > :nth-child(2)::before { content: 'база'; color: var(--muted); }
+  .pair-sheet .wds-break-all > :nth-child(4)::before, .pair-sheet .wds-break-net > :nth-child(4)::before { content: 'после 1-го %'; color: var(--muted); }
+  .pair-sheet .wds-break-all > :nth-child(5)::before, .pair-sheet .wds-break-net > :nth-child(5)::before { content: 'после 2-го %'; color: var(--muted); }
+  .pair-sheet .wds-break-all > :nth-child(6)::before, .pair-sheet .wds-break-net > :nth-child(6)::before { content: 'разница'; color: var(--muted); }
   /* Метка (r.tag) — не участвует в расчётах, только для отображения */
   .pair-tag {
     display: inline-block; margin-left: 6px;
@@ -1445,7 +1515,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v251</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v252</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1676,6 +1746,10 @@
       <button class="btn btn-ghost" onclick="closeModal('quick-entry-modal')">Закрыть</button>
     </div>
   </div>
+</div>
+
+<div class="modal-overlay pair-sheet" id="pair-sheet-modal">
+  <div class="modal"><div id="pair-sheet-body"></div></div>
 </div>
 
 <div class="modal-overlay" id="debt-out-modal">
@@ -4293,10 +4367,10 @@ function balanceReconcileHtml(dayStr) {
   // могут уйти в любую сторону, и «+ минус 200 000» читать нельзя.
   const дв = (подпись, знач, цвет) => ступень(подпись, знач < 0 ? '−' : '+', знач, цвет);
   const дата = formatDateShort(R.опорный);
-  return `<div class="no-print" style="margin:8px 0 10px;padding:10px 12px;border-radius:10px;
-      background:rgba(123,140,255,.08);border:1px solid rgba(123,140,255,.3);font-size:11.5px;line-height:1.5">
-      <details><summary style="cursor:pointer;font-weight:700;color:var(--accent3);margin-bottom:5px;list-style:none">
-        Откуда база и куда она уходит · разница ${fmt(R.разница)} — раскрыть</summary>
+  return `<div class="no-print" style="margin:4px 0 0;padding:14px 16px;border-radius:var(--radius);
+      background:rgba(255,255,255,.035);font-size:12px;line-height:1.5">
+      <details><summary class="wd2-link">
+        <span>Откуда база и куда она уходит</span><b>${fmt(R.разница)}</b><span class="chev">›</span></summary>
       <div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;align-items:baseline">
         <span style="font-weight:700">база — приходы до процентов</span>
         <b style="font-family:var(--font-num);font-size:13px;white-space:nowrap">${fmt(R.база)}</b>
@@ -5024,18 +5098,6 @@ function pairPaidShare(pair, dayStr) {
   return all > 0 ? Math.max(0, Math.min(1, paid / all)) : 0;
 }
 
-/** Полоска «сколько уже выдано» для строки пары. */
-function pairProgressHtml(pair) {
-  const share = pairPaidShare(pair, currentDate);
-  const pct = Math.round(share * 100);
-  return `<div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-      <div style="flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden">
-        <div style="width:${pct}%;height:100%;background:var(--accent);border-radius:99px"></div>
-      </div>
-      <span style="font-family:var(--font-ui);font-size:10.5px;color:var(--muted);white-space:nowrap">выдано ${pct}%</span>
-    </div>`;
-}
-
 /* Сроки отдачи по паре (v133). Смотрим невыданные приходы пары и берём их
    даты `dueDate`. Расчёт не трогаем — `pairUnpaidRows` только читает данные. */
 function pairDueDates(pair, dayStr) {
@@ -5455,7 +5517,7 @@ function unlinkPayout(dateStr, idx) {
    ничего не пересчитывает; при следующей перерисовке фильтр сбрасывается. */
 function filterPairRows(q) {
   const строка = (q || '').trim().toLowerCase();
-  document.querySelectorAll('.week-debt-block .wds-row-debt').forEach(el => {
+  document.querySelectorAll('.week-debt-block .pl-row').forEach(el => {
     const имя = el.querySelector('.wds-pair');
     el.hidden = !!строка && !(имя && имя.textContent.toLowerCase().includes(строка));
   });
@@ -5578,73 +5640,131 @@ function renderWeekDebtSummary() {
     return;
   }
 
-  const body = rows.map(r => {
-    const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
-    const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
-    const tag = r.carry ? ` <span class="chip chip-info">↪ перенос</span>` : '';
-    const man = r.manual ? ` <span class="chip chip-warn">✋ ручная</span>` : '';
-    const reop = r.givenDate ? ` <span class="chip chip-warn" title="Стоит «Число отдачи» ${r.givenDate}, но по этим приходам выдачи не было — они остались в долге">🔓 отмечено отдано</span>` : '';
-    const editBtn = (state.manualMode === true)
-      ? ` <span style="cursor:pointer" title="Изменить сумму пары вручную" onclick="editWeekDebtPair('${escapeHtml(r.name).replace(/'/g, "\\'")}')">✏️</span>`
-      : '';
-    const baseHtml = (r.base > 0)
-      ? `база: <b style="color:var(--muted-bright)">${fmt(r.base)}</b> · `
-      : '';
-    const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
-    return `<div class="wds-row wds-row-debt">
-      <div class="wds-row-main">
-        <div class="wds-head-line">
-          <span class="wds-pair">${escapeHtml(r.name)}${tag}${man}${reop}${editBtn}
-            <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button>
-          </span>
-          <span><span class="wds-sum-lbl">${lbl1}</span><b class="wds-sum">${fmt(r.v1)}</b></span>
-        </div>
-        <span class="wds-val">${baseHtml}${lbl2}: <b style="color:#818cf8">${fmt(r.v2)}</b> · разница: <b style="color:var(--accent)">${fmt(r.diff)}</b></span>
-        ${pairPartialHtml(r.name, 'current')}
-        ${pairDueHtml(r.name)}
-        ${pairProgressHtml(r.name)}
-      </div>
-      <details class="wds-break-details">
-        <summary>📋 Раскрыть базу: все приходы, обе суммы и разница</summary>
-        ${renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, 'current')}
-      </details>
-      <details class="wds-break-details">
-        <summary>⚙ Настройки пары: дата начала счёта, число отдачи</summary>
-        ${pairStartFieldHtml(r.name)}
-      </details>
-    </div>`;
-  }).join('');
-
+  /* v252, вариант 2b: наверху разница крупно и две полосы «нам должны /
+     мы должны отдать», ниже пары коротким списком — кольцо выданности, имя,
+     сумма, срок. Всё, что раньше стояло под строкой пары (база, проценты,
+     частичные выдачи, разбор базы, настройки), — в шторке openPairSheet.
+     Числа те же и из тех же функций: меняется только раскладка. */
   const G = computeWeekPairDebt();
-  const totalLine = `база: <b style="color:var(--muted-bright)">${fmt(G.grandBase)}</b> · нам должны: <b style="color:#ff8a4a">${fmt(G.grandTotal)}</b> · мы должны отдать: <b style="color:#818cf8">${fmt(G.grandTotal2)}</b> · разница: <b style="color:var(--accent)">${fmt(G.grandDiff)}</b>`
-    + (overdueRows.length ? ` <span style="font-size:10.5px;color:#f59e0b">(включая просрочку ${fmt(overdueTotal)})</span>` : '');
+  const макс = Math.max(G.grandTotal, G.grandTotal2, 1);
+  const полоса = (v, цвет) => `<div class="wd2-bar"><i style="width:${Math.max(0, Math.min(100, v / макс * 100))}%;background:${цвет}"></i></div>`;
+  const всегоПар = rows.length + overdueRows.length;
+  const список = (rs, scope) => rs.map(r => pairListRowHtml(r, scope)).join('');
 
-  /* v243: пятница из блока убрана совсем — ни подписи, ни подсветки.
-     Владелец: «Пятница нам в данном случае не нужна, нам нужна фактическая
-     на день задолженность». Блок выглядит одинаково в любой день. */
-  const mainBlock = rows.length ? `<div class="week-debt-block">
-    <div class="wds-head">
-      <span>📋 Задолженность по парам на текущий период · на ${formatDateShort(currentDate)}</span>
-      <span class="wds-total">${totalLine}</span>
+  box.innerHTML = `<div class="week-debt-block wd2">
+    <div class="wd2-title">Задолженность по парам</div>
+    <div class="wd2-sub">текущий период · на ${formatDateShort(currentDate)}</div>
+    <div class="wd2-lbl">Разница</div>
+    <div class="wd2-big">${G.grandDiff > 0 ? '+' : ''}${fmt(G.grandDiff)}</div>
+    <div class="wd2-bar-row"><span>Нам должны</span><b style="color:#ff8a4a">${fmt(G.grandTotal)}</b></div>
+    ${полоса(G.grandTotal, '#ff8a4a')}
+    <div class="wd2-bar-row"><span>Мы должны отдать</span><b>${fmt(G.grandTotal2)}</b></div>
+    ${полоса(G.grandTotal2, 'var(--text)')}
+    <div class="wd2-chips">
+      ${overdueRows.length ? `<span class="wd2-chip late" title="Показать просроченные пары"
+        onclick="document.getElementById('wd2-late').scrollIntoView({behavior:'smooth',block:'start'})">⏰ просрочка ${fmt(overdueTotal)}</span>` : ''}
+      <span class="wd2-chip">база ${fmt(G.grandBase)}</span>
     </div>
     ${balanceReconcileHtml(currentDate)}
-    ${rows.length > 10 ? `<input type="search" class="no-print" placeholder="поиск по паре"
-      oninput="filterPairRows(this.value)" style="width:100%;margin:6px 0;padding:7px 10px;
-      border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);
-      font-family:var(--font-ui);font-size:12px">` : ''}
-    ${body}
+    ${всегоПар > 10 ? `<input type="search" class="no-print" placeholder="поиск по паре"
+      oninput="filterPairRows(this.value)" style="width:100%;margin:14px 0 0;padding:9px 12px;
+      border-radius:12px;border:1px solid var(--border);background:var(--bg);color:var(--text);
+      font-family:var(--font-ui);font-size:13px">` : ''}
+    ${rows.length ? `<div class="wd2-sec">Пары · ${rows.length}</div>
+      <div class="wd2-list">${список(rows, 'current')}</div>` : ''}
+    ${overdueRows.length ? `<div class="wd2-sec late" id="wd2-late">⏰ Просрочено — прошлые недели · ${overdueRows.length}</div>
+      <div class="wd2-list">${список(overdueRows, 'overdue')}</div>` : ''}
     <details class="wds-foot"><summary style="cursor:pointer;list-style:none">Как это считается</summary>По каждой паре: сумма после 1-го % («нам должны»), после 2-го % («мы должны отдать») и разница между ними — нарастающим итогом ЗА ЭТУ НЕДЕЛЮ (пн–пт) за вычетом выданного этой паре на руки. Если второй % не задан — считается без второго вычета (разница 0). Полностью выданная пара уходит из списка. Пара с проставленным «числом отдачи» считается отданной ПО эту дату; но новые приходы, поступившие ПОЗЖЕ даты отдачи, снова показываются как неотданный остаток (🔄 после отдачи). Долг с прошлых недель сюда не подмешивается — смотри блок «⏰ Просрочено» ниже.${state.manualMode === true ? ' <b style="color:#ff8a4a">✋ Ручной режим: нажми ✏️ у пары, чтобы задать свою сумму — она станет основной.</b>' : ''}</details>
-  </div>` : '';
-
-  const overdueBlock = renderOverdueBlockHtml(overdueRows, overdueTotalBase, overdueTotal, overdueTotal2, overdueTotalDiff)
+  </div>`
     + closedByDateHtml(currentDate)        // отмечены отданными, но не выданы (v230)
-    + offDebtIncomesHtml(currentDate)      // приходы без пары (v223)
-    /* Разбор «база → итог дня» показывается ВВЕРХУ, сразу под шапкой (v225):
-       снизу владелец до него не доскроллил. Здесь — только если пар нет вовсе
-       и верхнего блока не существует. */
-    + (rows.length ? '' : balanceReconcileHtml(currentDate));
+    + offDebtIncomesHtml(currentDate);     // приходы без пары (v223)
 
-  box.innerHTML = mainBlock + overdueBlock;
+  // Шторка открыта — действие в ней (дата счёта, снятие выдачи…) перерисовало
+  // всё; перерисовываем и её, иначе в ней останутся старые суммы.
+  const шторка = document.getElementById('pair-sheet-modal');
+  if (шторка && шторка.classList.contains('open')) fillPairSheet();
+}
+
+/* Строка пары в коротком списке (v252). Кольцо — та же доля выданного,
+   что раньше показывала полоска (pairPaidShare); срок — ближайший из
+   pairDueDates, как в чипе «отдать до». */
+function pairListRowHtml(r, scope) {
+  const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
+  const pct = Math.round(pairPaidShare(r.name, currentDate) * 100);
+  const C = 2 * Math.PI * 19;
+  const срок = pairDueDates(r.name, currentDate)[0];
+  let sub = r.base > 0 ? 'база ' + fmt(r.base) : '';
+  if (срок) {
+    const late = срок.due < currentDate, now = срок.due === currentDate;
+    sub = late ? `<span style="color:var(--expense)">срок прошёл ${formatDateShort(срок.due)}</span> · отдать ${fmt(срок.left)}`
+        : now ? `<span style="color:#ffb74d">отдать сегодня</span> · ${fmt(срок.left)}`
+        : `до ${formatDateShort(срок.due)} · отдать ${fmt(срок.left)}`;
+  }
+  const имя = encodeURIComponent(r.name).replace(/'/g, '%27');
+  return `<div class="pl-row${scope === 'overdue' ? ' late' : ''}" onclick="openPairSheet('${имя}', '${scope}')">
+    <div class="pl-ring"><svg viewBox="0 0 44 44" width="44" height="44">
+      <circle cx="22" cy="22" r="19" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="3.5"/>
+      ${pct > 0 ? `<circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"
+        stroke-dasharray="${(C * pct / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 22 22)"/>` : ''}
+    </svg><span>${pct}%</span></div>
+    <div class="pl-mid">
+      <div class="pl-top"><span class="wds-pair">${escapeHtml(r.name)}</span><b class="pl-sum">${fmt(r.v1)}</b></div>
+      <div class="pl-sub"><span>${sub}</span><span>${r.pct1 != null ? '−' + pf(r.pct1) + '%' : '−13%'}</span></div>
+    </div>
+  </div>`;
+}
+
+/* Шторка с деталями пары (v252). Содержимое — то, что до v252 стояло прямо
+   под строкой пары, из тех же функций; расчёт не тронут. */
+let pairSheetOpen = null;   // { name, scope }
+function openPairSheet(nameEnc, scope) {
+  pairSheetOpen = { name: decodeURIComponent(nameEnc), scope };
+  fillPairSheet();
+  if (pairSheetOpen) document.getElementById('pair-sheet-modal').classList.add('open');
+}
+
+function fillPairSheet() {
+  const m = document.getElementById('pair-sheet-modal');
+  if (!m || !pairSheetOpen) return;
+  const W = computeWeekPairDebt();
+  const r = (pairSheetOpen.scope === 'overdue' ? W.overdueRows : W.rows)
+    .find(x => x.name === pairSheetOpen.name);
+  // Пару переименовали или долг по ней закрылся — показывать нечего
+  if (!r) { m.classList.remove('open'); pairSheetOpen = null; return; }
+  document.getElementById('pair-sheet-body').innerHTML = pairSheetHtml(r, pairSheetOpen.scope);
+}
+
+function pairSheetHtml(r, scope) {
+  const pf = (p) => (p === null || p === undefined) ? '' : String(p).replace('.', ',');
+  const lbl1 = r.pct1 != null ? `−${pf(r.pct1)}%` : '−13%';
+  const lbl2 = r.has2 ? (r.pct2 != null ? `−${pf(r.pct2)}%` : '−15%') : '—';
+  const nameEsc = escapeHtml(r.name).replace(/'/g, "\\'");
+  const метки = (r.carry ? `<span class="chip chip-info">↪ перенос</span>` : '')
+    + (r.manual ? `<span class="chip chip-warn">✋ ручная</span>` : '')
+    + (r.givenDate ? `<span class="chip chip-warn" title="Стоит «Число отдачи» ${r.givenDate}, но по этим приходам выдачи не было — они остались в долге">🔓 отмечено отдано</span>` : '')
+    + ((state.manualMode === true) ? ` <span style="cursor:pointer" title="Изменить сумму пары вручную" onclick="editWeekDebtPair('${nameEsc}')">✏️</span>` : '');
+  const разбор = renderPairBaseBreakdownHtml(r.name, { base: r.base, v1: r.v1, v2: r.v2 }, scope, scope === 'overdue');
+  const приходов = (разбор.match(/class="wds-break-row/g) || []).length;
+  return `<div class="sh-grab" onclick="closeModal('pair-sheet-modal')" title="Закрыть"></div>
+    <div class="sh-name">${scope === 'overdue' ? '⏰ ' : ''}${escapeHtml(r.name)}
+      <button class="wds-rename" onclick="editPairName('${nameEsc}')" title="Переименовать пару (изменить или убрать суффикс)">🏷️</button></div>
+    ${метки ? `<div style="margin-top:6px;margin-left:-6px">${метки}</div>` : ''}
+    <div class="sh-lbl">Нам должны</div>
+    <div class="sh-big">${fmt(r.v1)}</div>
+    ${pairDueHtml(r.name)}
+    <div class="sh-card">
+      ${r.base > 0 ? `<div class="sh-line"><span>База</span><b>${fmt(r.base)}</b></div>` : ''}
+      <div class="sh-line"><span>${lbl1} · нам должны</span><b style="color:#ff8a4a">${fmt(r.v1)}</b></div>
+      <div class="sh-line"><span>${lbl2} · отдаём</span><b>${fmt(r.v2)}</b></div>
+      <div class="sh-line"><span>Разница</span><b>${fmt(r.diff)}</b></div>
+    </div>
+    ${pairPartialHtml(r.name, scope)}
+    <div class="sh-sec">Приходы пары · ${приходов}</div>
+    ${разбор}
+    <div class="sh-sec">Настройки пары</div>
+    <div class="sh-card" style="padding:12px 16px">${pairStartFieldHtml(r.name)}</div>
+    <button class="btn btn-ghost" style="width:100%;margin-top:18px;padding:12px;border-radius:999px"
+      onclick="closeModal('pair-sheet-modal')">Закрыть</button>`;
 }
 
 // ── ПЛИТКА «СУММА К ОТДАЧЕ» ──────────────────────────────────────────────────
