@@ -1486,6 +1486,26 @@
   .kb-calc .res.done b { color:var(--kb-ok); }
   .kb-calc .second, .kb-calc .memo { margin-top:6px; font-size:12.5px; color:var(--kb-muted); }
   .kb-calc .second b { color:var(--kb-soft); }
+  /* Бланк прихода / выдачи (v259) — поля как в бумажной форме: подпись
+     мелким капсом, ввод по пунктирной строке */
+  .kb-actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .kb-slip-act { display:flex; justify-content:flex-end; margin:-2px 2px 4px; }
+  .kbf { display:grid; gap:4px; }
+  .kbf > span { font-size:12px; color:var(--kb-muted); letter-spacing:.06em; text-transform:uppercase; }
+  .kb .kbf input, .kb .kbf select { font:inherit; font-size:17px; color:var(--kb-text); background:transparent; width:100%;
+    border:0; border-bottom:1.5px dotted var(--kb-dots); border-radius:0; padding:8px 2px; }
+  .kb .kbf input:focus, .kb .kbf select:focus { outline:none; border-bottom:1.5px solid var(--kb-owe); }
+  .kb .kbf select option, .kb .kbf select optgroup { background:var(--kb-page); color:var(--kb-text); }
+  .kb .kbf input.kbf-sum { font-size:26px; font-weight:700; }
+  .kbf-row { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
+  .kbf-preview { font-size:13px; color:var(--kb-soft); background:var(--kb-wash); border-radius:12px; padding:10px 12px; line-height:1.6; }
+  .kbf-preview:empty, .kbf-err:empty { display:none; }
+  .kbf-preview b { color:var(--kb-text); white-space:nowrap; }
+  .kbf-err { color:var(--kb-late); font-size:13.5px; }
+  .kb .kbf-pick { display:grid; gap:2px; width:100%; margin-top:6px; padding:10px 12px; border-radius:12px;
+    background:var(--kb-raise); border:1.5px solid transparent; font-size:13.5px; color:var(--kb-soft); }
+  .kb .kbf-pick.on { border-color:var(--kb-owe); }
+  .kbf-pick b { color:var(--kb-text); white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -1638,7 +1658,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v258</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v259</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10137,7 +10157,7 @@ function printDayReport() {
    августовские 1 268 100 из долга 3 144 400. Теперь «нам должны» в главе
    текущего месяца — весь долг пары, как в задолженности. */
 const KB_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-let kbSt = null, kbData = null, kbSlip = -1, kbDepth = 0;
+let kbSt = null, kbData = null, kbSlip = -1, kbDepth = 0, kbForm = null;
 const kbMonthName = ym => KB_MONTHS[+ym.slice(5, 7) - 1];
 const kbPl = (n, a, b, c) => {
   const m10 = n % 10, m100 = n % 100;
@@ -10190,7 +10210,7 @@ function kbMonthData(ym) {
       if (!свой && !(counted && left1 > 0)) return;
       const ch = map[p] || (map[p] = { name: p, group: pairGroupName(p), start: pairStart(p), weeks: {}, carry: [] });
       const inc = {
-        date: d, amount: r.amount || 0, parts: r.parts || null, pct: r.pct, pct2: r.pct2,
+        date: d, idx, amount: r.amount || 0, parts: r.parts || null, pct: r.pct, pct2: r.pct2,
         after1, after2, left1, left2, counted, note: r.note || '', due: r.dueDate || null,
         late: left1 > 0 && !!r.dueDate && r.dueDate < день,
         pays: ((PARTS[key] || {}).parts) || [],
@@ -10231,7 +10251,7 @@ function kbMonthData(ym) {
 function openBook() {
   kbSt = { ym: currentDate.slice(0, 7), lvl: 0 };
   kbData = kbMonthData(kbSt.ym);
-  kbSlip = -1; kbDepth = 0;
+  kbSlip = -1; kbDepth = 0; kbForm = null;
   document.getElementById('kbOverlay').classList.add('open');
   kbDraw();
 }
@@ -10242,6 +10262,7 @@ function closeBook() { document.getElementById('kbOverlay').classList.remove('op
 function kbRefreshIfOpen() {
   const o = document.getElementById('kbOverlay');
   if (!kbSt || !kbData || !o || !o.classList.contains('open')) return;
+  if (kbForm) return;   // бланк открыт — не стирать набранное; пересчёт при закрытии
   const глава = kbSt.lvl >= 2 ? kbData.chapters[kbSt.c] : null;
   const тетрадь = (глава && kbSt.lvl >= 3) ? глава.weeks[kbSt.w] : null;
   kbData = kbMonthData(kbSt.ym);
@@ -10259,7 +10280,7 @@ function kbGo(next) {
   const ym = next.ym || kbSt.ym;
   if (ym !== kbSt.ym) kbData = kbMonthData(ym);
   kbSt = Object.assign({}, next, { ym });
-  kbSlip = -1;
+  kbSlip = -1; kbForm = null;
   kbDraw();
   document.getElementById('kbOverlay').scrollTop = 0;
 }
@@ -10267,6 +10288,8 @@ function kbGo(next) {
 function kbClick(e) {
   const g = e.target.closest('[data-kb-go]');
   if (g) { kbGo(JSON.parse(g.dataset.kbGo)); return; }
+  const fo = e.target.closest('[data-kb-form]');
+  if (fo) { kbOpenForm(JSON.parse(fo.dataset.kbForm)); return; }
   const sl = e.target.closest('[data-kb-slip]');
   if (sl) { const k = +sl.dataset.kbSlip; kbSlip = kbSlip === k ? -1 : k; kbDraw(); }
 }
@@ -10298,6 +10321,10 @@ const KB_VIEWS = {
         </div>
         <button class="kb-pill" data-kb-go='{"lvl":1}'>Открыть книгу</button>`
       : '<div class="kb-hint">В этом месяце приходов по парам нет.</div>'}
+      <div class="kb-actions">
+        <button class="kb-ghost" data-kb-form='{"t":"in"}'>＋ Приход</button>
+        <button class="kb-ghost" data-kb-form='{"t":"out"}'>＋ Выдача</button>
+      </div>
       <div class="kb-rule"></div>
       ${(st.ym === currentDate.slice(0, 7) && Math.abs(G.grandTotal - D.owe) >= 1)
         ? `<div class="kb-hint">В блоке «Задолженность по парам» — <b>${fmt(G.grandTotal)}</b>: там стоят ручные суммы пар ✏️.</div>` : ''}
@@ -10344,6 +10371,10 @@ const KB_VIEWS = {
       </div>` : ''}
       ${c.dues.length ? `<div class="kb-stamps">${c.dues.map(i => `<span class="kb-stamp${i.late ? ' late' : ''}">${kbDue(i)}</span>`).join('')}</div>` : ''}
       ${c.outside ? `<div class="kb-hint">Счёт по паре — с <b>${formatDateShort(c.start)}</b>: приходы раньше видны, но в суммы не входят.</div>` : ''}
+      <div class="kb-actions">
+        <button class="kb-ghost" data-kb-form='{"t":"in","c":${st.c}}'>＋ Приход по паре</button>
+        <button class="kb-ghost" data-kb-form='{"t":"out","c":${st.c}}'>＋ Выдача по паре</button>
+      </div>
       <div class="kb-lbl">Тетради · ${c.weeks.length}</div>
       <div class="kb-notebooks">${nbs}</div>
       <div class="kb-nav">
@@ -10371,7 +10402,8 @@ const KB_VIEWS = {
           ${!i.counted ? `<div class="memo"><span>счёт по паре — с ${formatDateShort(c.start)}</span></div>` : ''}
           ${i.note ? `<div class="memo"><span>${escapeHtml(i.note)}</span></div>` : ''}
         </span>` : ''}
-      </button>`;
+      </button>${(раскрыт && i.counted && i.left1 > 0) ? `
+      <div class="kb-slip-act"><button class="kb-ghost" data-kb-form='{"t":"out","c":${st.c},"aim":"${i.date}#${i.idx}"}'>Выдать по этому приходу</button></div>` : ''}`;
     }).join('');
     return `
       <div class="kb-eyebrow">Глава ${st.c + 1} · ${escapeHtml(c.name)}</div>
@@ -10392,18 +10424,203 @@ function kbDraw() {
   if (st.lvl >= 1) путь.push(['Оглавление', { lvl: 1 }]);
   if (st.lvl >= 2) путь.push([escapeHtml(D.chapters[st.c].name), { lvl: 2, c: st.c }]);
   if (st.lvl >= 3) путь.push(['тетрадь ' + kbNbLabel(D.chapters[st.c].weeks[st.w]), { lvl: 3, c: st.c, w: st.w }]);
+  if (kbForm) путь.push([kbForm.type === 'in' ? 'новый приход' : 'новая выдача', null]);
   document.getElementById('kbCrumbs').innerHTML = путь.map((x, k) => k < путь.length - 1
     ? `<button data-kb-go='${JSON.stringify(x[1])}'>${x[0]}</button><span aria-hidden="true">›</span>`
     : `<span class="here" aria-current="page">${x[0]}</span>`).join('');
   // Корешки слева: сколько переплётов — на такой глубине книги вы находитесь
+  const глубина = st.lvl + (kbForm ? 1 : 0);
   document.getElementById('kbBinding').innerHTML =
-    Array.from({ length: st.lvl + 1 }, (_, k) => `<span class="kb-band${k === st.lvl ? ' cur' : ''}"></span>`).join('');
+    Array.from({ length: глубина + 1 }, (_, k) => `<span class="kb-band${k === глубина ? ' cur' : ''}"></span>`).join('');
   const v = document.getElementById('kbView');
-  v.innerHTML = KB_VIEWS[st.lvl](D, st);
+  v.innerHTML = kbForm ? kbFormHtml() : KB_VIEWS[st.lvl](D, st);
   v.classList.remove('in-deep', 'in-back');
   void v.offsetWidth;
-  if (st.lvl !== kbDepth) v.classList.add(st.lvl > kbDepth ? 'in-deep' : 'in-back');
-  kbDepth = st.lvl;
+  if (глубина !== kbDepth) v.classList.add(глубина > kbDepth ? 'in-deep' : 'in-back');
+  kbDepth = глубина;
+  if (kbForm) kbFormPreview();
+}
+
+/* ── БЛАНК ПРИХОДА И ВЫДАЧИ В КНИГЕ (v259) ──────────────────────────────────
+   Владелец 26.09.2026: «в книге месяца сделать в таком же книжном стиле
+   добавление новых приходов и новых выдач».
+
+   Бланк — фасад, как крупная форма (v118): сам ничего не считает и не
+   хранит. Переносит набранное в поля компактной формы и зовёт addRow —
+   запись получается ровно такой же, как из обычной формы. Выдача
+   привязывается к приходу так же, как в qeSubmit: forIn дописывается
+   в только что созданную запись. Правила те же: есть невыданные приходы —
+   приход обязателен (v166); выдача больше остатка — переспросить (v170).
+   Запись идёт в открытый день программы (currentDate) — он подписан
+   на бланке. */
+function kbOpenForm(o) {
+  const pair = (o.c != null && kbData.chapters[o.c]) ? kbData.chapters[o.c].name
+    : ((document.getElementById(o.t === 'in' ? 'in-client' : 'out-client') || {}).value || state.clients[0] || '');
+  const aim = (o.aim && pairUnpaidRows(pair, currentDate).some(r => r.date + '#' + r.idx === o.aim)) ? o.aim : null;
+  kbForm = { type: o.t, pair, aim };
+  kbDraw();
+  document.getElementById('kbOverlay').scrollTop = 0;
+  if (aim) { const r = pairUnpaidRows(pair, currentDate).find(x => x.date + '#' + x.idx === aim); document.getElementById('kbfSum').value = fmtExact(r.left); }
+}
+
+function kbCloseForm() {
+  if (!kbForm) return;
+  kbForm = null;
+  kbRefreshIfOpen();   // пересчитать с новой записью и вернуться на то же место
+  document.getElementById('kbOverlay').scrollTop = 0;
+}
+
+// Проценты последнего прихода пары — у пары они обычно одни и те же
+function kbLastPct(pair) {
+  const дни = Object.keys(state.days).sort().reverse();
+  for (const d of дни) {
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    for (let i = dd.in.length - 1; i >= 0; i--) {
+      const r = dd.in[i];
+      if ((r.client || '').trim() === pair && r.pct > 0) return { pct: r.pct, pct2: r.pct2 };
+    }
+  }
+  return null;
+}
+
+function kbUnpaidHtml() {
+  const rows = pairUnpaidRows(kbForm.pair, currentDate);
+  if (!rows.length) return '<div class="kb-hint">Невыданных приходов у пары нет — выдача запишется без привязки.</div>';
+  return rows.map(r => `<button type="button" class="kbf-pick${kbForm.aim === r.date + '#' + r.idx ? ' on' : ''}" onclick="kbFormAim('${r.date}#${r.idx}')">
+      <span><b>${formatDateShort(r.date)}</b> · приход ${fmt(r.amount)}</span>
+      <span>осталось <b>${fmt(r.left)}</b>${r.dueDate ? ' · отдать до ' + formatDateShort(r.dueDate) : ''}</span>
+    </button>`).join('');
+}
+
+function kbFormHtml() {
+  const f = kbForm, isIn = f.type === 'in';
+  const варианты = groupedPairs().map(g => `<optgroup label="${escapeHtml(g.группа)}">`
+      + g.items.map(x => `<option value="${escapeHtml(x.name)}"${x.name === f.pair ? ' selected' : ''}>${escapeHtml(x.name)}</option>`).join('')
+      + '</optgroup>').join('') + '<option value="__add__">＋ Новая пара…</option>';
+  const прошлые = isIn ? kbLastPct(f.pair) : null;
+  const пц = v => (v > 0) ? String(v).replace('.', ',') : '';
+  return `
+    <div class="kb-eyebrow">${isIn ? 'Бланк прихода' : 'Бланк выдачи'} · запись в день ${formatDateShort(currentDate)}</div>
+    <div class="kb-title">${isIn ? 'Новый приход' : 'Новая выдача'}</div>
+    <label class="kbf"><span>Пара</span><select id="kbfPair" onchange="kbFormPair(this.value)">${варианты}</select></label>
+    ${isIn ? '' : `<div class="kbf"><span>За какой приход</span><div id="kbfUnpaid">${kbUnpaidHtml()}</div></div>`}
+    <label class="kbf"><span>${isIn ? 'Сумма прихода' : 'Сумма выдачи'}</span>
+      <input id="kbfSum" class="kbf-sum" inputmode="decimal" autocomplete="off" oninput="kbFormPreview()"
+        placeholder="${isIn ? '1 250 000 или 412 304+301 640' : '0'}"></label>
+    ${isIn ? `<div class="kbf-row">
+      <label class="kbf"><span>1-й %</span><input id="kbfP1" inputmode="decimal" autocomplete="off" value="${прошлые ? пц(прошлые.pct) : ''}" oninput="kbFormPreview()"></label>
+      <label class="kbf"><span>2-й %</span><input id="kbfP2" inputmode="decimal" autocomplete="off" value="${прошлые ? пц(прошлые.pct2) : ''}" oninput="kbFormPreview()"></label>
+      <label class="kbf"><span>Куратору %</span><input id="kbfPc" inputmode="decimal" autocomplete="off" value="${пц(state.lastPctCur)}" oninput="kbFormPreview()"></label>
+    </div>
+    <div class="kb-hint" id="kbfPctNote">${прошлые ? 'Проценты — как в прошлом приходе этой пары. Проверьте.' : ''}</div>
+    <div class="kbf-preview" id="kbfPreview"></div>` : ''}
+    <label class="kbf"><span>Отдать до</span><input type="date" id="kbfDue"></label>
+    <label class="kbf"><span>Примечание</span><input id="kbfNote" autocomplete="off" placeholder="необязательно"></label>
+    <div class="kbf-err" id="kbfErr" role="alert"></div>
+    <div class="kb-nav">
+      <button type="button" class="kb-ghost" onclick="kbCloseForm()">Отмена</button>
+      <button type="button" class="kb-pill" onclick="kbFormSave()">Записать в книгу</button>
+    </div>`;
+}
+
+function kbFormPair(v) {
+  if (v === '__add__') {
+    const added = promptNewPair();
+    if (added) { renderClientSelects(); kbForm.pair = added; kbForm.aim = null; }
+    const sum = document.getElementById('kbfSum').value;
+    kbDraw();
+    document.getElementById('kbfSum').value = sum;
+    return;
+  }
+  kbForm.pair = v; kbForm.aim = null;
+  if (kbForm.type === 'out') { document.getElementById('kbfUnpaid').innerHTML = kbUnpaidHtml(); return; }
+  const прошлые = kbLastPct(v), пц = x => (x > 0) ? String(x).replace('.', ',') : '';
+  document.getElementById('kbfP1').value = прошлые ? пц(прошлые.pct) : '';
+  document.getElementById('kbfP2').value = прошлые ? пц(прошлые.pct2) : '';
+  document.getElementById('kbfPctNote').textContent = прошлые ? 'Проценты — как в прошлом приходе этой пары. Проверьте.' : '';
+  kbFormPreview();
+}
+
+// Нажали на приход — привязали выдачу к нему; пустую сумму заполняем остатком,
+// набранную не трогаем (владелец часто выдаёт не весь остаток, v169)
+function kbFormAim(key) {
+  kbForm.aim = kbForm.aim === key ? null : key;
+  const r = pairUnpaidRows(kbForm.pair, currentDate).find(x => x.date + '#' + x.idx === key);
+  const поле = document.getElementById('kbfSum');
+  if (kbForm.aim && r && !поле.value.trim()) поле.value = fmtExact(r.left);
+  document.getElementById('kbfUnpaid').innerHTML = kbUnpaidHtml();
+  document.getElementById('kbfErr').textContent = '';
+}
+
+// Только показ — те же формулы, что в записи: calcInRowFinal (r100) и floor100 для куратора
+function kbFormPreview() {
+  const box = document.getElementById('kbfPreview');
+  if (!box || !kbForm || kbForm.type !== 'in') return;
+  const parsed = parseSumString(document.getElementById('kbfSum').value.replace(/\s/g, ''));
+  const p1 = parseDecimal(document.getElementById('kbfP1').value);
+  const p2 = parseDecimal(document.getElementById('kbfP2').value);
+  const pc = parseDecimal(document.getElementById('kbfPc').value);
+  if (!parsed || !(parsed.sum > 0) || !(p1 > 0)) { box.innerHTML = ''; return; }
+  const a = parsed.sum, a1 = r100(a * (1 - p1 / 100)), a2 = p2 > 0 ? r100(a * (1 - p2 / 100)) : null;
+  box.innerHTML = `после ${kbPc(p1)} — нам должны <b>${fmt(a1)}</b>`
+    + (a2 !== null ? `<br>после ${kbPc(p2)} — отдаём <b>${fmt(a2)}</b> · разница <b>${fmt(a1 - a2)}</b>` : '')
+    + (pc > 0 ? `<br>куратору ${kbPc(pc)} — <b>${fmt(floor100(a * pc / 100))}</b> (после выдачи)` : '');
+}
+
+function kbFormSave() {
+  const f = kbForm, g = id => document.getElementById(id);
+  const ошибка = t => { g('kbfErr').textContent = t; };
+  ошибка('');
+  const pair = g('kbfPair').value;
+  if (!pair || pair === '__add__') return ошибка('Выберите пару.');
+  const сумма = g('kbfSum').value.replace(/\s/g, '');
+  renderClientSelects();   // пара должна быть в списках компактной формы
+  const day = getDay(currentDate);
+  if (f.type === 'in') {
+    const parsed = parseSumString(сумма);
+    if (!parsed || !(parsed.sum > 0)) { g('kbfSum').focus(); return ошибка('Введите сумму прихода.'); }
+    if (!(parseDecimal(g('kbfP1').value) > 0)) { g('kbfP1').focus(); return ошибка('Введите первый процент.'); }
+    g('in-client').value = pair;
+    g('in-amount').value = сумма;
+    g('in-pct').value = g('kbfP1').value;
+    g('in-pct2').value = g('kbfP2').value;
+    g('in-pctcur').value = g('kbfPc').value;
+    g('in-note').value = g('kbfNote').value;
+    if (g('in-due')) g('in-due').value = g('kbfDue').value;
+    const было = day.in.length;
+    addRow('in');
+    if (getDay(currentDate).in.length <= было) return;   // addRow сам сказал, что не так
+  } else {
+    const amount = parseDecimal(сумма);
+    if (!(amount > 0)) { g('kbfSum').focus(); return ошибка('Введите сумму выдачи.'); }
+    const невыдано = pairUnpaidRows(pair, currentDate);
+    if (невыдано.length && !f.aim) return ошибка('Укажите приход, за который выдаёте, — нажмите на него в списке.');
+    const r = невыдано.find(x => x.date + '#' + x.idx === f.aim);
+    if (r && amount > r.left + 0.5 && !confirm(
+        'Выдача ' + fmt(amount) + ' больше остатка прихода от '
+        + formatDateShort(r.date) + ' — там осталось ' + fmt(r.left) + '.\n\n'
+        + 'Лишние ' + fmt(amount - r.left) + ' ни к какому приходу не отнесутся: '
+        + 'ни куратору, ни на руки они не пойдут.\n\n'
+        + 'Лучше записать двумя выдачами — по одной на каждый приход.\n\n'
+        + 'Всё равно сохранить?')) return;
+    g('out-client').value = pair;
+    g('out-amount').value = сумма;
+    g('out-note').value = g('kbfNote').value;
+    if (g('out-due')) g('out-due').value = g('kbfDue').value;
+    const было = day.out.length;
+    qeSubmitting = true;   // приход уже выбран здесь — addRow не должен уводить в крупную форму
+    try { addRow('out'); } finally { qeSubmitting = false; }
+    const outs = getDay(currentDate).out;
+    if (outs.length <= было) return;
+    if (f.aim) {
+      outs[outs.length - 1].forIn = f.aim;   // как в qeSubmit (v126)
+      recalcCarryoversAfter(currentDate);
+      saveState();
+      render();
+    }
+  }
+  kbCloseForm();
 }
 
 
