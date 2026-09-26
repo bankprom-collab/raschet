@@ -1408,6 +1408,15 @@
   .kb-crumbs { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; font-size:13px; color:var(--kb-muted); padding-top:6px; }
   .kb-crumbs button { color:var(--kb-soft); }
   .kb-crumbs .here { color:var(--kb-text); }
+  .kb-top-r { display:flex; gap:8px; flex:none; }
+  /* Синхронизация из книги (v268): точка — состояние копии на Google Диске */
+  .kb .kb-sync { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--kb-line);
+    border-radius:999px; padding:6px 14px; font-size:13px; color:var(--kb-soft); }
+  .kb-sync::before { content:''; width:8px; height:8px; border-radius:50%; background:var(--kb-muted); flex:none; }
+  .kb-sync[data-st="ok"]::before { background:var(--kb-ok); }
+  .kb-sync[data-st="stale"]::before { background:var(--kb-owe); }
+  .kb-sync.busy::before { animation:kb-pulse 1s ease-in-out infinite; }
+  @keyframes kb-pulse { 50% { opacity:.2; } }
   .kb .kb-close { flex:none; border:1px solid var(--kb-line); border-radius:999px; padding:6px 14px; font-size:13px; color:var(--kb-soft); }
   .kb-book { display:grid; grid-template-columns:auto minmax(0,1fr); min-height:480px; }
   .kb-binding { display:flex; }
@@ -1613,7 +1622,10 @@
   <div class="kb-wrap">
     <div class="kb-top">
       <nav class="kb-crumbs" id="kbCrumbs" aria-label="Где вы в книге"></nav>
-      <button class="kb-close" onclick="closeBook()" title="Доска и все остальные разделы">Доска</button>
+      <div class="kb-top-r">
+        <button class="kb-sync" id="kbSyncBtn" data-st="off" onclick="kbSync()">Синхр.</button>
+        <button class="kb-close" onclick="closeBook()" title="Доска и все остальные разделы">Доска</button>
+      </div>
     </div>
     <div class="kb-book">
       <div class="kb-binding" id="kbBinding" aria-hidden="true"></div>
@@ -1743,7 +1755,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v267</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v268</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10450,6 +10462,42 @@ function openBook() {
 }
 function closeBook() { document.getElementById('kbOverlay').classList.remove('open'); }
 
+/* Синхронизация прямо из книги (v268). Владелец 26.09.2026: «зашёл по новой,
+   ввёл пароль — и чтобы была возможность синхронизации; аккуратно разместить
+   кнопку; если синхронизации нет — чтобы можно было добавить все реквизиты».
+   Кнопка ничего своего не делает: не настроено — открывает то же окно
+   «Синхронизация» (Client ID, подключение, копии); настроено — smartSync,
+   как кнопка на главном экране. Токен Google живёт около часа: если истёк,
+   smartSync сам попросит войти, а при отказе откроется окно с причиной. */
+function kbSyncMark() {
+  const b = document.getElementById('kbSyncBtn');
+  if (!b) return;
+  const есть = !!getClientId();
+  const last = parseInt(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || '0', 10);
+  const свежо = есть && last && (Date.now() - last) / 86400000 < SYNC_STALE_DAYS;
+  b.dataset.st = !есть ? 'off' : (свежо ? 'ok' : 'stale');
+  const когда = last ? new Date(last).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  b.title = !есть ? 'Синхронизация не настроена — нажмите, чтобы ввести данные подключения'
+    : last ? 'Последняя синхронизация: ' + когда + '. Нажмите, чтобы синхронизировать.'
+    : 'Копии на Google Диске ещё не было. Нажмите, чтобы синхронизировать.';
+}
+
+async function kbSync() {
+  const b = document.getElementById('kbSyncBtn');
+  if (!getClientId()) { openSyncModal(); return; }   // сначала — реквизиты
+  if (b.classList.contains('busy')) return;
+  b.classList.add('busy');
+  try {
+    const r = await smartSync({ silent: false });
+    if (r && r.status === 'no-auth') openSyncModal();   // Google не пустил — окно покажет почему
+  } catch (e) {
+    openSyncModal();
+  } finally {
+    b.classList.remove('busy');
+    kbSyncMark();
+  }
+}
+
 /* Пересчитать открытую книгу, не сбивая место: глава и тетрадь ищутся
    по имени пары и неделе — после пересчёта порядок глав может смениться. */
 function kbRefreshIfOpen() {
@@ -10666,6 +10714,7 @@ function kbDraw() {
   const v = document.getElementById('kbView');
   v.innerHTML = kbForm ? kbFormHtml() : KB_VIEWS[st.lvl](D, st);
   v.classList.toggle('spread', !kbForm);   // на широком экране — разворот из двух страниц (v265)
+  try { kbSyncMark(); } catch (e) {}
   // Обложка на широком экране — во весь экран без прокрутки, листается только список глав (v266)
   document.getElementById('kbOverlay').classList.toggle('kb-cover', !kbForm && st.lvl === 0);
   v.classList.remove('in-deep', 'in-back');
@@ -12771,6 +12820,7 @@ function stopAutoSync() {
 const SYNC_STALE_DAYS = 3;
 
 function markSyncStale() {
+  try { kbSyncMark(); } catch (e) {}   // кнопка в книге (v268)
   const btn = document.getElementById('sync-btn');
   if (!btn) return;
   if (!getClientId()) return;                 // Drive не настроен — упрекать не за что
