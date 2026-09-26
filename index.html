@@ -1534,6 +1534,11 @@
   .kb-slipbox { display:grid; gap:10px; align-content:start; }
   .kb-slipbox .kb-slip-act { margin:0 2px; }
   .kb-wide-only { display:none; }
+  .kb-arch > summary { cursor:pointer; list-style:none; font-size:14px; color:var(--kb-muted); padding:6px 0; }
+  .kb-arch > summary::-webkit-details-marker { display:none; }
+  .kb-arch > summary::before { content:'›'; display:inline-block; width:14px; transition:transform .15s; }
+  .kb-arch[open] > summary { margin-bottom:8px; }
+  .kb-arch[open] > summary::before { transform:rotate(90deg); }
   .kb-narrow-only { display:grid; gap:16px; }
   @media (min-width: 960px) {
     .kb { padding-left:32px; padding-right:32px; }
@@ -1755,7 +1760,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v269</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v270</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10462,10 +10467,20 @@ function kbMonthData(ym) {
   chapters.sort((x, y) => x.group !== y.group
     ? (долгГруппы[y.group] - долгГруппы[x.group]) || x.group.localeCompare(y.group, 'ru')
     : (y.owe - x.owe) || x.name.localeCompare(y.name, 'ru'));
-  const allInc = chapters.flatMap(c => c.weeks.flatMap(w => w.incomes));
-  return { chapters, owe: sum(chapters, 'owe'), give: sum(chapters, 'give'), came: sum(chapters, 'came'),
-    carried: sum(chapters, 'carried'),
-    late: sum(allInc.filter(i => i.late), 'left1'), weeks: chapters.reduce((t, c) => t + c.weeks.length, 0) };
+  /* Архив (v270). Владелец 26.09.2026: «если приход закрыт и деньги выданы —
+     их не должно быть в книге, они уходят в архив; нужны только действующие
+     пары, по которым нужно выдавать». Глава в архиве, если долга нет и нет
+     выдач без прихода (их надо исправлять — они остаются на виду).
+     Действующие главы — впереди, архивные — после, порядок внутри тот же. */
+  chapters.forEach(c => { c.archived = !(c.owe > 0) && !c.loose.length; });
+  const поПорядку = [...chapters.filter(c => !c.archived), ...chapters.filter(c => c.archived)];
+  const открыта = w => w.incomes.some(i => i.left1 > 0);
+  const allInc = поПорядку.flatMap(c => c.weeks.flatMap(w => w.incomes));
+  return { chapters: поПорядку, owe: sum(поПорядку, 'owe'), give: sum(поПорядку, 'give'), came: sum(поПорядку, 'came'),
+    carried: sum(поПорядку, 'carried'),
+    active: поПорядку.filter(c => !c.archived).length, archivedN: поПорядку.filter(c => c.archived).length,
+    late: sum(allInc.filter(i => i.late), 'left1'),
+    weeks: поПорядку.reduce((t, c) => t + c.weeks.filter(открыта).length, 0) };
 }
 
 function openBook() {
@@ -10552,12 +10567,14 @@ function kbClick(e) {
 
 const kbDue = i => i.due === currentDate ? 'отдать сегодня' : (i.late ? 'срок прошёл ' : 'отдать до ') + formatDateShort(i.due);
 
-function kbTocRows(D) {
+function kbTocRows(D, арх) {
   let part = '';
   return D.chapters.map((c, k) => {
+    if (!!c.archived !== !!арх) return '';
     const head = c.group !== part ? `<div class="kb-part">Часть «${escapeHtml(c.group)}»</div>` : '';
     part = c.group;
     const сумма = c.owe ? `<span class="sum">${fmt(c.owe)}</span>`
+      : c.loose.length ? '<span class="sum out" style="color:var(--kb-late)">выдача без прихода</span>'
       : c.counted ? '<span class="sum done">закрыта</span>' : '<span class="sum out">вне счёта</span>';
     return head + `<button data-kb-go='{"lvl":2,"c":${k}}'>
       <span class="n">${k + 1}</span>
@@ -10593,7 +10610,7 @@ const KB_VIEWS = {
         <div class="kb-chips">
           <span class="kb-chip">пришло за месяц ${fmt(D.came)}</span>
           ${D.carried ? `<span class="kb-chip">с прошлых месяцев ${fmt(D.carried)}</span>` : ''}
-          <span class="kb-chip">${kbPl(D.chapters.length, 'глава', 'главы', 'глав')}</span>
+          <span class="kb-chip">${kbPl(D.active, 'глава', 'главы', 'глав')}</span>
           <span class="kb-chip">${kbPl(D.weeks, 'тетрадь', 'тетради', 'тетрадей')}</span>
           ${D.late ? `<span class="kb-chip late">просрочка ${fmt(D.late)}</span>` : ''}
         </div>
@@ -10605,8 +10622,9 @@ const KB_VIEWS = {
       </div>
       ${D.chapters.length ? `<div class="kb-wide-only">
         <div class="kb-rule"></div>
-        <div class="kb-lbl">Главы · ${D.chapters.length}</div>
-        <div class="kb-toc">${kbTocRows(D)}</div>
+        <div class="kb-lbl">Главы · ${D.active}</div>
+        <div class="kb-toc">${kbTocRows(D, false) || '<div class="kb-hint">Все пары этого месяца выданы — они в архиве.</div>'}</div>
+        ${D.archivedN ? `<div class="kb-actions"><button class="kb-ghost" data-kb-go='{"lvl":1,"arch":1}'>Архив · ${kbPl(D.archivedN, 'пара', 'пары', 'пар')}</button></div>` : ''}
       </div>` : ''}
       <div class="kb-rule"></div>
       ${(st.ym === currentDate.slice(0, 7) && Math.abs(G.grandTotal - D.owe) >= 1)
@@ -10618,19 +10636,24 @@ const KB_VIEWS = {
       </div>
       </div>`;
   },
-  1(D) {
-    const rows = kbTocRows(D);
-    return `<div class="kb-l"><div class="kb-title">Оглавление</div></div>
-      <div class="kb-full kb-toc">${rows}</div>
-      <div class="kb-l"><div class="kb-hint">Глава — пара. Рядом — сколько она должна, включая невыданное с прошлых месяцев. Красная закладка — просрочка.</div>
+  1(D, st) {
+    const арх = !!st.arch;
+    const rows = kbTocRows(D, арх);
+    return `<div class="kb-l"><div class="kb-title">${арх ? 'Архив' : 'Оглавление'}</div>
+      ${арх ? '<div class="kb-hint">Пары, по которым в этом месяце всё выдано. В долге их нет — они здесь для истории.</div>' : ''}</div>
+      <div class="kb-full kb-toc">${rows || `<div class="kb-hint">${арх ? 'В архиве пока пусто.' : 'Все пары этого месяца выданы — они в архиве.'}</div>`}</div>
+      <div class="kb-l">${арх
+        ? `<div class="kb-actions"><button class="kb-ghost" data-kb-go='{"lvl":1}'>‹ К оглавлению</button></div>`
+        : `<div class="kb-hint">Глава — пара. Рядом — сколько она должна, включая невыданное с прошлых месяцев. Красная закладка — просрочка.</div>
         <div class="kb-actions">
+          ${D.archivedN ? `<button class="kb-ghost" data-kb-go='{"lvl":1,"arch":1}'>Архив · ${kbPl(D.archivedN, 'пара', 'пары', 'пар')}</button>` : ''}
           <button class="kb-ghost" data-kb-form='{"t":"pair"}'>＋ Новая пара</button>
           <button class="kb-ghost" data-kb-form='{"t":"pairs"}'>Все пары</button>
-        </div></div>`;
+        </div>`}</div>`;
   },
   2(D, st) {
     const c = D.chapters[st.c];
-    const nbs = c.weeks.map((w, k) => {
+    const тетрадь = (w, k) => {
       const left = w.incomes.reduce((t, i) => t + i.left1, 0);
       const вСчёте = w.incomes.some(i => i.counted);
       return `<button class="kb-nb" data-kb-go='{"lvl":3,"c":${st.c},"w":${k}}'>
@@ -10638,7 +10661,15 @@ const KB_VIEWS = {
         <span><span class="kb-nb-name">${w.carry ? 'С прошлых месяцев' : kbWeekLabel(w.mon)}</span><br><span class="kb-nb-sub">${kbPl(w.incomes.length, 'вкладыш', 'вкладыша', 'вкладышей')} · ${w.carry ? 'не выдано с ' + formatDateShort(w.incomes[0].date) : 'пришло ' + fmt(w.incomes.reduce((t, i) => t + i.amount, 0))}</span><br>
           <span class="kb-nb-st${left ? '' : вСчёте ? ' done' : ' out'}">${left ? 'осталось ' + fmt(left) : вСчёте ? 'закрыта' : 'вне счёта'}</span></span>
       </button>`;
-    }).join('');
+    };
+    // в действующей главе закрытые тетради — в архив; архивная глава показывается целиком
+    const открыта = w => w.incomes.some(i => i.left1 > 0);
+    const живые = c.weeks.map((w, k) => (c.archived || открыта(w)) ? тетрадь(w, k) : '').join('');
+    const закрытые = c.archived ? [] : c.weeks.map((w, k) => открыта(w) ? '' : тетрадь(w, k)).filter(Boolean);
+    const архивТетрадей = закрытые.length ? `<details class="kb-arch"><summary>Архив · ${kbPl(закрытые.length, 'тетрадь', 'тетради', 'тетрадей')}</summary>
+      <div class="kb-notebooks">${закрытые.join('')}</div></details>` : '';
+    const своя = D.chapters.map((x, i) => i).filter(i => !!D.chapters[i].archived === !!c.archived);
+    const pos = своя.indexOf(st.c), пред = своя[pos - 1], след = своя[pos + 1];
     const l1 = c.p1 ? '−' + kbPc(c.p1) : 'после 1-го %', l2 = c.p2 ? '−' + kbPc(c.p2) : 'после 2-го %';
     return `<div class="kb-l">
       <div class="kb-eyebrow">Глава ${st.c + 1} · часть «${escapeHtml(c.group)}»</div>
@@ -10658,8 +10689,9 @@ const KB_VIEWS = {
         <button class="kb-ghost" data-kb-form='{"t":"pair","c":${st.c}}'>Изменить пару</button>
       </div>
       </div><div class="kb-r">
-      <div class="kb-lbl">Тетради · ${c.weeks.length}</div>
-      <div class="kb-notebooks">${nbs}</div>
+      <div class="kb-lbl">Тетради · ${c.archived ? c.weeks.length : c.weeks.filter(открыта).length}</div>
+      <div class="kb-notebooks">${живые}</div>
+      ${архивТетрадей}
       ${c.loose.length ? `<div class="kb-lbl" style="color:var(--kb-late)">Выдачи без прихода · ${c.loose.length}</div>
       <div class="kb-hint">Эти выдачи ни один приход пары не гасят. Привяжите к нужному приходу или удалите.</div>
       <div class="kb-notebooks">${c.loose.map(x => `<div class="kb-payrow">
@@ -10667,14 +10699,14 @@ const KB_VIEWS = {
         <button class="kb-ghost" data-kb-form='{"t":"out","edit":"${x.date}#${x.idx}"}'>изменить</button>
       </div>`).join('')}</div>` : ''}
       <div class="kb-nav">
-        <button class="kb-ghost" ${st.c ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c - 1}}'>‹ Глава ${st.c}</button>
-        <button class="kb-ghost" ${st.c < D.chapters.length - 1 ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c + 1}}'>Глава ${st.c + 2} ›</button>
+        <button class="kb-ghost" ${пред != null ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${пред}}'>‹ Глава ${пред + 1}</button>
+        <button class="kb-ghost" ${след != null ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${след}}'>Глава ${след + 1} ›</button>
       </div>
       </div>`;
   },
   3(D, st) {
     const c = D.chapters[st.c], w = c.weeks[st.w];
-    const slips = w.incomes.map((i, k) => {
+    const вкладыш = (i, k) => {
       const done = i.counted && !i.left1;
       const статус = !i.counted ? '<em class="done" style="color:var(--kb-muted)">до начала счёта — не считается</em>'
         : done ? '<em class="done">выдан целиком</em>' : `<em>осталось ${fmt(i.left1)}</em>`;
@@ -10703,7 +10735,12 @@ const KB_VIEWS = {
           <button class="kb-ghost" data-kb-form='{"t":"out","edit":"${x.date}#${x.payIdx}"}'>изменить</button>
         </div>` : ''; }).join('')}
       </div>` : ''}</div>`;
-    }).join('');
+    };
+    // невыданные — на виду, выданные целиком и вне счёта — в архив (если тетрадь не вся такая)
+    const открыт = i => i.counted && i.left1 > 0;
+    const всеЗакрыты = !w.incomes.some(открыт);
+    const slips = w.incomes.map((i, k) => (всеЗакрыты || открыт(i)) ? вкладыш(i, k) : '').join('');
+    const выданы = всеЗакрыты ? [] : w.incomes.map((i, k) => открыт(i) ? '' : вкладыш(i, k)).filter(Boolean);
     return `<div class="kb-l">
       <div class="kb-eyebrow">Глава ${st.c + 1} · ${escapeHtml(c.name)}</div>
       <div class="kb-title">Тетрадь ${w.carry ? '«С прошлых месяцев»' : kbWeekLabel(w.mon)}</div>
@@ -10711,6 +10748,9 @@ const KB_VIEWS = {
       <div class="kb-hint">Вкладыш — один приход. Нажмите, чтобы развернуть расчёт.</div>
       </div>
       <div class="kb-full kb-slips">${slips}</div>
+      ${выданы.length ? `<div class="kb-full"><details class="kb-arch">
+        <summary>Архив · выданы целиком: ${выданы.length}</summary>
+        <div class="kb-slips">${выданы.join('')}</div></details></div>` : ''}
       <div class="kb-full kb-nav">
         <button class="kb-ghost" ${st.w < c.weeks.length - 1 ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":3,"c":${st.c},"w":${st.w + 1}}'>‹ раньше</button>
         <button class="kb-ghost" ${st.w ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":3,"c":${st.c},"w":${st.w - 1}}'>позже ›</button>
@@ -10721,7 +10761,8 @@ const KB_VIEWS = {
 function kbDraw() {
   const D = kbData, st = kbSt;
   const путь = [[kbMonthName(st.ym), { lvl: 0 }]];
-  if (st.lvl >= 1) путь.push(['Оглавление', { lvl: 1 }]);
+  const вАрхиве = st.lvl >= 2 ? !!(D.chapters[st.c] || {}).archived : !!st.arch;
+  if (st.lvl >= 1) путь.push([вАрхиве ? 'Архив' : 'Оглавление', вАрхиве ? { lvl: 1, arch: 1 } : { lvl: 1 }]);
   if (st.lvl >= 2) путь.push([escapeHtml(D.chapters[st.c].name), { lvl: 2, c: st.c }]);
   if (st.lvl >= 3) путь.push(['тетрадь ' + kbNbLabel(D.chapters[st.c].weeks[st.w]), { lvl: 3, c: st.c, w: st.w }]);
   if (kbForm) путь.push([kbFormLabel(kbForm), null]);
