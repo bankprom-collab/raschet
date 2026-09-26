@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Расчёт">
-<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Literata:opsz,wght@7..72,500;7..72,600&display=swap" rel="stylesheet">
 <script src="https://apis.google.com/js/api.js"></script>
 <script src="https://accounts.google.com/gsi/client"></script>
 <style>
@@ -1379,6 +1379,113 @@
     background:color-mix(in srgb, var(--zone-c,var(--border)) 30%, transparent);
   }
   .board-zone-note { font-size:10.5px; color:var(--muted); letter-spacing:0; text-transform:none; font-family:var(--font-num); }
+
+  /* ── КНИГА МЕСЯЦА (v255): месяц → пары → недели → приходы.
+     Палитра «Ночная библиотека» действует только внутри книги — владелец
+     выбрал её для книги, остальная программа остаётся графитовой. ── */
+  .kb {
+    --kb-bg:#0c1220; --kb-page:#141c2d; --kb-raise:#1b2539; --kb-line:#25304a;
+    --kb-wash:rgba(255,255,255,.035); --kb-wash2:rgba(255,255,255,.06); --kb-hair:rgba(255,255,255,.06);
+    --kb-dots:#33405c; --kb-fold:#28344d;
+    --kb-text:#eef2f9; --kb-muted:#8b97ae; --kb-soft:#c3cbdb;
+    --kb-owe:#ffb45a; --kb-on-owe:#3d2400; --kb-ok:#62d8bd; --kb-late:#ff8f8f; --kb-late-bg:rgba(255,110,110,.15);
+    --kb-band0:#1d2840; --kb-band1:#25324f; --kb-band2:#2e3d5f;
+    --kb-book:'Literata', Georgia, 'Times New Roman', serif;
+    display:none; position:fixed; inset:0; z-index:160; overflow-y:auto; color-scheme:dark;
+    background:var(--kb-bg); color:var(--kb-text); font-family:var(--font-ui);
+    font-size:15px; line-height:1.45; font-variant-numeric:tabular-nums;
+    padding:calc(14px + env(safe-area-inset-top, 0px)) 16px calc(48px + env(safe-area-inset-bottom, 0px));
+  }
+  .kb.open { display:block; }
+  .kb button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+  .kb button:focus-visible { outline:2px solid var(--kb-owe); outline-offset:2px; border-radius:8px; }
+  .kb-wrap { max-width:460px; margin:0 auto; display:grid; gap:12px; }
+  .kb-top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .kb-crumbs { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; font-size:13px; color:var(--kb-muted); padding-top:6px; }
+  .kb-crumbs button { color:var(--kb-soft); }
+  .kb-crumbs .here { color:var(--kb-text); }
+  .kb .kb-close { flex:none; border:1px solid var(--kb-line); border-radius:999px; padding:6px 14px; font-size:13px; color:var(--kb-soft); }
+  .kb-book { display:grid; grid-template-columns:auto minmax(0,1fr); min-height:480px; }
+  .kb-binding { display:flex; }
+  .kb-band { width:11px; border-radius:6px 0 0 6px; margin-right:-3px; }
+  .kb-band:nth-child(1) { background:var(--kb-band0); }
+  .kb-band:nth-child(2) { background:var(--kb-band1); }
+  .kb-band:nth-child(3) { background:var(--kb-band2); }
+  .kb-band.cur { background:var(--kb-owe); }
+  .kb-sheet { background:var(--kb-page); border-radius:0 18px 18px 0; padding:22px 20px 20px; overflow:hidden; }
+  .kb-view { display:grid; gap:16px; }
+  .kb-view.in-deep { animation:kb-in-deep .26s ease-out; }
+  .kb-view.in-back { animation:kb-in-back .26s ease-out; }
+  @keyframes kb-in-deep { from { transform:translateX(28px); opacity:.2; } }
+  @keyframes kb-in-back { from { transform:translateX(-28px); opacity:.2; } }
+  @media (prefers-reduced-motion: reduce) { .kb-view.in-deep, .kb-view.in-back { animation:none; } }
+  .kb-eyebrow { font-size:12px; color:var(--kb-muted); letter-spacing:.06em; text-transform:uppercase; }
+  .kb-title { font-family:var(--kb-book); font-weight:600; font-size:30px; line-height:1.15; text-wrap:balance; overflow-wrap:anywhere; }
+  .kb-title.xl { font-size:46px; }
+  .kb-lbl { font-size:14px; color:var(--kb-muted); }
+  .kb-big { font-size:36px; font-weight:700; letter-spacing:-1px; line-height:1.1; color:var(--kb-owe); }
+  .kb-pair { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .kb-pair b { display:block; font-size:19px; font-weight:700; }
+  .kb-chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .kb-chip { font-size:13px; padding:5px 12px; border-radius:999px; background:var(--kb-wash2); color:var(--kb-soft); }
+  .kb-chip.late { background:var(--kb-late-bg); color:var(--kb-late); }
+  .kb .kb-pill { justify-self:start; background:var(--kb-text); color:var(--kb-page); font-weight:600; border-radius:999px; padding:11px 20px; }
+  .kb .kb-ghost { border:1px solid var(--kb-line); border-radius:999px; padding:9px 16px; color:var(--kb-soft); font-size:14px; }
+  .kb-nav { display:flex; justify-content:space-between; gap:10px; }
+  .kb-rule { height:1px; background:var(--kb-line); }
+  .kb-hint { font-size:12.5px; color:var(--kb-muted); }
+  .kb-hint b { color:var(--kb-soft); font-weight:600; white-space:nowrap; }
+  .kb-shelf { display:flex; align-items:flex-end; gap:6px; flex-wrap:wrap; }
+  .kb .kb-vol { width:30px; border-radius:4px 4px 2px 2px; background:var(--kb-raise); display:flex; align-items:center; justify-content:center; }
+  .kb-vol span { writing-mode:vertical-rl; transform:rotate(180deg); font-family:var(--kb-book); font-size:13px; color:var(--kb-soft); }
+  .kb .kb-vol.now { background:var(--kb-owe); }
+  .kb-vol.now span { color:var(--kb-on-owe); }
+  .kb-part { font-size:12px; color:var(--kb-muted); letter-spacing:.06em; text-transform:uppercase; margin-top:6px; }
+  .kb-toc { display:grid; }
+  .kb-toc button { display:grid; grid-template-columns:22px auto minmax(12px,1fr) auto; align-items:baseline; gap:8px; padding:11px 0; border-bottom:1px solid var(--kb-hair); }
+  .kb-toc .n { font-size:13px; color:var(--kb-muted); }
+  .kb-toc .name { font-family:var(--kb-book); font-size:17px; font-weight:500; overflow-wrap:anywhere; }
+  .kb-toc .dots { border-bottom:2px dotted var(--kb-dots); transform:translateY(-5px); }
+  .kb-toc .sum { font-weight:700; color:var(--kb-owe); white-space:nowrap; }
+  .kb-toc .sum.done { color:var(--kb-ok); font-weight:500; font-size:14px; }
+  .kb-toc .sum.out { color:var(--kb-muted); font-weight:500; font-size:14px; }
+  .kb-ribbon { display:inline-block; width:8px; height:14px; background:var(--kb-late); clip-path:polygon(0 0,100% 0,100% 100%,50% 72%,0 100%); margin-left:6px; vertical-align:-1px; }
+  .kb-ledger { background:var(--kb-wash); border-radius:14px; padding:2px 14px; }
+  .kb-ledger div { display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--kb-hair); font-size:14px; color:var(--kb-soft); }
+  .kb-ledger div:last-child { border-bottom:0; color:var(--kb-text); font-weight:600; }
+  .kb-ledger b { font-weight:700; color:var(--kb-text); white-space:nowrap; }
+  .kb-stamps { display:flex; flex-wrap:wrap; gap:10px; }
+  .kb-stamp { font-size:12px; letter-spacing:.04em; text-transform:uppercase; border:1.5px solid var(--kb-soft); color:var(--kb-soft); border-radius:4px; padding:4px 9px; transform:rotate(-3deg); }
+  .kb-stamp.late { border-color:var(--kb-late); color:var(--kb-late); transform:rotate(2deg); }
+  .kb-notebooks { display:grid; gap:8px; }
+  .kb .kb-nb { display:grid; grid-template-columns:34px minmax(0,1fr); align-items:center; gap:12px; background:var(--kb-wash); border-radius:14px; padding:12px 14px; }
+  .kb-nb-ico { width:30px; height:36px; border-radius:3px 7px 7px 3px; background:var(--kb-band1); position:relative; }
+  .kb-nb-ico::before { content:''; position:absolute; left:5px; top:0; bottom:0; width:2px; background:var(--kb-band2); }
+  .kb-nb-ico.open::after { content:''; position:absolute; right:5px; top:6px; width:7px; height:7px; border-radius:50%; background:var(--kb-owe); }
+  .kb-nb-name { font-family:var(--kb-book); font-size:16px; font-weight:500; }
+  .kb-nb-sub { font-size:12.5px; color:var(--kb-muted); }
+  .kb-nb-st { display:inline-block; margin-top:2px; font-size:13px; font-weight:600; color:var(--kb-owe); white-space:nowrap; }
+  .kb-nb-st.done { color:var(--kb-ok); font-weight:500; }
+  .kb-nb-st.out { color:var(--kb-muted); font-weight:500; }
+  .kb-slips { display:grid; gap:10px; }
+  .kb .kb-slip { display:grid; gap:4px; background:var(--kb-raise); border-radius:12px 4px 12px 12px; padding:13px 15px; position:relative;
+    clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%); }
+  .kb-slip::after { content:''; position:absolute; top:0; right:0; width:16px; height:16px; background:var(--kb-fold); border-bottom-left-radius:4px; }
+  .kb-slip-top { display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding-right:10px; }
+  .kb-slip-top span { font-family:var(--kb-book); font-size:16px; font-weight:500; }
+  .kb-slip-top b { font-weight:700; white-space:nowrap; }
+  .kb-slip-sub { font-size:12.5px; color:var(--kb-muted); }
+  .kb-slip-sub em { font-style:normal; color:var(--kb-owe); }
+  .kb-slip-sub em.done { color:var(--kb-ok); }
+  .kb-slip-sub em.late { color:var(--kb-late); }
+  .kb-calc { display:grid; gap:2px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--kb-dots); font-size:13.5px; }
+  .kb-calc div { display:flex; justify-content:space-between; gap:10px; color:var(--kb-soft); }
+  .kb-calc div b { color:var(--kb-text); font-weight:600; white-space:nowrap; }
+  .kb-calc .res { margin-top:4px; font-weight:700; color:var(--kb-text); }
+  .kb-calc .res b { color:var(--kb-owe); font-weight:700; }
+  .kb-calc .res.done b { color:var(--kb-ok); }
+  .kb-calc .second, .kb-calc .memo { margin-top:6px; font-size:12.5px; color:var(--kb-muted); }
+  .kb-calc .second b { color:var(--kb-soft); }
 </style>
 </head>
 <body>
@@ -1393,6 +1500,20 @@
     <input type="password" id="loginPwd2" placeholder="Повторите пароль" autocomplete="new-password" style="display:none">
     <button class="btn btn-primary login-btn" onclick="submitLogin()">Войти</button>
     <div id="loginError" class="login-error"></div>
+  </div>
+</div>
+
+<!-- ── КНИГА МЕСЯЦА (v255) ── -->
+<div id="kbOverlay" class="kb" role="dialog" aria-label="Книга месяца" onclick="kbClick(event)">
+  <div class="kb-wrap">
+    <div class="kb-top">
+      <nav class="kb-crumbs" id="kbCrumbs" aria-label="Где вы в книге"></nav>
+      <button class="kb-close" onclick="closeBook()">Закрыть</button>
+    </div>
+    <div class="kb-book">
+      <div class="kb-binding" id="kbBinding" aria-hidden="true"></div>
+      <div class="kb-sheet"><div class="kb-view" id="kbView"></div></div>
+    </div>
   </div>
 </div>
 
@@ -1448,6 +1569,10 @@
     <div class="board-zone" style="--zone-c:#7b8cff">
       <div class="board-zone-head">Отчёты <span class="board-zone-note">только смотришь, ничего не меняешь</span></div>
       <div class="board-grid">
+        <div class="board-tile" style="--tile-c:#ffb45a" onclick="openBook()">
+          <div class="ic">📖</div><div class="t">Книга месяца</div>
+          <div class="s">Месяц — книга, пары — главы, недели — тетради, приходы — вкладыши.</div>
+        </div>
         <div class="board-tile" style="--tile-c:#7b8cff" onclick="openAnalyticsModal()">
           <div class="ic">📈</div><div class="t">Аналитика</div>
           <div class="s">Приходы и получено на руки по дням.</div>
@@ -1513,7 +1638,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v254</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v255</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -9979,6 +10104,258 @@ function printDayReport() {
 
   showAbPrintOverlay('Расчёт ' + formatDateShort(d),
     head + inBlock + outBlock + debtBlock + shareBlock + note);
+}
+
+/* ── КНИГА МЕСЯЦА (v255) ───────────────────────────────────────────────────
+   Владелец 26.09.2026 выбрал образец «книга в книге» в цветах «Ночная
+   библиотека»: месяц — книга, пары — главы, недели — тетради, приходы —
+   вкладыши. Только показ, ничего не меняет.
+
+   Числа — из тех же функций, что задолженность: выданность прихода —
+   pairPaidCoverage(день, 'fifo', undefined, true), остатки — как в блоке
+   «Частично выдано» (pairPartialHtml): r100(после % × невыданная доля),
+   без второго процента «отдаём» = «нам должны». Приходы раньше «Счёт с»
+   пары видны, но в суммы не входят — как и в задолженности.
+
+   ⚠️ Итог книги — только приходы ЭТОГО месяца. Весь долг по парам (за все
+   месяцы) стоит на обложке отдельной строкой из computeWeekPairDebt. */
+const KB_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+let kbSt = null, kbData = null, kbSlip = -1, kbDepth = 0;
+const kbMonthName = ym => KB_MONTHS[+ym.slice(5, 7) - 1];
+const kbPl = (n, a, b, c) => {
+  const m10 = n % 10, m100 = n % 100;
+  return n + ' ' + (m10 === 1 && m100 !== 11 ? a : (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) ? b : c);
+};
+const kbPc = v => (v === null || v === undefined || !(v > 0)) ? '' : String(v).replace('.', ',') + '%';
+
+function kbWeekLabel(mon) {
+  const вс = new Date(mon + 'T12:00:00');
+  вс.setDate(вс.getDate() + 6);
+  const iso = вс.getFullYear() + '-' + String(вс.getMonth() + 1).padStart(2, '0') + '-' + String(вс.getDate()).padStart(2, '0');
+  const a = formatDateShort(mon).split(' '), b = formatDateShort(iso).split(' ');
+  return a[1] === b[1] ? a[0] + '–' + b.join(' ') : a.join(' ') + ' – ' + b.join(' ');
+}
+
+function kbMonths() {
+  const set = new Set([currentDate.slice(0, 7)]);
+  for (const d of Object.keys(state.days)) {
+    const dd = state.days[d];
+    if (d <= currentDate && dd && Array.isArray(dd.in) && dd.in.some(r => (r.client || '').trim())) set.add(d.slice(0, 7));
+  }
+  return [...set].sort().slice(-6);
+}
+
+function kbMonthData(ym) {
+  const день = currentDate;
+  const cover = pairPaidCoverage(день, 'fifo', undefined, true);
+  const PARTS = incomeCoverParts(день, true);
+  const map = {};
+  for (const d of Object.keys(state.days).sort()) {
+    if (d.slice(0, 7) !== ym || d > день) continue;
+    const dd = state.days[d];
+    if (!dd || !Array.isArray(dd.in)) continue;
+    dd.in.forEach((r, idx) => {
+      const p = (r.client || '').trim();
+      if (!p) return;
+      const key = p + '#' + d + '#' + idx;
+      const counted = d >= pairStart(p);
+      const frac = counted ? (cover[key] || 0) : 0;
+      const after1 = calcInRowFinal(r) || 0;
+      const after2 = hasSecondPct(r) ? r100(r.total2) : null;
+      const left1 = counted ? r100(after1 * (1 - frac)) : 0;
+      const left2 = !counted ? 0 : (after2 !== null ? r100(after2 * (1 - frac)) : left1);
+      const ch = map[p] || (map[p] = { name: p, group: pairGroupName(p), start: pairStart(p), weeks: {} });
+      const wk = weekMondayStr(d);
+      (ch.weeks[wk] || (ch.weeks[wk] = [])).push({
+        date: d, amount: r.amount || 0, parts: r.parts || null, pct: r.pct, pct2: r.pct2,
+        after1, after2, left1, left2, counted, note: r.note || '', due: r.dueDate || null,
+        late: left1 > 0 && !!r.dueDate && r.dueDate < день,
+        pays: ((PARTS[key] || {}).parts) || [],
+      });
+    });
+  }
+  const sum = (a, k) => a.reduce((t, x) => t + (x[k] || 0), 0);
+  const chapters = Object.values(map).map(ch => {
+    const weeks = Object.keys(ch.weeks).sort().reverse().map(mon => ({ mon, incomes: ch.weeks[mon] }));
+    const all = weeks.flatMap(w => w.incomes);
+    const open = all.filter(i => i.left1 > 0);
+    const один = k => {
+      const v = [...new Set(all.filter(i => i.counted).map(i => i[k]).filter(x => x > 0))];
+      return v.length === 1 ? v[0] : null;
+    };
+    return Object.assign(ch, {
+      weeks, owe: sum(all, 'left1'), give: sum(all, 'left2'), base: sum(open, 'amount'), came: sum(all, 'amount'),
+      counted: all.some(i => i.counted), outside: all.some(i => !i.counted),
+      late: all.some(i => i.late), dues: open.filter(i => i.due), p1: один('pct'), p2: один('pct2'),
+    });
+  });
+  // Порядок — как в задолженности: группы с большим долгом выше, внутри — по долгу
+  const долгГруппы = {};
+  chapters.forEach(c => { долгГруппы[c.group] = (долгГруппы[c.group] || 0) + c.owe; });
+  chapters.sort((x, y) => x.group !== y.group
+    ? (долгГруппы[y.group] - долгГруппы[x.group]) || x.group.localeCompare(y.group, 'ru')
+    : (y.owe - x.owe) || x.name.localeCompare(y.name, 'ru'));
+  const allInc = chapters.flatMap(c => c.weeks.flatMap(w => w.incomes));
+  return { chapters, owe: sum(chapters, 'owe'), give: sum(chapters, 'give'), came: sum(chapters, 'came'),
+    late: sum(allInc.filter(i => i.late), 'left1'), weeks: chapters.reduce((t, c) => t + c.weeks.length, 0) };
+}
+
+function openBook() {
+  kbSt = { ym: currentDate.slice(0, 7), lvl: 0 };
+  kbData = kbMonthData(kbSt.ym);
+  kbSlip = -1; kbDepth = 0;
+  document.getElementById('kbOverlay').classList.add('open');
+  kbDraw();
+}
+function closeBook() { document.getElementById('kbOverlay').classList.remove('open'); }
+
+function kbGo(next) {
+  kbDepth = kbSt.lvl;
+  const ym = next.ym || kbSt.ym;
+  if (ym !== kbSt.ym) kbData = kbMonthData(ym);
+  kbSt = Object.assign({}, next, { ym });
+  kbSlip = -1;
+  kbDraw();
+  document.getElementById('kbOverlay').scrollTop = 0;
+}
+
+function kbClick(e) {
+  const g = e.target.closest('[data-kb-go]');
+  if (g) { kbGo(JSON.parse(g.dataset.kbGo)); return; }
+  const sl = e.target.closest('[data-kb-slip]');
+  if (sl) { const k = +sl.dataset.kbSlip; kbSlip = kbSlip === k ? -1 : k; kbDraw(); }
+}
+
+const kbDue = i => i.due === currentDate ? 'отдать сегодня' : (i.late ? 'срок прошёл ' : 'отдать до ') + formatDateShort(i.due);
+
+const KB_VIEWS = {
+  0(D, st) {
+    const G = computeWeekPairDebt();
+    const полка = kbMonths().map((ym, k) => `<button class="kb-vol${ym === st.ym ? ' now' : ''}" style="height:${92 + (k % 3) * 10}px"
+        data-kb-go='{"lvl":0,"ym":"${ym}"}' aria-label="${kbMonthName(ym)}"><span>${kbMonthName(ym)}</span></button>`).join('');
+    return `
+      <div class="kb-eyebrow">Книга учёта · ${st.ym.slice(0, 4)}</div>
+      <div class="kb-title xl">${kbMonthName(st.ym)}</div>
+      <div class="kb-hint">на ${formatDateShort(currentDate)} · приходы по парам за этот месяц</div>
+      <div class="kb-rule"></div>
+      ${D.chapters.length ? `
+        <div><div class="kb-lbl">Нам должны по приходам месяца</div><div class="kb-big"${D.owe ? '' : ' style="color:var(--kb-ok)"'}>${D.owe ? fmt(D.owe) : 'всё выдано'}</div></div>
+        <div class="kb-pair">
+          <div><span class="kb-lbl">Отдаём</span><b>${fmt(D.give)}</b></div>
+          <div><span class="kb-lbl">Разница</span><b>${fmt(D.owe - D.give)}</b></div>
+        </div>
+        <div class="kb-chips">
+          <span class="kb-chip">пришло ${fmt(D.came)}</span>
+          <span class="kb-chip">${kbPl(D.chapters.length, 'глава', 'главы', 'глав')}</span>
+          <span class="kb-chip">${kbPl(D.weeks, 'тетрадь', 'тетради', 'тетрадей')}</span>
+          ${D.late ? `<span class="kb-chip late">просрочка ${fmt(D.late)}</span>` : ''}
+        </div>
+        <button class="kb-pill" data-kb-go='{"lvl":1}'>Открыть книгу</button>`
+      : '<div class="kb-hint">В этом месяце приходов по парам нет.</div>'}
+      <div class="kb-rule"></div>
+      <div class="kb-hint">Весь долг по парам сейчас, за все месяцы: <b>${fmt(G.grandTotal)}</b> — как в блоке «Задолженность по парам».</div>
+      <div class="kb-lbl">На полке</div>
+      <div class="kb-shelf">${полка}</div>
+      <div class="kb-hint">Каждый месяц — отдельная книга. Нажмите на корешок, чтобы открыть.</div>`;
+  },
+  1(D) {
+    let part = '';
+    const rows = D.chapters.map((c, k) => {
+      const head = c.group !== part ? `<div class="kb-part">Часть «${escapeHtml(c.group)}»</div>` : '';
+      part = c.group;
+      const сумма = c.owe ? `<span class="sum">${fmt(c.owe)}</span>`
+        : c.counted ? '<span class="sum done">закрыта</span>' : '<span class="sum out">вне счёта</span>';
+      return head + `<button data-kb-go='{"lvl":2,"c":${k}}'>
+        <span class="n">${k + 1}</span>
+        <span class="name">${escapeHtml(c.name)}${c.late ? '<span class="kb-ribbon" title="Просрочка"></span>' : ''}</span>
+        <span class="dots"></span>${сумма}</button>`;
+    }).join('');
+    return `<div class="kb-title">Оглавление</div><div class="kb-toc">${rows}</div>
+      <div class="kb-hint">Глава — пара. Рядом — сколько она должна по приходам этого месяца. Красная закладка — просрочка.</div>`;
+  },
+  2(D, st) {
+    const c = D.chapters[st.c];
+    const nbs = c.weeks.map((w, k) => {
+      const left = w.incomes.reduce((t, i) => t + i.left1, 0);
+      const вСчёте = w.incomes.some(i => i.counted);
+      return `<button class="kb-nb" data-kb-go='{"lvl":3,"c":${st.c},"w":${k}}'>
+        <span class="kb-nb-ico${left ? ' open' : ''}"></span>
+        <span><span class="kb-nb-name">${kbWeekLabel(w.mon)}</span><br><span class="kb-nb-sub">${kbPl(w.incomes.length, 'вкладыш', 'вкладыша', 'вкладышей')} · пришло ${fmt(w.incomes.reduce((t, i) => t + i.amount, 0))}</span><br>
+          <span class="kb-nb-st${left ? '' : вСчёте ? ' done' : ' out'}">${left ? 'осталось ' + fmt(left) : вСчёте ? 'закрыта' : 'вне счёта'}</span></span>
+      </button>`;
+    }).join('');
+    const l1 = c.p1 ? '−' + kbPc(c.p1) : 'после 1-го %', l2 = c.p2 ? '−' + kbPc(c.p2) : 'после 2-го %';
+    return `
+      <div class="kb-eyebrow">Глава ${st.c + 1} · часть «${escapeHtml(c.group)}»</div>
+      <div class="kb-title">${escapeHtml(c.name)}</div>
+      <div><div class="kb-lbl">Нам должны</div><div class="kb-big"${c.owe ? '' : ' style="color:var(--kb-ok)"'}>${c.owe ? fmt(c.owe) : (c.counted ? 'всё выдано' : 'вне счёта')}</div></div>
+      ${c.owe ? `<div class="kb-ledger">
+        <div><span>База</span><b>${fmt(c.base)}</b></div>
+        <div><span>${l1} · нам должны</span><b style="color:var(--kb-owe)">${fmt(c.owe)}</b></div>
+        <div><span>${l2} · отдаём</span><b>${fmt(c.give)}</b></div>
+        <div><span>Разница</span><b>${fmt(c.owe - c.give)}</b></div>
+      </div>` : ''}
+      ${c.dues.length ? `<div class="kb-stamps">${c.dues.map(i => `<span class="kb-stamp${i.late ? ' late' : ''}">${kbDue(i)}</span>`).join('')}</div>` : ''}
+      ${c.outside ? `<div class="kb-hint">Счёт по паре — с <b>${formatDateShort(c.start)}</b>: приходы раньше видны, но в суммы не входят.</div>` : ''}
+      <div class="kb-lbl">Тетради · ${c.weeks.length}</div>
+      <div class="kb-notebooks">${nbs}</div>
+      <div class="kb-nav">
+        <button class="kb-ghost" ${st.c ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c - 1}}'>‹ Глава ${st.c}</button>
+        <button class="kb-ghost" ${st.c < D.chapters.length - 1 ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c + 1}}'>Глава ${st.c + 2} ›</button>
+      </div>`;
+  },
+  3(D, st) {
+    const c = D.chapters[st.c], w = c.weeks[st.w];
+    const slips = w.incomes.map((i, k) => {
+      const done = i.counted && !i.left1;
+      const статус = !i.counted ? '<em class="done" style="color:var(--kb-muted)">до начала счёта — не считается</em>'
+        : done ? '<em class="done">выдан целиком</em>' : `<em>осталось ${fmt(i.left1)}</em>`;
+      const срок = (i.due && i.left1) ? ` · ${i.late ? '<em class="late">' + kbDue(i) + '</em>' : kbDue(i)}` : '';
+      const раскрыт = kbSlip === k;
+      return `<button class="kb-slip" data-kb-slip="${k}" aria-expanded="${раскрыт}">
+        <span class="kb-slip-top"><span>Приход ${formatDateShort(i.date)}</span><b>${fmt(i.amount)}</b></span>
+        <span class="kb-slip-sub">${статус}${срок}</span>
+        ${раскрыт ? `<span class="kb-calc">
+          ${i.parts && i.parts.length > 1 ? `<div class="memo"><span>из чего сумма</span><b>${i.parts.map(n => fmtRaw(n)).join(' + ')}</b></div>` : ''}
+          <div><span>${i.pct > 0 ? '−' + kbPc(i.pct) + ' от прихода' : 'без процента'}</span><b>${fmt(i.after1)}</b></div>
+          ${i.pays.map(x => `<div><span>выдача ${formatDateShort(x.date)}${x.aimed ? '' : ' (перешла с другого прихода)'}</span><b>− ${fmt(x.amount)}</b></div>`).join('')}
+          ${i.counted ? `<div class="res${done ? ' done' : ''}"><span>осталось по 1-му %</span><b>${fmt(i.left1)}</b></div>` : ''}
+          ${(i.counted && i.after2 !== null) ? `<div class="second"><span>по 2-му % (${kbPc(i.pct2)}): ${fmt(i.after2)} → осталось</span><b>${fmt(i.left2)}</b></div>` : ''}
+          ${!i.counted ? `<div class="memo"><span>счёт по паре — с ${formatDateShort(c.start)}</span></div>` : ''}
+          ${i.note ? `<div class="memo"><span>${escapeHtml(i.note)}</span></div>` : ''}
+        </span>` : ''}
+      </button>`;
+    }).join('');
+    return `
+      <div class="kb-eyebrow">Глава ${st.c + 1} · ${escapeHtml(c.name)}</div>
+      <div class="kb-title">Тетрадь ${kbWeekLabel(w.mon)}</div>
+      <div class="kb-hint">Вкладыш — один приход. Нажмите, чтобы развернуть расчёт.</div>
+      <div class="kb-slips">${slips}</div>
+      <div class="kb-nav">
+        <button class="kb-ghost" ${st.w < c.weeks.length - 1 ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":3,"c":${st.c},"w":${st.w + 1}}'>‹ раньше</button>
+        <button class="kb-ghost" ${st.w ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":3,"c":${st.c},"w":${st.w - 1}}'>позже ›</button>
+      </div>`;
+  },
+};
+
+function kbDraw() {
+  const D = kbData, st = kbSt;
+  const путь = [[kbMonthName(st.ym), { lvl: 0 }]];
+  if (st.lvl >= 1) путь.push(['Оглавление', { lvl: 1 }]);
+  if (st.lvl >= 2) путь.push([escapeHtml(D.chapters[st.c].name), { lvl: 2, c: st.c }]);
+  if (st.lvl >= 3) путь.push(['тетрадь ' + kbWeekLabel(D.chapters[st.c].weeks[st.w].mon), { lvl: 3, c: st.c, w: st.w }]);
+  document.getElementById('kbCrumbs').innerHTML = путь.map((x, k) => k < путь.length - 1
+    ? `<button data-kb-go='${JSON.stringify(x[1])}'>${x[0]}</button><span aria-hidden="true">›</span>`
+    : `<span class="here" aria-current="page">${x[0]}</span>`).join('');
+  // Корешки слева: сколько переплётов — на такой глубине книги вы находитесь
+  document.getElementById('kbBinding').innerHTML =
+    Array.from({ length: st.lvl + 1 }, (_, k) => `<span class="kb-band${k === st.lvl ? ' cur' : ''}"></span>`).join('');
+  const v = document.getElementById('kbView');
+  v.innerHTML = KB_VIEWS[st.lvl](D, st);
+  v.classList.remove('in-deep', 'in-back');
+  void v.offsetWidth;
+  if (st.lvl !== kbDepth) v.classList.add(st.lvl > kbDepth ? 'in-deep' : 'in-back');
+  kbDepth = st.lvl;
 }
 
 
