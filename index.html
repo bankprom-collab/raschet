@@ -1516,6 +1516,49 @@
     border-radius:12px; padding:9px 12px; font-size:13.5px; color:var(--kb-soft); }
   .kb-payrow b { color:var(--kb-text); }
   .kb .kb-payrow .kb-ghost { padding:6px 12px; font-size:13px; flex:none; }
+  /* Разворот (v265). Владелец 26.09.2026 про книгу на широком экране:
+     «разверни на целую страницу, чтобы было не компактно, размести красиво».
+     Страница делится на .kb-l / .kb-r (левая и правая) и .kb-full (через
+     корешок: оглавление в две колонки, вкладыши, листание). На телефоне
+     это просто блоки друг под другом — вид тот же, что до v265. */
+  .kb-l, .kb-r, .kb-full { display:grid; gap:16px; align-content:start; min-width:0; }
+  .kb-slipbox { display:grid; gap:10px; align-content:start; }
+  .kb-slipbox .kb-slip-act { margin:0 2px; }
+  .kb-wide-only { display:none; }
+  .kb-narrow-only { display:grid; gap:16px; }
+  @media (min-width: 960px) {
+    .kb { padding-left:32px; padding-right:32px; }
+    .kb-wrap { max-width:1240px; }
+    .kb-book { min-height:calc(100vh - 110px); }
+    .kb-sheet { padding:48px 60px 44px; border-radius:0 26px 26px 0; display:flex; flex-direction:column; }
+    .kb-view { flex:1; align-content:start; }   /* страницы — на всю высоту, корешок сверху донизу */
+    .kb-wide-only { display:grid; gap:14px; }
+    .kb-narrow-only { display:none; }
+    .kb-view.spread .kb-l, .kb-view.spread .kb-r { display:flex; flex-direction:column; }   /* полка и листание — к низу страницы */
+    .kb-view.spread .kb-r > .kb-nav:last-child { margin-top:auto; padding-top:24px; }
+    .kb-shelf-l { margin-top:auto; padding-top:24px; }
+    .kb-r .kb-toc { column-count:1; }
+    .kb-band { width:14px; }
+    .kb-view.spread { grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:120px; row-gap:24px; position:relative; }
+    .kb-view.spread::before { content:''; position:absolute; top:-48px; bottom:-44px; left:50%; width:1px;
+      background:var(--kb-line); box-shadow:0 0 30px 10px rgba(0,0,0,.28); pointer-events:none; }
+    .kb-view.spread .kb-l { grid-column:1; }
+    .kb-view.spread .kb-r { grid-column:2; }
+    .kb-view.spread .kb-full { grid-column:1 / -1; }
+    .kb-view.spread .kb-l, .kb-view.spread .kb-r { gap:22px; }
+    .kb-view:not(.spread) { max-width:640px; margin:0 auto; width:100%; }
+    .kb-title { font-size:42px; }
+    .kb-title.xl { font-size:88px; line-height:1; }
+    .kb-big { font-size:60px; letter-spacing:-1.5px; }
+    .kb-pair b { font-size:28px; }
+    .kb-lbl, .kb-ledger div { font-size:15px; }
+    .kb-toc { display:block; column-count:2; column-gap:120px; }
+    .kb-toc > * { break-inside:avoid; }
+    .kb-toc button { width:100%; }
+    .kb-part { break-after:avoid; }
+    .kb-slips { grid-template-columns:repeat(2, minmax(0,1fr)); column-gap:120px; row-gap:18px; }
+    .kb .kb-vol { width:38px; }
+  }
 </style>
 </head>
 <body>
@@ -1668,7 +1711,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v264</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v265</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10414,12 +10457,26 @@ function kbClick(e) {
 
 const kbDue = i => i.due === currentDate ? 'отдать сегодня' : (i.late ? 'срок прошёл ' : 'отдать до ') + formatDateShort(i.due);
 
+function kbTocRows(D) {
+  let part = '';
+  return D.chapters.map((c, k) => {
+    const head = c.group !== part ? `<div class="kb-part">Часть «${escapeHtml(c.group)}»</div>` : '';
+    part = c.group;
+    const сумма = c.owe ? `<span class="sum">${fmt(c.owe)}</span>`
+      : c.counted ? '<span class="sum done">закрыта</span>' : '<span class="sum out">вне счёта</span>';
+    return head + `<button data-kb-go='{"lvl":2,"c":${k}}'>
+      <span class="n">${k + 1}</span>
+      <span class="name">${escapeHtml(c.name)}${c.late ? '<span class="kb-ribbon" title="Просрочка"></span>' : ''}</span>
+      <span class="dots"></span>${сумма}</button>`;
+  }).join('');
+}
+
 const KB_VIEWS = {
   0(D, st) {
     const G = computeWeekPairDebt();
     const полка = kbMonths().map((ym, k) => `<button class="kb-vol${ym === st.ym ? ' now' : ''}" style="height:${92 + (k % 3) * 10}px"
         data-kb-go='{"lvl":0,"ym":"${ym}"}' aria-label="${kbMonthName(ym)}"><span>${kbMonthName(ym)}</span></button>`).join('');
-    return `
+    return `<div class="kb-l">
       <div class="kb-eyebrow">Книга учёта · ${st.ym.slice(0, 4)}</div>
       <div class="kb-title xl">${kbMonthName(st.ym)}</div>
       <div class="kb-hint">на ${formatDateShort(currentDate)} · приходы месяца и невыданное с прошлых</div>
@@ -10429,7 +10486,15 @@ const KB_VIEWS = {
         <div class="kb-pair">
           <div><span class="kb-lbl">Отдаём</span><b>${fmt(D.give)}</b></div>
           <div><span class="kb-lbl">Разница</span><b>${fmt(D.owe - D.give)}</b></div>
-        </div>
+        </div>` : '<div class="kb-hint">В этом месяце приходов по парам нет.</div>'}
+      <div class="kb-wide-only kb-shelf-l">
+        <div class="kb-rule"></div>
+        <div class="kb-lbl">На полке</div>
+        <div class="kb-shelf">${полка}</div>
+        <div class="kb-hint">Каждый месяц — отдельная книга. Нажмите на корешок, чтобы открыть.</div>
+      </div>
+      </div><div class="kb-r">
+      ${D.chapters.length ? `
         <div class="kb-chips">
           <span class="kb-chip">пришло за месяц ${fmt(D.came)}</span>
           ${D.carried ? `<span class="kb-chip">с прошлых месяцев ${fmt(D.carried)}</span>` : ''}
@@ -10437,33 +10502,31 @@ const KB_VIEWS = {
           <span class="kb-chip">${kbPl(D.weeks, 'тетрадь', 'тетради', 'тетрадей')}</span>
           ${D.late ? `<span class="kb-chip late">просрочка ${fmt(D.late)}</span>` : ''}
         </div>
-        <button class="kb-pill" data-kb-go='{"lvl":1}'>Открыть книгу</button>`
-      : '<div class="kb-hint">В этом месяце приходов по парам нет.</div>'}
+        <button class="kb-pill" data-kb-go='{"lvl":1}'>Открыть книгу</button>` : ''}
       <div class="kb-actions">
         <button class="kb-ghost" data-kb-form='{"t":"in"}'>＋ Приход</button>
         <button class="kb-ghost" data-kb-form='{"t":"out"}'>＋ Выдача</button>
       </div>
+      ${D.chapters.length ? `<div class="kb-wide-only">
+        <div class="kb-rule"></div>
+        <div class="kb-lbl">Главы · ${D.chapters.length}</div>
+        <div class="kb-toc">${kbTocRows(D)}</div>
+      </div>` : ''}
       <div class="kb-rule"></div>
       ${(st.ym === currentDate.slice(0, 7) && Math.abs(G.grandTotal - D.owe) >= 1)
         ? `<div class="kb-hint">В блоке «Задолженность по парам» — <b>${fmt(G.grandTotal)}</b>: там стоят ручные суммы пар ✏️.</div>` : ''}
-      <div class="kb-lbl">На полке</div>
-      <div class="kb-shelf">${полка}</div>
-      <div class="kb-hint">Каждый месяц — отдельная книга. Нажмите на корешок, чтобы открыть.</div>`;
+      <div class="kb-narrow-only">
+        <div class="kb-lbl">На полке</div>
+        <div class="kb-shelf">${полка}</div>
+        <div class="kb-hint">Каждый месяц — отдельная книга. Нажмите на корешок, чтобы открыть.</div>
+      </div>
+      </div>`;
   },
   1(D) {
-    let part = '';
-    const rows = D.chapters.map((c, k) => {
-      const head = c.group !== part ? `<div class="kb-part">Часть «${escapeHtml(c.group)}»</div>` : '';
-      part = c.group;
-      const сумма = c.owe ? `<span class="sum">${fmt(c.owe)}</span>`
-        : c.counted ? '<span class="sum done">закрыта</span>' : '<span class="sum out">вне счёта</span>';
-      return head + `<button data-kb-go='{"lvl":2,"c":${k}}'>
-        <span class="n">${k + 1}</span>
-        <span class="name">${escapeHtml(c.name)}${c.late ? '<span class="kb-ribbon" title="Просрочка"></span>' : ''}</span>
-        <span class="dots"></span>${сумма}</button>`;
-    }).join('');
-    return `<div class="kb-title">Оглавление</div><div class="kb-toc">${rows}</div>
-      <div class="kb-hint">Глава — пара. Рядом — сколько она должна, включая невыданное с прошлых месяцев. Красная закладка — просрочка.</div>`;
+    const rows = kbTocRows(D);
+    return `<div class="kb-l"><div class="kb-title">Оглавление</div></div>
+      <div class="kb-full kb-toc">${rows}</div>
+      <div class="kb-l"><div class="kb-hint">Глава — пара. Рядом — сколько она должна, включая невыданное с прошлых месяцев. Красная закладка — просрочка.</div></div>`;
   },
   2(D, st) {
     const c = D.chapters[st.c];
@@ -10477,7 +10540,7 @@ const KB_VIEWS = {
       </button>`;
     }).join('');
     const l1 = c.p1 ? '−' + kbPc(c.p1) : 'после 1-го %', l2 = c.p2 ? '−' + kbPc(c.p2) : 'после 2-го %';
-    return `
+    return `<div class="kb-l">
       <div class="kb-eyebrow">Глава ${st.c + 1} · часть «${escapeHtml(c.group)}»</div>
       <div class="kb-title">${escapeHtml(c.name)}</div>
       <div><div class="kb-lbl">Нам должны</div><div class="kb-big"${c.owe ? '' : ' style="color:var(--kb-ok)"'}>${c.owe ? fmt(c.owe) : (c.counted ? 'всё выдано' : 'вне счёта')}</div></div>
@@ -10493,6 +10556,7 @@ const KB_VIEWS = {
         <button class="kb-ghost" data-kb-form='{"t":"in","c":${st.c}}'>＋ Приход по паре</button>
         <button class="kb-ghost" data-kb-form='{"t":"out","c":${st.c}}'>＋ Выдача по паре</button>
       </div>
+      </div><div class="kb-r">
       <div class="kb-lbl">Тетради · ${c.weeks.length}</div>
       <div class="kb-notebooks">${nbs}</div>
       ${c.loose.length ? `<div class="kb-lbl" style="color:var(--kb-late)">Выдачи без прихода · ${c.loose.length}</div>
@@ -10504,6 +10568,7 @@ const KB_VIEWS = {
       <div class="kb-nav">
         <button class="kb-ghost" ${st.c ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c - 1}}'>‹ Глава ${st.c}</button>
         <button class="kb-ghost" ${st.c < D.chapters.length - 1 ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":2,"c":${st.c + 1}}'>Глава ${st.c + 2} ›</button>
+      </div>
       </div>`;
   },
   3(D, st) {
@@ -10514,7 +10579,7 @@ const KB_VIEWS = {
         : done ? '<em class="done">выдан целиком</em>' : `<em>осталось ${fmt(i.left1)}</em>`;
       const срок = (i.due && i.left1) ? ` · ${i.late ? '<em class="late">' + kbDue(i) + '</em>' : kbDue(i)}` : '';
       const раскрыт = kbSlip === k;
-      return `<button class="kb-slip" data-kb-slip="${k}" aria-expanded="${раскрыт}">
+      return `<div class="kb-slipbox"><button class="kb-slip" data-kb-slip="${k}" aria-expanded="${раскрыт}">
         <span class="kb-slip-top"><span>Приход ${formatDateShort(i.date)}</span><b>${fmt(i.amount)}</b></span>
         <span class="kb-slip-sub">${статус}${срок}</span>
         ${раскрыт ? `<span class="kb-calc">
@@ -10536,15 +10601,16 @@ const KB_VIEWS = {
           <span>выдача <b>${formatDateShort(x.date)}</b> · ${fmt(o.amount || 0)}</span>
           <button class="kb-ghost" data-kb-form='{"t":"out","edit":"${x.date}#${x.payIdx}"}'>изменить</button>
         </div>` : ''; }).join('')}
-      </div>` : ''}`;
+      </div>` : ''}</div>`;
     }).join('');
-    return `
+    return `<div class="kb-l">
       <div class="kb-eyebrow">Глава ${st.c + 1} · ${escapeHtml(c.name)}</div>
       <div class="kb-title">Тетрадь ${w.carry ? '«С прошлых месяцев»' : kbWeekLabel(w.mon)}</div>
       ${w.carry ? '<div class="kb-hint">Приходы прошлых месяцев, которые до сих пор не выданы. Они входят в долг пары.</div>' : ''}
       <div class="kb-hint">Вкладыш — один приход. Нажмите, чтобы развернуть расчёт.</div>
-      <div class="kb-slips">${slips}</div>
-      <div class="kb-nav">
+      </div>
+      <div class="kb-full kb-slips">${slips}</div>
+      <div class="kb-full kb-nav">
         <button class="kb-ghost" ${st.w < c.weeks.length - 1 ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":3,"c":${st.c},"w":${st.w + 1}}'>‹ раньше</button>
         <button class="kb-ghost" ${st.w ? '' : 'style="visibility:hidden"'} data-kb-go='{"lvl":3,"c":${st.c},"w":${st.w - 1}}'>позже ›</button>
       </div>`;
@@ -10567,6 +10633,7 @@ function kbDraw() {
     Array.from({ length: глубина + 1 }, (_, k) => `<span class="kb-band${k === глубина ? ' cur' : ''}"></span>`).join('');
   const v = document.getElementById('kbView');
   v.innerHTML = kbForm ? kbFormHtml() : KB_VIEWS[st.lvl](D, st);
+  v.classList.toggle('spread', !kbForm);   // на широком экране — разворот из двух страниц (v265)
   v.classList.remove('in-deep', 'in-back');
   void v.offsetWidth;
   if (глубина !== kbDepth) v.classList.add(глубина > kbDepth ? 'in-deep' : 'in-back');
