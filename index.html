@@ -758,6 +758,13 @@
   }
   #abPrintContent h3 { font-size: 13px; margin: 14px 0 4px; color: #444; }
   #abPrintContent table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  /* v271: строка таблицы не рвётся между листами — ни при печати, ни в PDF.
+     Владелец 29.09.2026 про отчёт по Вейс(рук)-Рынок: «разрыв на строке при
+     печати и выводе; сделай, чтобы аккуратно переносились все цифры». Строка
+     целиком уходит на следующий лист; заголовок не остаётся внизу листа
+     отдельно от своей таблицы. html2pdf читает эти же правила (mode: css). */
+  #abPrintContent tr { break-inside: avoid; page-break-inside: avoid; }
+  #abPrintContent h1, #abPrintContent h2, #abPrintContent h3 { break-after: avoid; page-break-after: avoid; }
   /* Предпросмотр отчёта на телефоне: ужимаем, чтобы влезали все колонки (v139).
      На печати А4 размеры обычные — это правило только для экрана. */
   @media screen and (max-width: 760px) {
@@ -1760,7 +1767,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v270</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v271</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -11536,7 +11543,7 @@ async function abSavePdf() {
     image: { type: 'jpeg', quality: 0.97 },
     html2canvas: { scale: 2, backgroundColor: '#ffffff' },
     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    pagebreak: { mode: ['css', 'legacy'] }
+    pagebreak: { mode: ['css', 'legacy'], avoid: ['tr'] }   // строка таблицы — целиком на одном листе (v271)
   }).from(el).save().then(function () {
     showToast('PDF сохранён');
   }).catch(function () {
