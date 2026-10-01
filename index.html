@@ -1767,7 +1767,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v271</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v272</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1796,7 +1796,7 @@
          и все три — в подписи под «Итого на конец дня». Владелец: «программа
          перегружена излишней информацией, убери, если дублируется». -->
     <div class="stat-card s-balance">
-      <div class="stat-label">Итого на конец дня</div>
+      <div class="stat-label">Нам должны</div>
       <div class="stat-value main" id="s-balance">—</div>
       <div id="s-balance-parts" style="font-size:13px;color:var(--muted);margin-top:6px;font-family:var(--font-ui)"></div>
     </div>
@@ -8244,15 +8244,23 @@ function renderSummary(day) {
   const partsEl = document.getElementById('s-balance-parts');
   if (partsEl) {
     const b = v => '<b style="color:var(--muted-bright);font-weight:500">' + fmt(v) + '</b>';
-    partsEl.innerHTML = 'остаток ' + b(co)
-      + (inT ? ' + приход ' + b(inT) : '')
-      + (outT ? ' − выдано ' + b(outT) : '');
+    // Касса теперь строкой под главной цифрой (v272): главная цифра — «Нам должны»
+    partsEl.innerHTML = 'итого на конец дня ' + b(balance)
+      + ((inT || outT) ? ' = остаток ' + b(co) + (inT ? ' + приход ' + b(inT) : '') + (outT ? ' − выдано ' + b(outT) : '') : '');
   }
   const outTile = document.getElementById('s-out');
   if (outTile) outTile.textContent = fmt(outT);
   const inTile = document.getElementById('s-in');
   if (inTile) inTile.textContent = fmt(inT);
-  document.getElementById('s-balance').textContent = fmt(balance);
+  /* Главная цифра — «Нам должны» (v272). Владелец 01.10.2026 со снимками
+     «Итого на конец дня 5 302 200» и «Нам должны 6 336 300»: «там, где 5 302 200,
+     должна стоять сумма 6 336 300; так должно быть всегда; эта сумма
+     вставляется в то место, где Итог на конец дня». Берём ту же сумму, что в
+     блоке «Задолженность по парам» и на обложке книги, — computeWeekPairDebt().
+     Касса (итог на конец дня) не пропала: она строкой под цифрой. */
+  let долгВсего = null;
+  try { долгВсего = computeWeekPairDebt().grandTotal; } catch (e) { console.warn('Нам должны:', e); }
+  document.getElementById('s-balance').textContent = долгВсего === null ? '—' : fmt(долгВсего);
   const curEl = document.getElementById('s-curator');
   if (curEl) curEl.textContent = fmt(curatorDebt(ledgerDay()));
   const curPaidLine = document.getElementById('curator-paid-line');
