@@ -1540,6 +1540,11 @@
   .kb .kbf select option, .kb .kbf select optgroup { background:var(--kb-page); color:var(--kb-text); }
   .kb .kbf input.kbf-sum { font-size:26px; font-weight:700; }
   .kbf-row { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
+  .kbf-sumrow { display:flex; align-items:center; gap:8px; }
+  .kb .kbf-sumdel { flex:none; width:36px; height:36px; border-radius:50%; border:1px solid var(--kb-line); color:var(--kb-muted); font-size:14px; text-align:center; }
+  .kbf-sumfoot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:6px; color:var(--kb-soft); font-size:14px; }
+  .kbf-sumfoot b { color:var(--kb-text); font-size:17px; white-space:nowrap; }
+  .kbf-sumfoot .kb-ghost { white-space:nowrap; }
   .kbf-preview { font-size:13px; color:var(--kb-soft); background:var(--kb-wash); border-radius:12px; padding:10px 12px; line-height:1.6; }
   .kbf-preview:empty, .kbf-err:empty { display:none; }
   .kbf-preview b { color:var(--kb-text); white-space:nowrap; }
@@ -1789,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v273</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v274</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10977,10 +10982,11 @@ function kbOpenEdit(type, ключ) {
   if (!r) { showToast('Запись не найдена — обновите книгу'); return; }
   kbForm = { type, pair: (r.client || '').trim(), aim: type === 'out' ? (r.forIn || null) : null,
              edit: { date: дата, idx: +н }, orig: { forIn: r.forIn || null, amount: r.amount || 0 } };
+  if (type === 'in') kbForm.sums = ((r.parts && r.parts.length > 1) ? r.parts : [r.amount || 0]).map(fmtExact);
   kbDraw();
   document.getElementById('kbOverlay').scrollTop = 0;
   const g = id => document.getElementById(id), пц = v => (v > 0) ? String(v).replace('.', ',') : '';
-  g('kbfSum').value = (r.parts && r.parts.length > 1) ? r.parts.map(fmtExact).join('+') : fmtExact(r.amount || 0);
+  if (type === 'out') g('kbfSum').value = fmtExact(r.amount || 0);
   if (type === 'in') { g('kbfP1').value = пц(r.pct); g('kbfP2').value = пц(r.pct2); g('kbfPc').value = пц(r.pctCur); g('kbfPctNote').textContent = ''; }
   g('kbfDue').value = r.dueDate || '';
   g('kbfNote').value = r.note || '';
@@ -11089,9 +11095,9 @@ function kbFormHtml() {
     <div class="kb-title">${f.edit ? (isIn ? 'Изменить приход' : 'Изменить выдачу') : (isIn ? 'Новый приход' : 'Новая выдача')}</div>
     <label class="kbf"><span>Пара</span><select id="kbfPair" onchange="kbFormPair(this.value)">${варианты}</select></label>
     ${isIn ? '' : `<div class="kbf"><span>За какой приход</span><div id="kbfUnpaid">${kbUnpaidHtml()}</div></div>`}
-    <label class="kbf"><span>${isIn ? 'Сумма прихода' : 'Сумма выдачи'}</span>
-      <input id="kbfSum" class="kbf-sum" inputmode="decimal" autocomplete="off" oninput="kbFormPreview()"
-        placeholder="${isIn ? '1 250 000 или 412 304+301 640' : '0'}"></label>
+    ${isIn ? `<div class="kbf"><span>Суммы прихода — по одной в строке</span><div id="kbfSums">${kbSumsHtml()}</div></div>`
+    : `<label class="kbf"><span>Сумма выдачи</span>
+      <input id="kbfSum" class="kbf-sum" inputmode="decimal" autocomplete="off" oninput="kbFormPreview()" placeholder="0"></label>`}
     ${isIn ? `<div class="kbf-row">
       <label class="kbf"><span>1-й %</span><input id="kbfP1" inputmode="decimal" autocomplete="off" value="${прошлые ? пц(прошлые.pct) : ''}" oninput="kbFormPreview()"></label>
       <label class="kbf"><span>2-й %</span><input id="kbfP2" inputmode="decimal" autocomplete="off" value="${прошлые ? пц(прошлые.pct2) : ''}" oninput="kbFormPreview()"></label>
@@ -11111,6 +11117,44 @@ function kbFormHtml() {
       <button type="button" class="kb-ghost kb-danger" onclick="kbDelete()">${isIn ? 'Удалить приход' : 'Удалить выдачу'}</button>
     </div>` : ''}`;
 }
+
+/* Суммы прихода в бланке — столбиком, как в крупной форме (v119, v274):
+   Enter или «＋ ещё сумма» заводит новую строку. В скрытое #kbfSum уходит
+   «a+b» без пробелов — его читают предпросмотр и запись, как раньше. */
+function kbSumsHtml() {
+  const s = kbForm.sums = (kbForm.sums && kbForm.sums.length) ? kbForm.sums : [''];
+  return s.map((v, i) => `<div class="kbf-sumrow">
+      <input class="kbf-sum" inputmode="decimal" autocomplete="off" value="${escapeHtml(String(v))}"
+        placeholder="${i ? 'ещё сумма' : '1 250 000'}" oninput="kbSumInput(${i}, this)" onblur="kbSumBlur(${i}, this)" onkeydown="kbSumKey(event)">
+      ${s.length > 1 ? `<button type="button" class="kbf-sumdel" onclick="kbSumDel(${i})" aria-label="Убрать сумму">✕</button>` : ''}
+    </div>`).join('')
+    + `<div class="kbf-sumfoot"><button type="button" class="kb-ghost" onclick="kbSumAdd()">＋ ещё сумма</button>
+      <span id="kbfSumTotal">${kbSumTotal()}</span></div>
+    <input type="hidden" id="kbfSum" value="${kbSumJoined()}">`;
+}
+function kbSumJoined() { return kbForm.sums.map(qeParseSum).filter(n => !isNaN(n)).map(String).join('+'); }
+function kbSumTotal() {
+  const p = kbForm.sums.length > 1 && parseSumString(kbSumJoined());
+  return p ? 'итого <b>' + fmt(p.sum) + '</b>' : '';
+}
+function kbSumSync() {
+  document.getElementById('kbfSum').value = kbSumJoined();
+  document.getElementById('kbfSumTotal').innerHTML = kbSumTotal();
+  kbFormPreview();
+}
+function kbSumInput(i, el) { numericInputFilter({ target: el }); kbForm.sums[i] = el.value; kbSumSync(); }
+function kbSumBlur(i, el) { const n = qeParseSum(el.value); if (!isNaN(n)) el.value = kbForm.sums[i] = fmtExact(n); }
+function kbSumKey(e) { if (e.key === 'Enter') { e.preventDefault(); kbSumAdd(); } }
+function kbSumAdd() {
+  kbForm.sums = kbForm.sums.map(v => { const n = qeParseSum(v); return isNaN(n) ? v : fmtExact(n); });
+  if (kbForm.sums[kbForm.sums.length - 1] !== '') kbForm.sums.push('');   // пустая уже есть — встаём в неё
+  kbSumRedraw();
+  const поля = document.querySelectorAll('#kbfSums input.kbf-sum');
+  поля[поля.length - 1].focus();
+}
+function kbSumDel(i) { kbForm.sums.splice(i, 1); kbSumRedraw(); }
+function kbSumRedraw() { document.getElementById('kbfSums').innerHTML = kbSumsHtml(); kbSumSync(); }
+function kbSumFocus() { (document.querySelector('#kbfSums input.kbf-sum') || document.getElementById('kbfSum')).focus(); }
 
 function kbFormPair(v) {
   if (v === '__add__') {
@@ -11164,7 +11208,7 @@ function kbSaveEdit(pair, сумма) {
   if (!r) { kbCloseForm(); return; }
   if (f.type === 'in') {
     const parsed = parseSumString(сумма);
-    if (!parsed || !(parsed.sum > 0)) { g('kbfSum').focus(); return ошибка('Введите сумму прихода.'); }
+    if (!parsed || !(parsed.sum > 0)) { kbSumFocus(); return ошибка('Введите сумму прихода.'); }
     const p1 = parseDecimal(g('kbfP1').value);
     if (isNaN(p1) || p1 <= 0) { g('kbfP1').focus(); return ошибка('Введите первый процент.'); }
     let p2 = null;
@@ -11219,7 +11263,7 @@ function kbFormSave() {
   const day = getDay(currentDate);
   if (f.type === 'in') {
     const parsed = parseSumString(сумма);
-    if (!parsed || !(parsed.sum > 0)) { g('kbfSum').focus(); return ошибка('Введите сумму прихода.'); }
+    if (!parsed || !(parsed.sum > 0)) { kbSumFocus(); return ошибка('Введите сумму прихода.'); }
     if (!(parseDecimal(g('kbfP1').value) > 0)) { g('kbfP1').focus(); return ошибка('Введите первый процент.'); }
     g('in-client').value = pair;
     g('in-amount').value = сумма;
