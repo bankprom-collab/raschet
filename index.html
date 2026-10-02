@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v274</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v275</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2739,6 +2739,12 @@ const MIGRATION_VERSION = 9;
    Теперь граница — только погрешность вычислений (доли копейки): закрыт
    приход, по которому выдано всё до копейки. */
 const ДОЛЯ_EPS = 1e-9;
+/* Куратор и «На руки» — только с приходов, выданных ЦЕЛИКОМ (v275).
+   Владелец 02.10.2026: «доход будет считаться куратором и на руки только
+   тогда, когда сумма выдана полностью; выдана не полностью — не учитывается
+   в расчёте по прибыли». До v275 частичная выдача давала свою долю (v166 п. 2).
+   Отдаёт ровно 1 или 0: floor100 от 0,999… срезал бы сотню. */
+function доляВСчёт(frac) { return frac >= 1 - ДОЛЯ_EPS ? 1 : 0; }
 let state = loadState();
 let currentDate = todayStr();
 
@@ -3714,8 +3720,8 @@ function curatorAccruedTotal(dayStr) {
       if (!(r.pctCur > 0)) return;
       if (d < handStart()) return;              // до начала счёта — закрыто
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
-      const frac = cover[key] || 0;
-      if (frac <= 0) return;                    // не выдано — не считается
+      const frac = доляВСчёт(cover[key] || 0);
+      if (frac <= 0) return;                    // не выдан целиком — не считается (v275)
       sum += floor100((r.amount || 0) * r.pctCur / 100 * frac);
     });
   }
@@ -3782,8 +3788,8 @@ function curatorSettlement(dayStr) {
       if (!(r.pctCur > 0)) return;
       if (d < handStart()) return;              // до начала счёта — закрыто
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
-      const frac = cover[key] || 0;
-      if (frac <= 0) return;                    // не выдано — не считается
+      const frac = доляВСчёт(cover[key] || 0);
+      if (frac <= 0) return;                    // не выдан целиком — не считается (v275)
       const sum = floor100((r.amount || 0) * r.pctCur / 100 * frac);
       if (sum <= 0) return;
       const pp = PARTS[key];
@@ -4067,8 +4073,8 @@ function handOpenRows(dayStr) {
     dd.in.forEach((r, idx) => {
       if (d < handStart()) return;              // до начала счёта — закрыто
       const key = (r.client || '').trim() + '#' + d + '#' + idx;
-      const frac = cover[key] || 0;
-      if (frac <= 0) return;                    // ещё не выдан — заработка нет
+      const frac = доляВСчёт(cover[key] || 0);
+      if (frac <= 0) return;                    // не выдан целиком — заработка нет (v275)
       const deal = dealOfRow(r, frac);
       const cur = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
         ? floor100((r.amount || 0) * r.pctCur / 100 * frac) : 0;
@@ -4105,11 +4111,12 @@ function handExcludedRows(dayStr) {
       if (!dealFull && !hasCur) return;               // ни сделки, ни куратора — не о чем
       let why = null;
       if (frac <= 0) why = 'ещё не выдан на руки';
+      else if (!доляВСчёт(frac)) why = 'выдан не целиком — в счёт после полной выдачи';
       else if (reset && d <= reset) why = 'закрыт чертой сброса';
       else if (!hasCur && !dealFull) why = 'нет второго процента — сделки нет';
       if (!why) return;                               // должен быть в счёте
       rows.push({ date: d, pair: r.client || '—', amount: r.amount || 0,
-                  frac: frac, deal: dealOfRow(r, frac || 1), why: why });
+                  frac: frac, deal: dealFull, why: why });
     });
   }
   return rows;
@@ -5000,17 +5007,18 @@ function renderInBody(day) {
            даты начала счёта закрыт: у него ни куратора, ни «на руки» нет.
            Невыданная часть подписана как ожидание, а не как начисление —
            иначе строка обещает деньги, которых в счёте нет. */
-        const frac = inCount ? (COVER[(r.client || '').trim() + '#' + currentDate + '#' + i] || 0) : 0;
+        const выдано = inCount ? (COVER[(r.client || '').trim() + '#' + currentDate + '#' + i] || 0) : 0;
+        const frac = доляВСчёт(выдано);   // v275: только выданный целиком
         const curFull = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
           ? floor100((r.amount || 0) * r.pctCur / 100) : 0;
         const curOfRow = (r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0)
           ? floor100((r.amount || 0) * r.pctCur / 100 * frac) : 0;
         const handOfRow = r100(dealResult * frac) - curOfRow;
-        const waiting = inCount && frac < 1 - ДОЛЯ_EPS;
+        const waiting = inCount && frac < 1;
         const waitNote = waiting
           ? `<div style="font-family:var(--font-ui);font-size:9px;color:var(--muted);
-               text-align:right;margin-top:2px">${frac > ДОЛЯ_EPS
-                 ? 'выдано ' + Math.floor(frac * 100) + '% — остальное после выдачи'
+               text-align:right;margin-top:2px">${выдано > ДОЛЯ_EPS
+                 ? 'выдано ' + Math.floor(выдано * 100) + '% — в счёт после полной выдачи: ' + fmt(dealResult - curFull)
                  : 'в счёт пойдёт после выдачи: ' + fmt(dealResult - curFull)}</div>`
           : (inCount ? '' : `<div style="font-family:var(--font-ui);font-size:9px;color:var(--muted);
                text-align:right;margin-top:2px">до начала счёта — не участвует</div>`);
@@ -7914,7 +7922,7 @@ function curatorPendingHtml(dayStr) {
       <div style="font-size:11.5px;color:var(--muted);margin-bottom:2px">
         <b style="color:var(--muted-bright)">Ждут выдачи: ${P.after.length}</b>
         на ${fmt(sum(P.after))} — встанут в счёт, когда деньги будут выданы
-        и приход указан.</div>
+        целиком и приход указан.</div>
       <div style="max-height:34vh;overflow-y:auto">${
         P.after.map(r => rowHtml(r, r.frac > ДОЛЯ_EPS
           ? '· выдано ' + Math.floor(r.frac * 100) + '%'
