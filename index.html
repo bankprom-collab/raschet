@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v275</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v276</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1853,6 +1853,7 @@
       <!-- v238: сумма стоит в заголовке панели, второй раз внутри не нужна -->
       <div class="carryover-label">Режим <span id="carryover-mode" style="font-size:10px;color:var(--accent);margin-left:6px"></span></div>
       <div id="carryover-mismatch" style="display:none;margin-top:8px;font-size:11px;padding:6px 10px;border-radius:6px;background:rgba(255,183,77,.12);border:1px solid rgba(255,183,77,.3);color:#ffb74d;font-family:var(--font-num);max-width:520px"></div>
+      <div id="carryover-debt-hint" style="display:none;margin-top:8px;font-size:13px;color:var(--muted);font-family:var(--font-ui)"></div>
     </div>
     <div class="carryover-input-row">
       <input type="text" id="carryover-input" placeholder="Сумма остатка" inputmode="decimal" oninput="numericInputFilter(event)" style="width:200px">
@@ -4336,6 +4337,23 @@ function разоваяПравкаДанных() {
   saveState();
 }
 
+/* Разовая правка остатка 1 окт (v276). Владелец 02.10.2026 выбрал вариант 1:
+   там стоит 7 132 300 — «нам должны» на КОНЕЦ 1 окт, приход 796 000 и выдача
+   420 700 этого дня легли дважды (касса больше долга на 375 300). Ставим долг
+   на НАЧАЛО дня — 6 757 000. Только по точному совпадению обоих чисел; копия —
+   «До правки остатка 1 окт». Удалить, когда флаг стоит на всех устройствах. */
+function правкаОстатка1Окт() {
+  const d = '2026-10-01', day = state && state.days && state.days[d];
+  if (!day || state._co1octFixed || day.carryoverManual !== true || day.carryover !== 7132300) return;
+  const долг = долгНаНачалоДня(d);
+  if (долг === null || Math.abs(долг - 6757000) > 0.5) return;
+  backupSlot('pre-fix-co1oct');
+  day.carryover = долг;
+  state._co1octFixed = true;
+  recalcCarryoversAfter(d);
+  saveState();
+}
+
 /* Переходящие остатки хранятся посчитанными. После v264 приход с «ровно
    полсотни» после 1-го % даёт на 50 ₽ меньше, и сохранённые авто-остатки
    следующих дней разошлись бы с пересчётом. Сдвигаем их один раз ровно
@@ -4364,6 +4382,7 @@ function render() {
   // Правка ниже пересчитывает их уже новым — в обратном порядке 50 ₽ ушли бы дважды.
   try { сдвигОстатковПолсотни(); } catch (e) { console.warn('Сдвиг остатков:', e); }
   try { разоваяПравкаДанных(); } catch (e) { console.warn('Разовая правка:', e); }
+  try { правкаОстатка1Окт(); } catch (e) { console.warn('Правка остатка 1 окт:', e); }
   renderDateLabel();
   const day = getDay(currentDate);
   // Carryover
@@ -4405,6 +4424,16 @@ function render() {
     } else {
       mismatchEl.style.display = 'none';
     }
+  }
+  // Подсказка при ручном вводе: сколько нам должны на начало дня (v276)
+  const hintEl = document.getElementById('carryover-debt-hint');
+  if (hintEl) {
+    let долг = null;
+    try { долг = долгНаНачалоДня(currentDate); } catch (e) { console.warn('Долг на начало дня:', e); }
+    hintEl.style.display = долг === null ? 'none' : 'block';
+    if (долг !== null) hintEl.innerHTML = 'На начало ' + formatDateShort(currentDate) + ' нам должны <b style="color:var(--text)">'
+      + fmt(долг) + '</b>' + (Math.abs(co - долг) > 0.5
+        ? ` · <a href="#" onclick="event.preventDefault(); document.getElementById('carryover-input').value='${долг}'" style="color:var(--accent)">подставить</a>` : ' ✓');
   }
   // Note
   document.getElementById('day-note').value = day.note || '';
@@ -8296,6 +8325,20 @@ function renderSummary(day) {
   let долгВсего = null;
   try { долгВсего = computeWeekPairDebt().grandTotal; } catch (e) { console.warn('Нам должны:', e); }
   document.getElementById('s-balance').textContent = долгВсего === null ? '—' : fmt(долгВсего);
+  /* Касса и «нам должны» по правилу владельца — одно и то же (v276). Разошлись —
+     строка с разницей; если виноват ручной остаток, называем его. */
+  if (partsEl && долгВсего !== null && Math.abs(balance - долгВсего) > 0.5) {
+    let причина = '';
+    try {
+      const ручной = Object.keys(state.days).filter(d => d <= currentDate && state.days[d].carryoverManual === true).sort().pop();
+      const надо = ручной ? долгНаНачалоДня(ручной) : null;
+      if (надо !== null && Math.abs((state.days[ручной].carryover || 0) - надо) > 0.5)
+        причина = '<br>ручной остаток ' + formatDateShort(ручной) + ': ' + fmt(state.days[ручной].carryover || 0)
+          + ', а на начало дня нам должны ' + fmt(надо);
+    } catch (e) { console.warn('Причина расхождения:', e); }
+    partsEl.innerHTML += '<div style="margin-top:6px;color:#ffb74d">⚠️ не сходится с «нам должны» на <b>'
+      + fmt(Math.abs(balance - долгВсего)) + '</b>' + причина + '</div>';
+  }
   const curEl = document.getElementById('s-curator');
   if (curEl) curEl.textContent = fmt(curatorDebt(ledgerDay()));
   const curPaidLine = document.getElementById('curator-paid-line');
@@ -9066,10 +9109,29 @@ function updateInPreview() {
   preview.style.whiteSpace = 'pre-line';
 }
 
+/* «Нам должны» на НАЧАЛО дня d (v276) — долг на конец предыдущего дня
+   с данными, тот же computeWeekPairDebt, открытый на нём. Владелец: «переходящий
+   остаток — это сколько нам должны». null — раньше d данных нет. */
+function долгНаНачалоДня(d) {
+  const prev = prevDayWithData(d);
+  if (!prev) return null;
+  const был = currentDate;
+  try { currentDate = prev; return computeWeekPairDebt().grandTotal; }
+  finally { currentDate = был; }
+}
+
 // ── ACTIONS ────────────────────────────────────────────────────────────────
 function setCarryover() {
   const v = parseDecimal(document.getElementById('carryover-input').value);
   if (isNaN(v)) { showToast('Введите сумму', true); return; }
+  /* v276: 1 окт остаток ввели суммой «нам должны» на КОНЕЦ дня — приход
+     и выдача дня легли дважды (+375 300). Переспрашиваем, если не совпало. */
+  const долг = долгНаНачалоДня(currentDate);
+  if (долг !== null && Math.abs(v - долг) > 0.5 && !confirm(
+      'На начало ' + formatDateShort(currentDate) + ' нам должны ' + fmt(долг) + '.\n'
+      + 'Вы вводите ' + fmt(v) + ' — разница ' + fmt(Math.abs(v - долг)) + '.\n\n'
+      + 'Остаток — это сумма на НАЧАЛО дня, без сегодняшних приходов и выдач.\n'
+      + 'Сохранить ' + fmt(v) + '?')) return;
   const day = getDay(currentDate);
   day.carryover = v;
   day.carryoverManual = true;
@@ -12326,6 +12388,7 @@ function backupKeyLabel(key) {
   if (suffix === 'pre-restore') return 'До восстановления из копии';
   if (suffix === 'pre-purge') return 'До удаления записей пары';
   if (suffix === 'pre-fix-samv15') return 'До удаления выдачи 15 сен (Мухтар-Самв)';
+  if (suffix === 'pre-fix-co1oct') return 'До правки остатка 1 окт';
   if (/^\d{4}-\d{2}-\d{2}$/.test(suffix)) {
     return 'Копия за ' + (typeof formatDateShort === 'function' ? formatDateShort(suffix) : suffix);
   }
