@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v276</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v277</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2721,6 +2721,18 @@ function handStart() {
 
 const STORAGE_KEY = 'ledger_v1';
 
+/* Синхронизация без часов (v277). Раньше сравнивали время правки в этом
+   браузере со временем файла на Диске и брали «что новее» целиком — правки
+   другого устройства затирались, если это отправляло позже. Теперь помним,
+   какую версию файла видели в последний раз, есть ли неотправленное и как
+   выглядели данные в момент последней синхронизации (база для совмещения).
+   Объявлены до loadState: saveState их трогает. */
+const GDRIVE_CLOUD_VER_KEY = 'gdrive_cloud_ver_v1';   // modifiedTime файла, с которым сошлись
+const GDRIVE_DIRTY_KEY = 'gdrive_dirty_v1';           // '1' — есть правки, ещё не ушедшие на Диск
+const GDRIVE_BASE_KEY = 'gdrive_base_v1';             // данные на момент последней синхронизации
+let syncGen = 0;          // растёт с каждой правкой: правка посреди отправки не теряет «неотправлено»
+let syncTimer = null;
+
 // ── РЕЗЕРВНЫЕ КОПИИ: константы (объявлены до loadState — важно) ──
 const BACKUP_PREFIX = 'ledger_backup_';
 const BACKUP_KEEP = 14;              // сколько ежедневных копий хранить
@@ -3075,6 +3087,7 @@ function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     saveOk();
+    syncMarkDirty();
   } catch (e) {
     // Хранилище переполнено или закрыто браузером. Молчать здесь нельзя:
     // на экране записи есть, а в браузере их нет — закрыл вкладку и потерял
@@ -9282,9 +9295,10 @@ async function applyAndSave() {
     saveState();
     render();
 
-    // 3. Отправка на Google Drive
+    // 3. Синхронизация с Google Drive. v277: не голая отправка — она стирала
+    //    правки, сделанные на другом устройстве; синхронизация их совмещает.
     if (typeof accessToken !== 'undefined' && accessToken) {
-      await saveToGDrive();
+      await smartSync({ silent: false });
     } else {
       showToast('💾 Сохранено в браузере. Для отправки на Google Drive подключитесь в разделе «Синхронизация».', true);
     }
@@ -12389,6 +12403,7 @@ function backupKeyLabel(key) {
   if (suffix === 'pre-purge') return 'До удаления записей пары';
   if (suffix === 'pre-fix-samv15') return 'До удаления выдачи 15 сен (Мухтар-Самв)';
   if (suffix === 'pre-fix-co1oct') return 'До правки остатка 1 окт';
+  if (suffix === 'sync-other') return 'Версия с другого устройства (спорные места при совмещении)';
   if (/^\d{4}-\d{2}-\d{2}$/.test(suffix)) {
     return 'Копия за ' + (typeof formatDateShort === 'function' ? formatDateShort(suffix) : suffix);
   }
@@ -12726,16 +12741,17 @@ function refreshSyncUI() {
   const accLine = document.getElementById('sync-account');
   if (lastSync) {
     const dt = new Date(parseInt(lastSync));
-    accLine.textContent = 'Последняя синхронизация: ' + dt.toLocaleString('ru-RU');
+    accLine.textContent = 'Последняя синхронизация: ' + dt.toLocaleString('ru-RU')
+      + (syncDirty() ? ' · есть правки, ещё не отправленные на Диск' : '');
   } else {
     accLine.textContent = '';
   }
 
-  const auto = JSON.parse(localStorage.getItem(GDRIVE_AUTOSYNC_KEY) || 'null');
+  const auto = autoSyncSetting();
   const cb = document.getElementById('autosync-cb');
   const sel = document.getElementById('autosync-interval');
   const info = document.getElementById('autosync-info');
-  if (auto && auto.enabled) {
+  if (auto.enabled) {
     cb.checked = true;
     sel.value = String(auto.interval);
     info.textContent = `Включено. Следующая через ~${auto.interval} мин`;
@@ -12954,41 +12970,81 @@ async function ensureFolderAndFile() {
   return { folderId, fileId };
 }
 
+/* Правка записана в браузер — пометить «не отправлено» и отправить сама,
+   через 3 секунды после последнего нажатия (v277). Раньше правка уходила
+   на Диск только по таймеру или кнопке: закрыл телефон — второе устройство
+   её не видело, а потом могло затереть своей отправкой. */
+function syncMarkDirty() {
+  syncGen++;
+  try {
+    localStorage.setItem(GDRIVE_DIRTY_KEY, '1');
+    if (!getClientId()) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => { smartSync({ silent: true }).catch(() => {}); }, 3000);
+  } catch (e) {}
+}
+const syncDirty = () => localStorage.getItem(GDRIVE_DIRTY_KEY) === '1';
+
+/* Диск и этот браузер сошлись на версии ver с содержимым json.
+   gen — номер правки на момент снимка: если после него правили ещё,
+   «неотправлено» остаётся, и следующий заход отправит остальное. */
+function syncSettled(ver, json, gen) {
+  try {
+    if (ver) localStorage.setItem(GDRIVE_CLOUD_VER_KEY, ver);
+    localStorage.setItem(GDRIVE_BASE_KEY, json);
+    if (gen === syncGen) localStorage.setItem(GDRIVE_DIRTY_KEY, '0');
+    localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
+  } catch (e) { console.warn('syncSettled:', e); }
+  refreshSyncUI();
+}
+
+// Отправить текущие данные на Диск (без проверок — их делает вызывающий)
+async function uploadState(fileId, folderId) {
+  const gen = syncGen, body = JSON.stringify(state, null, 2);
+  const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
+  if (!fileId) metadata.parents = [folderId];
+  const boundary = '-------RasčëtBoundary' + Date.now();
+  const delim = `\r\n--${boundary}\r\n`;
+  const closeDelim = `\r\n--${boundary}--`;
+  const multipart =
+    delim + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify(metadata) +
+    delim + 'Content-Type: application/json\r\n\r\n' +
+    body + closeDelim;
+  const res = await gapi.client.request({
+    path: fileId ? `/upload/drive/v3/files/${fileId}?uploadType=multipart` : '/upload/drive/v3/files?uploadType=multipart',
+    method: fileId ? 'PATCH' : 'POST',
+    params: { uploadType: 'multipart', fields: 'id,modifiedTime' },
+    headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
+    body: multipart
+  });
+  if (res.result && res.result.id) localStorage.setItem(GDRIVE_FILE_ID_KEY, res.result.id);
+  syncSettled(res.result && res.result.modifiedTime, body, gen);
+}
+
+// Заменить данные этого браузера версией с Диска (здесь не было неотправленного)
+function applyRemote(remote, ver) {
+  backupSlot('pre-sync');                    // копия того, что было, — до замены
+  state = remote;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { saveBroken(e); return; }
+  syncSettled(ver, JSON.stringify(state), syncGen);
+  render();
+}
+
+// Кнопка «⬆ Только отправить»: перезаписать Диск. Если там чужие правки — спросить.
 async function saveToGDrive() {
   if (!(await ensureToken(true))) { showToast('Сначала подключись к Google Drive', true); return; }
   gapi.client.setToken({ access_token: accessToken });
   try {
-    showToast('Сохраняем...');
-    let { folderId, fileId } = await ensureFolderAndFile();
-    const body = JSON.stringify(state, null, 2);
-    const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
-    if (!fileId) metadata.parents = [folderId];
-
-    const boundary = '-------RasčëtBoundary' + Date.now();
-    const delim = `\r\n--${boundary}\r\n`;
-    const closeDelim = `\r\n--${boundary}--`;
-    const multipart =
-      delim + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-      JSON.stringify(metadata) +
-      delim + 'Content-Type: application/json\r\n\r\n' +
-      body + closeDelim;
-
-    const path = fileId
-      ? `/upload/drive/v3/files/${fileId}?uploadType=multipart`
-      : '/upload/drive/v3/files?uploadType=multipart';
-    const method = fileId ? 'PATCH' : 'POST';
-
-    const res = await gapi.client.request({
-      path, method,
-      params: { uploadType: 'multipart' },
-      headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
-      body: multipart
-    });
-    if (res.result && res.result.id) {
-      localStorage.setItem(GDRIVE_FILE_ID_KEY, res.result.id);
+    const { folderId, fileId } = await ensureFolderAndFile();
+    if (fileId) {
+      const meta = await gapi.client.drive.files.get({ fileId, fields: 'id, modifiedTime' });
+      if (meta.result.modifiedTime !== localStorage.getItem(GDRIVE_CLOUD_VER_KEY) && !confirm(
+          'На Диске есть изменения с другого устройства, которых здесь нет. Отправка их сотрёт.\n\n'
+          + 'Лучше нажать «Синхронизировать» — изменения совместятся.\n\nВсё равно отправить?')) return;
     }
-    localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
-    refreshSyncUI();
+    showToast('Сохраняем...');
+    await uploadState(fileId, folderId);
     showToast('✅ Сохранено в Google Drive');
   } catch (e) {
     console.error('Save error:', e);
@@ -12996,6 +13052,7 @@ async function saveToGDrive() {
   }
 }
 
+// Кнопка «⬇ Загрузить»: заменить данные браузера версией с Диска
 async function loadFromGDrive() {
   if (!(await ensureToken(true))) { showToast('Сначала подключись к Google Drive', true); return; }
   if (!confirm('Загрузить данные с Диска? Текущие данные в браузере будут заменены.')) return;
@@ -13004,37 +13061,130 @@ async function loadFromGDrive() {
     showToast('Загружаем...');
     const { fileId } = await ensureFolderAndFile();
     if (!fileId) { showToast('На Диске нет сохранённых данных', true); return; }
+    const meta = await gapi.client.drive.files.get({ fileId, fields: 'id, modifiedTime' });
     const res = await gapi.client.drive.files.get({ fileId, alt: 'media' });
     const data = typeof res.body === 'string' ? JSON.parse(res.body) : res.result;
-    if (data.clients && data.days) {
-      state = migrateState(data);
-      saveState();
-      localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
-      refreshSyncUI();
-      render();
-      showToast('✅ Данные загружены с Google Drive');
-    } else {
-      showToast('Неверный формат файла на Диске', true);
-    }
+    if (!(data.clients && data.days)) { showToast('Неверный формат файла на Диске', true); return; }
+    applyRemote(migrateState(data), meta.result.modifiedTime);
+    showToast('✅ Данные загружены с Google Drive');
   } catch (e) {
     console.error('Load error:', e);
     showToast('Ошибка загрузки: ' + (e.message || 'см. консоль'), true);
   }
 }
 
-// ── УМНАЯ ДВУСТОРОННЯЯ СИНХРОНИЗАЦИЯ ───────────────────────────────────────
-// Сравнивает метку времени локальных данных (state._modifiedAt) с меткой
-// данных в облаке. Берёт более свежие.
-// Используется и при автоматической синхронизации, и при ручной "🔄 Синхронизировать".
-async function smartSync(opts) {
-  opts = opts || {};
-  const silent = !!opts.silent; // не показывать toast'ы если silent
+/* Совмещение двух версий (v277). base — данные на момент прошлой
+   синхронизации (общий предок), local — этот браузер, remote — Диск сейчас.
+   - менялось только с одной стороны — берётся оттуда (старое не затирает новое);
+   - в один день с обеих сторон добавили записи — складываются;
+   - одно и то же место изменено по-разному на обоих — спор: берётся более
+     поздняя правка, место попадает в conflicts;
+   - авто-остатки не спорят: после совмещения цепочка пересчитывается с from;
+   - привязки выдач (forIn = «дата#номер») ищутся заново по содержимому
+     прихода: при сложении номера приходов могли сдвинуться.
+   Без базы (первая синхронизация после обновления) отличить «удалили» от
+   «добавили» нельзя — тогда в спорных днях побеждает более поздняя правка. */
+function mergeStates(base, local, remote) {
+  const canon = x => JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v))
+    ? Object.keys(v).sort().reduce((o, kk) => { o[kk] = v[kk]; return o; }, {}) : v);
+  const eq = (a, b) => canon(a) === canon(b);
+  const isObj = x => !!x && typeof x === 'object' && !Array.isArray(x);
+  const newerLocal = (local._modifiedAt || 0) >= (remote._modifiedAt || 0);
+  const conflicts = [];
+  const side = new WeakMap();                // выдача → откуда пришла, для привязок
+  [[local, 'L'], [remote, 'R']].forEach(([s, t]) =>
+    Object.values(s.days || {}).forEach(d => (d.out || []).forEach(o => side.set(o, t))));
+
+  function arr3(b, l, r, path) {
+    if (path === '.clients') return l.filter(x => r.includes(x) || !b.includes(x))
+      .concat(r.filter(x => !l.includes(x) && !b.includes(x)));
+    const n = b.length, kept = a => a.length >= n && b.every((x, i) => eq(x, a[i]));
+    const lAdd = kept(l), rAdd = kept(r);
+    if (lAdd && rAdd) {                      // обе стороны только добавили
+      let c = n;                             // одинаковые добавления не дублируем
+      while (c < l.length && c < r.length && eq(l[c], r[c])) c++;
+      return l.concat(r.slice(c));
+    }
+    if (lAdd) return r.concat(l.slice(n));   // там правили старое, здесь добавили
+    if (rAdd) return l.concat(r.slice(n));
+    return null;
+  }
+
+  function m3(b, l, r, path) {
+    if (eq(l, r)) return l;
+    if (base && eq(b, l)) return r;
+    if (base && eq(b, r)) return l;
+    if (!base && l === undefined) return r;
+    if (!base && r === undefined) return l;
+    if (isObj(l) && isObj(r)) {
+      const out = {}, dayLevel = /^\.days\.[^.]+$/.test(path);
+      new Set([...Object.keys(l), ...Object.keys(r)]).forEach(k => {
+        if (k === '_modifiedAt') return;
+        const bb = isObj(b) ? b[k] : undefined;
+        const bothChanged = !base || (!eq(bb, l[k]) && !eq(bb, r[k]));
+        const v = (dayLevel && k === 'carryover' && !l.carryoverManual && !r.carryoverManual && bothChanged)
+          ? l[k]                              // авто-остаток — пересчитается ниже
+          : m3(bb, l[k], r[k], path + '.' + k);
+        if (v !== undefined) out[k] = v;
+      });
+      return out;
+    }
+    if (Array.isArray(l) && Array.isArray(r) && base) {
+      const bb = Array.isArray(b) ? b : (/^\.days\.[^.]+\.(in|out)$/.test(path) ? [] : null);
+      const a = bb && arr3(bb, l, r, path);
+      if (a) return a;
+    }
+    conflicts.push(path.slice(1));
+    return newerLocal ? l : r;
+  }
+
+  const res = m3(base || undefined, local, remote, '');
+
+  // Привязки выдач: номер прихода мог сдвинуться — ищем тот же приход по содержимому
+  Object.keys(res.days || {}).forEach(d => {
+    const outs = res.days[d].out || [];
+    outs.forEach((o, i) => {
+      if (!o || !o.forIn) return;
+      const src = side.get(o) === 'R' ? remote : local;
+      const [D, k] = String(o.forIn).split('#');
+      const tgt = (((src.days || {})[D] || {}).in || [])[+k];
+      const ins = (res.days[D] || {}).in || [];
+      if (tgt && ins[+k] && eq(ins[+k], tgt)) return;
+      const j = tgt ? ins.findIndex(x => eq(x, tgt)) : -1;
+      if (j >= 0) { outs[i] = Object.assign({}, o, { forIn: D + '#' + j }); return; }
+      if (ins[+k] && (ins[+k].client || '').trim() === (o.client || '').trim()) return;   // приход правили, номер тот же
+      outs[i] = Object.assign({}, o, { forIn: null });
+      conflicts.push('days.' + d + '.out: привязка ' + o.forIn + ' потеряна');
+    });
+  });
+
+  // С какого дня пересчитать авто-остатки: первый день, где приходы, выдачи
+  // или ручной остаток у сторон разные
+  const dk = x => x ? canon([x.in, x.out, !!x.carryoverManual, x.carryoverManual ? x.carryover : null]) : '';
+  const from = [...new Set([...Object.keys(local.days || {}), ...Object.keys(remote.days || {})])].sort()
+    .find(d => dk((local.days || {})[d]) !== dk((remote.days || {})[d])) || null;
+  return { state: res, conflicts, from };
+}
+
+/* Синхронизация (v277). Один заход за раз: таймер, возврат на вкладку
+   и отправка после правки не наступают друг другу на ноги. */
+let _syncRun = null, _syncAgain = false;
+function smartSync(opts) {
+  if (_syncRun) { _syncAgain = true; return _syncRun; }
+  _syncRun = smartSyncOnce(opts || {}).finally(() => {
+    _syncRun = null;
+    if (_syncAgain) { _syncAgain = false; smartSync({ silent: true }).catch(() => {}); }
+  });
+  return _syncRun;
+}
+
+async function smartSyncOnce(opts) {
+  const silent = !!opts.silent;
   if (!(await ensureToken(!silent))) {
     if (!silent) showToast('Сначала подключись к Google Drive', true);
     return { status: 'no-auth' };
   }
   if (typeof gapi === 'undefined' || !gapi.client || !gapiInited) {
-    // Google API ещё загружается (например, сразу после открытия страницы)
     initGoogleApis();
     if (!silent) showToast('Подключаюсь к Google… попробуй ещё раз через пару секунд', true);
     return { status: 'not-ready' };
@@ -13043,85 +13193,61 @@ async function smartSync(opts) {
   try {
     if (!silent) showToast('🔄 Синхронизация...');
     const { folderId, fileId } = await ensureFolderAndFile();
+    if (!fileId) { await uploadState(null, folderId); return { status: 'uploaded-fresh' }; }
 
-    // Если файла нет на Диске — просто заливаем туда наши данные
-    if (!fileId) {
-      await saveToGDrive();
-      return { status: 'uploaded-fresh' };
-    }
+    const meta = await gapi.client.drive.files.get({ fileId, fields: 'id, modifiedTime' });
+    const cloudVer = meta.result.modifiedTime;
+    const cloudChanged = cloudVer !== localStorage.getItem(GDRIVE_CLOUD_VER_KEY);
 
-    // Получаем метаданные облачного файла (modifiedTime)
-    const meta = await gapi.client.drive.files.get({
-      fileId,
-      fields: 'id, modifiedTime'
-    });
-    const cloudModifiedAt = new Date(meta.result.modifiedTime).getTime();
-
-    // Локальная метка времени
-    const localModifiedAt = state._modifiedAt || 0;
-
-    // Метка последней успешной синхронизации с этим устройством
-    const lastSyncAt = parseInt(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || '0', 10);
-
-    // Логика принятия решения:
-    // 1. Если облако новее локального → СКАЧАТЬ
-    // 2. Если локальное новее облака → ЗАГРУЗИТЬ
-    // 3. Если равны → ничего не делать
-    // Чтобы избежать ложных срабатываний, добавляем буфер в 2 секунды
-
-    const BUFFER_MS = 2000;
-    const localIsNewer = localModifiedAt > cloudModifiedAt + BUFFER_MS;
-    const cloudIsNewer = cloudModifiedAt > localModifiedAt + BUFFER_MS;
-
-    if (cloudIsNewer) {
-      // Облако новее. Если есть локальные изменения после последнего sync —
-      // это конфликт. Спросим пользователя.
-      const hasLocalChangesAfterSync = localModifiedAt > lastSyncAt + BUFFER_MS;
-      if (hasLocalChangesAfterSync && !opts.force) {
-        // КОНФЛИКТ
-        const choice = confirm(
-          '⚠️ Конфликт данных!\n\n' +
-          'На Google Drive есть более новые данные, но в этом браузере тоже есть изменения.\n\n' +
-          'Локально изменено: ' + new Date(localModifiedAt).toLocaleString('ru-RU') + '\n' +
-          'На Диске изменено: ' + new Date(cloudModifiedAt).toLocaleString('ru-RU') + '\n\n' +
-          'OK — взять данные с Диска (локальные изменения потеряются)\n' +
-          'Отмена — оставить локальные (потом можно нажать "Сохранить" чтобы записать на Диск)'
-        );
-        if (!choice) {
-          if (!silent) showToast('Синхронизация отменена');
-          return { status: 'conflict-kept-local' };
-        }
-      }
-      // Скачиваем с диска
-      const res = await gapi.client.drive.files.get({ fileId, alt: 'media' });
-      const data = typeof res.body === 'string' ? JSON.parse(res.body) : res.result;
-      if (data.clients && data.days) {
-        backupSlot('pre-sync'); // копия текущих данных перед заменой облачными
-        state = migrateState(data);
-        // ВАЖНО: сохраняем без обновления _modifiedAt — иначе метка собьётся
-        const modAt = state._modifiedAt;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        state._modifiedAt = modAt;
+    if (!cloudChanged) {
+      if (!syncDirty()) {
         localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
         refreshSyncUI();
-        render();
-        if (!silent) showToast('⬇ Загружено с Drive (свежее)');
-        return { status: 'downloaded' };
-      } else {
-        if (!silent) showToast('Файл на Диске повреждён', true);
-        return { status: 'corrupt' };
+        if (!silent) showToast('✓ Уже синхронизировано');
+        return { status: 'in-sync' };
       }
-    } else if (localIsNewer) {
-      // Локальное новее — заливаем на Диск
-      await saveToGDrive();
+      await uploadState(fileId, folderId);   // на Диске никто не менял — отправляем своё
+      if (!silent) showToast('⬆ Отправлено на Диск');
       return { status: 'uploaded' };
-    } else {
-      // Одинаковы — ничего не делаем
-      localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
-      refreshSyncUI();
-      if (!silent) showToast('✓ Уже синхронизировано');
-      return { status: 'in-sync' };
     }
+
+    // На Диске новая версия — забираем
+    const res = await gapi.client.drive.files.get({ fileId, alt: 'media' });
+    const raw = typeof res.body === 'string' ? JSON.parse(res.body) : res.result;
+    if (!(raw && raw.clients && raw.days)) {
+      if (!silent) showToast('Файл на Диске повреждён', true);
+      return { status: 'corrupt' };
+    }
+    const remote = migrateState(raw);
+
+    // Отсюда до записи — без await: пока совмещаем, правка не вклинится
+    if (!syncDirty()) {
+      applyRemote(remote, cloudVer);
+      if (!silent) showToast('⬇ Загружено с Диска');
+      return { status: 'downloaded' };
+    }
+    let base = null;
+    try { base = JSON.parse(localStorage.getItem(GDRIVE_BASE_KEY) || 'null'); } catch (e) {}
+    const m = mergeStates(base, state, remote);
+    backupSlot('pre-sync');
+    if (m.conflicts.length) idbSet(BACKUP_PREFIX + 'sync-other', JSON.stringify(remote)).catch(() => {});
+    state = m.state;
+    if (m.from) recalcCarryoversAfter(prevDayWithData(m.from) || m.from);
+    state._modifiedAt = Date.now();
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { saveBroken(e); }
+    // Общий предок теперь — то, что на Диске; совмещённое ещё не отправлено
+    localStorage.setItem(GDRIVE_CLOUD_VER_KEY, cloudVer);
+    localStorage.setItem(GDRIVE_BASE_KEY, JSON.stringify(remote));
+    localStorage.setItem(GDRIVE_DIRTY_KEY, '1');
+    syncGen++;
+    render();
+    await uploadState(fileId, folderId);
+    if (m.conflicts.length) {
+      console.warn('Синхронизация: спорные места —', m.conflicts);
+      showToast('🔀 Совмещено с другим устройством. Спорных мест: ' + m.conflicts.length
+        + ' — взята более поздняя правка. Версия с другого устройства — в «Резервных копиях».', true);
+    } else if (!silent) showToast('🔀 Совмещено с другим устройством');
+    return { status: 'merged', conflicts: m.conflicts };
   } catch (e) {
     console.error('Smart sync error:', e);
     if (!silent) showToast('Ошибка синхронизации: ' + (e.message || 'см. консоль'), true);
@@ -13175,10 +13301,17 @@ function markSyncStale() {
     : 'Google Drive и резервные копии';
 }
 
+/* Настройка автосинхронизации. v277: если её не трогали — включена, раз
+   в 5 минут: открытое на компьютере должно видеть правки с телефона. */
+function autoSyncSetting() {
+  try { return JSON.parse(localStorage.getItem(GDRIVE_AUTOSYNC_KEY) || 'null') || { enabled: true, interval: 5 }; }
+  catch (e) { return { enabled: true, interval: 5 }; }
+}
+
 // При запуске — если включён автосинк, попробуй запустить
 function bootstrapAutoSync() {
-  const auto = JSON.parse(localStorage.getItem(GDRIVE_AUTOSYNC_KEY) || 'null');
-  if (auto && auto.enabled && getClientId()) {
+  const auto = autoSyncSetting();
+  if (auto.enabled && getClientId()) {
     startAutoSync(auto.interval);
   }
 }
@@ -13204,6 +13337,12 @@ if (location.protocol.indexOf('http') === 0 && 'serviceWorker' in navigator) {
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────
+/* Переход на v277: пометки «не отправлено» ещё нет — выводим её так, как
+   считала старая версия: правили позже последней синхронизации. */
+if (localStorage.getItem(GDRIVE_DIRTY_KEY) === null) {
+  const last = parseInt(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || '0', 10);
+  try { localStorage.setItem(GDRIVE_DIRTY_KEY, (state._modifiedAt || 0) > last + 2000 ? '1' : '0'); } catch (e) {}
+}
 restoreSavedToken();
 initLoginScreen();
 bootstrapAutoSync();
@@ -13213,23 +13352,29 @@ if (accessToken && getClientId()) { initGoogleApis(); }
 
 // При возвращении вкладки в фокус — проверяем, нет ли свежих данных
 let lastVisibilitySync = 0;
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    markSyncStale();          // вернулся на вкладку — увидел, свежа ли копия
-    // Не чаще раз в 30 секунд
-    const now = Date.now();
-    if (now - lastVisibilitySync < 30000) return;
-    lastVisibilitySync = now;
-    if (getClientId()) {
-      // Если приложение разблокировано
-      const loginVisible = !document.getElementById('loginOverlay').classList.contains('hidden');
-      if (!loginVisible) {
-        // Токен мог протухнуть, пока вкладка была свёрнута — smartSync продлит молча
-        smartSync({ silent: true }).catch(e => console.warn('Visibility sync failed:', e));
-      }
+function syncOnReturn() {
+  markSyncStale();          // вернулся на вкладку — увидел, свежа ли копия
+  // Не чаще раз в 30 секунд
+  const now = Date.now();
+  if (now - lastVisibilitySync < 30000) return;
+  lastVisibilitySync = now;
+  if (getClientId()) {
+    // Если приложение разблокировано
+    const loginVisible = !document.getElementById('loginOverlay').classList.contains('hidden');
+    if (!loginVisible) {
+      // Токен мог протухнуть, пока вкладка была свёрнута — smartSync продлит молча
+      smartSync({ silent: true }).catch(e => console.warn('Visibility sync failed:', e));
     }
   }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') syncOnReturn();
+  // v277: уходим с вкладки (телефон заблокировали, переключились) — отправить
+  // то, что ещё не ушло, не дожидаясь трёх секунд
+  else if (syncDirty() && tokenAlive()) { clearTimeout(syncTimer); smartSync({ silent: true }).catch(() => {}); }
 });
+// На компьютере переход между окнами вкладку не прячет — ловим фокус окна (v277)
+window.addEventListener('focus', syncOnReturn);
 
 // render() будет вызван после успешного входа
 </script>
