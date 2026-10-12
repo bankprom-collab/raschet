@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v279</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v280</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3840,12 +3840,20 @@ function curatorSettlement(dayStr) {
     a.closedBy.push({ date: pay.date, amount: take });
     return take;
   };
+  /* Черта делит счёт на прошлое и текучку (v280). Владелец 12.10.2026:
+     «не надо подтягивать старые расчёты, они должны остаться в прошлом;
+     считай только текучку». До v280 хвост старой выплаты уходил «вперёд»
+     через черту и садился на новые сделки (16 500 от 26 авг — на сделку
+     8 окт). Теперь выплата до черты гасит только сделки до черты, после —
+     только после. */
+  const сторона = d => !reset || d > reset;
   pays.forEach(pay => {
     pay.left = pay.amount;
     for (const a of order) {
       if (pay.left <= 0.0001) break;
       if (a.group !== pay.group) continue;      // своя таблица — своя выплата
       if (a.payDate > pay.date) continue;       // выдано позже выплаты — не её
+      if (сторона(a.payDate) !== сторона(pay.date)) continue;
       pay.left -= give(a, pay, pay.left);
     }
   });
@@ -3853,6 +3861,7 @@ function curatorSettlement(dayStr) {
     for (const a of order) {
       if (pay.left <= 0.0001) break;
       if (a.group !== pay.group) continue;
+      if (сторона(a.payDate) !== сторона(pay.date)) continue;   // через черту — нельзя
       pay.left -= give(a, pay, pay.left);
     }
   });
@@ -4382,6 +4391,20 @@ function правкаКуратор12Окт() {
   saveState();
 }
 
+/* Разовая черта куратора по 8 окт (v280). Владелец 12.10.2026: «старые
+   расчёты куда-нибудь убери, пусть там и останутся; считай только текучку».
+   По 8 окт включительно всё выданное оплачено куратору до рубля (остальные —
+   529 500 на 529 500, Рынок — 124 200 на 124 200), после — только новые
+   сделки. Ставим, только если черты нет и она ничего не списывает без оплаты;
+   иначе решает владелец кнопкой в окне. Убрать — «Убрать черту». */
+function чертаКуратора8Окт() {
+  if (!state || state._curReset8oct || state.curatorResetAt) return;
+  state._curReset8oct = true;
+  state.curatorResetAt = '2026-10-08';
+  if (curatorSettlement(ledgerDay()).byReset.length) { delete state.curatorResetAt; return; }
+  saveState();
+}
+
 /* Переходящие остатки хранятся посчитанными. После v264 приход с «ровно
    полсотни» после 1-го % даёт на 50 ₽ меньше, и сохранённые авто-остатки
    следующих дней разошлись бы с пересчётом. Сдвигаем их один раз ровно
@@ -4412,6 +4435,7 @@ function render() {
   try { разоваяПравкаДанных(); } catch (e) { console.warn('Разовая правка:', e); }
   try { правкаОстатка1Окт(); } catch (e) { console.warn('Правка остатка 1 окт:', e); }
   try { правкаКуратор12Окт(); } catch (e) { console.warn('Правка выплаты куратору 12 окт:', e); }
+  try { чертаКуратора8Окт(); } catch (e) { console.warn('Черта куратора 8 окт:', e); }
   renderDateLabel();
   const day = getDay(currentDate);
   // Carryover
@@ -7805,9 +7829,14 @@ function openCuratorMineModal() {
   /* Блок «Отдано куратору» — ВСЕ выплаты с даты начала счёта (v206). Раньше
      collectCuratorPayments показывал только текущую неделю: при «Итого отдано
      16 200» стояло «Пока ничего не отдано». */
-  const paidRows = SET.pays;   // v220: у каждой выплаты своя группа
-  const paidTotal = SET.pays.reduce((x, p) => x + p.amount, 0);
-  const paidList = paidRows.length
+  /* v280: при черте здесь только выплаты текучки (после черты). Старые — в
+     прошлом: владелец «старые расчёты убери, пусть там и останутся». В архиве
+     ниже они видны по-прежнему — «Отдано <дата>» с закрытыми сделками. */
+  const paidRows = SET.reset ? SET.pays.filter(p => p.date > SET.reset) : SET.pays;   // v220: у каждой выплаты своя группа
+  const paidTotal = paidRows.reduce((x, p) => x + p.amount, 0);
+  const paidOld = SET.reset ? SET.pays.length - paidRows.length : 0;
+  const paidList = (paidOld ? `<div class="cm-pay-empty">Выплаты по ${formatDateShort(SET.reset)} (${paidOld} шт.) — в прошлом, в архиве ниже.</div>` : '')
+    + (paidRows.length
     ? paidRows.map(p => `
         <div class="cm-pay-row">
           <span class="cm-pay-date">${formatDateShort(p.date)}</span>
@@ -7816,7 +7845,7 @@ function openCuratorMineModal() {
           <button class="cm-pay-del no-print" onclick="removeCuratorPayment('${p.date}','${p.group}')" title="Убрать отметку об отдаче за этот день">✕</button>
         </div>
       `).join('')
-    : `<div class="cm-pay-empty">Пока ничего не отдано.</div>`;
+    : `<div class="cm-pay-empty">Пока ничего не отдано.</div>`);
 
   // Архив: что закрыто, сгруппировано по дате выдачи — «что я отдал такого-то».
   const archByPay = {};
@@ -7902,10 +7931,11 @@ function openCuratorMineModal() {
   /* Черта сброса убирает сделки из счёта — без объяснения это выглядит как
      пропажа. Показываем прямо под шапкой: сколько списано и чем вернуть. */
   const resetSum = (SET.byReset || []).reduce((x, a) => x + (a.resetAmount || a.sum), 0);
-  const resetNote = (SET.reset && resetSum > 0) ? `
+  const resetNote = SET.reset ? `
     <div style="margin:10px 0 4px;padding:10px 12px;border-radius:10px;background:rgba(255,183,77,.10);border:1px solid rgba(255,183,77,.35);font-size:12px;line-height:1.5">
-      <b style="color:#ffb74d">Черта от ${formatDateShort(SET.reset)}</b> — сделки по эту дату списаны и в счёт не входят:
-      <b style="font-family:var(--font-num);color:#ffb74d">${fmt(resetSum)}</b> (${SET.byReset.length} шт., они в архиве ниже).
+      <b style="color:#ffb74d">Черта от ${formatDateShort(SET.reset)}</b> — всё, что выдано по эту дату, и выплаты за него остались в прошлом:
+      в счёт не входят, лежат в архиве ниже. Считается только текучка.${resetSum > 0 ? `
+      Списано без оплаты: <b style="font-family:var(--font-num);color:#ffb74d">${fmt(resetSum)}</b> (${SET.byReset.length} шт.).` : ''}
       <button class="btn btn-ghost" onclick="askCuratorResetUndo()"
         style="border-color:#ffb74d;color:#ffb74d;font-size:11.5px;padding:3px 10px;margin-left:6px">Убрать черту</button>
     </div>` : '';
@@ -7915,7 +7945,7 @@ function openCuratorMineModal() {
       <div class="cm-period">Счёт с ${formatDateShort(handStart())} · по факту выдачи, без деления на недели<button
           class="btn btn-ghost no-print" onclick="askHandStart()"
           style="font-size:11.5px;padding:7px 14px;margin-left:8px;border-color:#ffb74d;color:#ffb74d">изменить</button></div>
-      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только с выданной на руки части прихода — невыданные суммы не участвуют.</div>
+      <div class="cm-note">Сумма куратору = исходная сумма прихода × %кур ÷ 100, округлено вниз до сотен. Считается только по приходам, выданным на руки целиком, — выданные частично и невыданные не участвуют.</div>
     </div>
     ${resetNote}
     ${table}
