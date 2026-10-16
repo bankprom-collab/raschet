@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v281</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v282</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -13192,6 +13192,10 @@ function mergeStates(base, local, remote) {
   }
 
   function m3(b, l, r, path) {
+    /* Список пар только объединяется (v282). Владелец 16.10.2026: «все пары,
+       которые были, должны остаться, никуда не должны деться». Пара, убранная
+       на одном устройстве, при совмещении возвращается — потерять пару хуже. */
+    if (path === '.clients' && Array.isArray(l) && Array.isArray(r)) return l.concat(r.filter(x => !l.includes(x)));
     if (eq(l, r)) return l;
     if (base && eq(b, l)) return r;
     if (base && eq(b, r)) return l;
@@ -13299,11 +13303,21 @@ async function smartSyncOnce(opts) {
       if (!silent) showToast('Файл на Диске повреждён', true);
       return { status: 'corrupt' };
     }
+    const чиселПарВФайле = Array.isArray(raw.clients) ? raw.clients.length : 0;   // migrateState меняет raw на месте
     const remote = migrateState(raw);
+    /* v282: загрузка дописала в список пары, которых в файле не было, —
+       значит на Диске список урезан (старая версия программы перезаписала его;
+       16.10.2026 пропала группа «Мухтар»). Отправим исправленный. */
+    const healed = remote.clients.length > чиселПарВФайле;
 
     // Отсюда до записи — без await: пока совмещаем, правка не вклинится
     if (!syncDirty()) {
       applyRemote(remote, cloudVer);
+      if (healed) {                          // отправляем список пар, исправленный при загрузке
+        try { localStorage.setItem(GDRIVE_DIRTY_KEY, '1'); } catch (e) {}
+        syncGen++;
+        await uploadState(fileId, folderId);
+      }
       if (!silent) showToast('⬇ Загружено с Диска');
       return { status: 'downloaded' };
     }
