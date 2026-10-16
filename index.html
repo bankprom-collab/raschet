@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v285</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v286</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1839,25 +1839,9 @@
       <div class="stat-label">На руки · осталось получить</div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
         <div class="stat-value" id="s-hand">—</div>
-        <button class="btn btn-ghost" id="s-hand-toggle" onclick="toggleHandMore()" aria-expanded="false" style="background:var(--border);border:none;color:var(--muted-bright);font-size:12px;padding:5px 12px;border-radius:999px;line-height:1.3" title="Раскрыть: сделки, внесение получения, обнуление">Открыть</button>
+        <button class="btn btn-ghost" onclick="openHandModal()" style="background:var(--border);border:none;color:var(--muted-bright);font-size:12px;padding:5px 12px;border-radius:999px;line-height:1.3" title="Открыть расчёты «на руки»: сделки, получения, обнуление">Открыть</button>
       </div>
       <div id="s-hand-line" style="font-size:10px;color:var(--muted);margin-top:3px"></div>
-      <!-- v285: всё остальное прячется, плитка — цифра и кнопка -->
-      <div id="s-hand-more" style="display:none">
-      <div id="s-hand-deals" style="margin-top:8px;max-height:42vh;overflow-y:auto"></div>
-      <!-- v283: получение вносится прямо здесь — как отдача куратору в окне -->
-      <div class="no-print" style="display:flex;gap:6px;margin-top:10px">
-        <input type="text" id="hq-amt" inputmode="decimal" placeholder="Сумма ₽" autocomplete="off" aria-label="Сколько получено на руки"
-               oninput="numericInputFilter(event)" onkeydown="if(event.key==='Enter'){event.preventDefault();addHandQuick();}"
-               style="flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:8px 10px;font-size:14px;font-family:var(--font-num)">
-        <button class="btn btn-primary" onclick="addHandQuick()" aria-label="Записать получение"
-                style="flex:none;background:var(--accent);border-color:var(--accent);color:#000;border-radius:10px;padding:0 14px;font-size:18px;font-weight:700">+</button>
-      </div>
-      <button class="btn btn-ghost no-print" onclick="askHandReset()" title="Обнулить остаток «на руки» на сегодня"
-              style="margin-top:8px;font-size:11px;padding:4px 10px;border-radius:999px;color:var(--muted)">Обнулить остаток</button>
-      <button class="btn btn-ghost no-print" onclick="openHandModal()" title="Полная таблица, архив, получения"
-              style="margin-top:8px;margin-left:6px;font-size:11px;padding:4px 10px;border-radius:999px;color:var(--muted)">Вся таблица</button>
-      </div>
     </div>
   </div>
 
@@ -4037,31 +4021,6 @@ function addHandPayment() {
   amtEl.value = '';
   openHandModal();
   if (typeof showToast === 'function') showToast('Записано: получено ' + fmt(amount) + ' (' + formatDateShort(dateStr) + ')');
-}
-
-/* Получение с плитки «На руки» (v283). Владелец 17.10.2026: «в этом месте тоже
-   добавь возможность вносить отдачу, чтобы она фиксировалась и обнулялась».
-   Пишет в тот же `handPaid` дня, что и форма в окне, — расчёт общий. */
-function toggleHandMore() {
-  const box = document.getElementById('s-hand-more'), btn = document.getElementById('s-hand-toggle');
-  if (!box || !btn) return;
-  const open = box.style.display === 'none';
-  box.style.display = open ? 'block' : 'none';
-  btn.textContent = open ? 'Свернуть' : 'Открыть';
-  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-function addHandQuick() {
-  const el = document.getElementById('hq-amt');
-  if (!el) return;
-  const amount = parseFloat((el.value || '').trim().replace(/\s/g, '').replace(',', '.'));
-  if (isNaN(amount) || amount <= 0) { el.focus(); showToast('Введите сумму больше нуля', true); return; }
-  const day = getDay(currentDate);
-  day.handPaid = (day.handPaid || 0) + amount;
-  el.value = '';
-  saveState();
-  render();
-  showToast('Записано: получено ' + fmt(amount) + ' (' + formatDateShort(currentDate) + ')');
 }
 
 function removeHandPayment(dateStr) {
@@ -7401,21 +7360,6 @@ function curatorMineTotals(dayStr) {
 /* Плитка «На руки» на Доске — рядом с «Куратор ко мне» (v119).
    Считает то же, что строка «= НА РУКИ» под приходами и плитка на дашборде:
    итог сделок минус процент куратора, по выданным. Источник один — handTotals. */
-/* Что причитается «на руки» по каждой сделке (v284). Владелец 17.10.2026: «показывай,
-   сколько мне за каждую сделку положено». Строки — те же открытые сделки, что
-   в таблице окна «На руки» (`handSettlement().open`), по одной на сделку: дата
-   прихода, пара, сколько ещё получить (при частичном получении — «из N»). */
-function handDealsHtml(лимит) {
-  const open = handSettlement(ledgerDay()).open;
-  if (!open.length) return '';
-  const shown = open.slice(0, лимит);
-  return shown.map(a => `<div style="padding:4px 0;border-top:1px dashed rgba(255,255,255,.08)">
-      <div style="color:var(--muted-bright);font-size:11px;line-height:1.3">${formatDateShort(a.date)} · ${escapeHtml(a.pair)}</div>
-      <div style="font-family:var(--font-num);color:var(--accent);font-weight:700;font-size:14px">${fmt(a.rest)}${a.paid > 0 ? `<span style="color:var(--muted);font-weight:400;font-size:10.5px"> из ${fmt(a.sum)}</span>` : ''}</div>
-    </div>`).join('')
-    + (open.length > shown.length ? `<div style="color:var(--muted);font-size:10.5px;line-height:1.5">и ещё ${open.length - shown.length} — в «Открыть»</div>` : '');
-}
-
 function renderHandTile() {
   const body = document.getElementById('tileHandBody');
   if (!body) return;
@@ -8528,8 +8472,6 @@ function renderSummary(day) {
   const handTileEl = document.getElementById('s-hand');
   const остатокНаРуки = handRemain(ledgerDay());
   if (handTileEl) handTileEl.textContent = fmt(остатокНаРуки);
-  const handDealsEl = document.getElementById('s-hand-deals');
-  if (handDealsEl) handDealsEl.innerHTML = handDealsHtml(200);
   const handLineEl = document.getElementById('s-hand-line');
   if (handLineEl) {
     handLineEl.textContent = hw.hand
