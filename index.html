@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v291</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v292</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -12727,6 +12727,7 @@ function backupKeyLabel(key) {
   if (suffix === 'pre-fix-samv15') return 'До удаления выдачи 15 сен (Мухтар-Самв)';
   if (suffix === 'pre-fix-co1oct') return 'До правки остатка 1 окт';
   if (suffix === 'pre-fix-cur12oct') return 'До удаления выплаты куратору 12 окт (16 600)';
+  if (suffix === 'pre-wipe-guard') return 'Данные до остановленной синхронизации (на Диске стало намного меньше)';
   if (suffix === 'sync-other') return 'Версия с другого устройства (спорные места при совмещении)';
   if (/^\d{4}-\d{2}-\d{2}$/.test(suffix)) {
     return 'Копия за ' + (typeof formatDateShort === 'function' ? formatDateShort(suffix) : suffix);
@@ -13322,6 +13323,20 @@ function syncSettled(ver, json, gen) {
   refreshSyncUI();
 }
 
+/* Защита от потери данных при синхронизации (v292). 17.10.2026 у владельца на Диске
+   оказался пустой файл (768 байт, один пустой день вместо 102), и устройства его
+   скачали. Теперь, если дней стало намного меньше (меньше половины, а было ≥ 10),
+   программа ничего не заменяет и не отправляет: копия кладётся в «Резервные копии»
+   (`pre-wipe-guard`), владельцу — предупреждение. */
+const днейВ = st => Object.keys((st && st.days) || {}).length;
+let _lastWipeWarn = 0;
+function предупредитьОПотере(текст) {
+  const now = Date.now();
+  if (now - _lastWipeWarn < 60000) return;            // не чаще раза в минуту
+  _lastWipeWarn = now;
+  showToast(текст, true);
+}
+
 // Отправить текущие данные на Диск (без проверок — их делает вызывающий)
 async function uploadState(fileId, folderId) {
   const gen = syncGen, body = JSON.stringify(state, null, 2);
@@ -13534,6 +13549,14 @@ async function smartSyncOnce(opts) {
         if (!silent) showToast('✓ Уже синхронизировано');
         return { status: 'in-sync' };
       }
+      /* v292: данных стало намного меньше, чем при последней синхронизации, —
+         не отправляем: это затёрло бы хорошую копию на Диске. */
+      let nb = 0; try { nb = днейВ(JSON.parse(localStorage.getItem(GDRIVE_BASE_KEY) || 'null')); } catch (e) {}
+      if (nb >= 10 && днейВ(state) < nb * 0.5) {
+        backupSlot('pre-wipe-guard');
+        предупредитьОПотере('⚠️ В программе дней стало ' + днейВ(state) + ' вместо ' + nb + ' — отправка на Диск остановлена. Загляните в «Синхр. → Резервные копии».');
+        return { status: 'blocked-upload' };
+      }
       await uploadState(fileId, folderId);   // на Диске никто не менял — отправляем своё
       if (!silent) showToast('⬆ Отправлено на Диск');
       return { status: 'uploaded' };
@@ -13553,6 +13576,22 @@ async function smartSyncOnce(opts) {
        16.10.2026 пропала группа «Мухтар»). Отправим исправленный. */
     const healed = remote.clients.length > чиселПарВФайле;
 
+    /* v292: на Диске данных намного меньше, чем здесь (было 102 дня, стал 1) —
+       похоже, файл перезаписали. Ничего не заменяем. Нажали вручную — спросим,
+       не вернуть ли Диску наши данные. */
+    const nL = днейВ(state), nR = днейВ(remote);
+    if (nL >= 10 && nR < nL * 0.5) {
+      backupSlot('pre-wipe-guard');
+      if (!silent && confirm('⚠️ На Google Диске данных намного меньше, чем здесь: ' + nR + ' дн. против ' + nL + '.\n\n'
+          + 'Похоже, файл на Диске перезаписали. Ваши данные здесь целы.\n\n'
+          + 'ОК — вернуть Диску ваши данные (отправить с этого устройства).\nОтмена — ничего не менять.')) {
+        await uploadState(fileId, folderId);
+        return { status: 'restored-remote' };
+      }
+      предупредитьОПотере('⚠️ На Диске данных намного меньше (' + nR + ' дн. против ' + nL + ') — ничего не заменено. Нажмите «Синхр.» и вернём Диску ваши данные.');
+      return { status: 'suspicious-remote' };
+    }
+
     // Отсюда до записи — без await: пока совмещаем, правка не вклинится
     if (!syncDirty()) {
       applyRemote(remote, cloudVer);
@@ -13567,6 +13606,13 @@ async function smartSyncOnce(opts) {
     let base = null;
     try { base = JSON.parse(localStorage.getItem(GDRIVE_BASE_KEY) || 'null'); } catch (e) {}
     const m = mergeStates(base, state, remote);
+    /* v292: совмещение не должно «удалить» почти все дни — ни у нас, ни на Диске. */
+    const опора = Math.max(днейВ(base), днейВ(remote));
+    if (опора >= 10 && днейВ(m.state) < опора * 0.5) {
+      backupSlot('pre-wipe-guard');
+      предупредитьОПотере('⚠️ После совмещения дней стало бы ' + днейВ(m.state) + ' вместо ' + опора + ' — синхронизация остановлена, данные не тронуты. «Синхр. → Резервные копии».');
+      return { status: 'blocked-upload' };
+    }
     backupSlot('pre-sync');
     if (m.conflicts.length) idbSet(BACKUP_PREFIX + 'sync-other', JSON.stringify(remote)).catch(() => {});
     state = m.state;
