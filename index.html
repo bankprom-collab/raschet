@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v280</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v281</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3847,8 +3847,35 @@ function curatorSettlement(dayStr) {
      8 окт). Теперь выплата до черты гасит только сделки до черты, после —
      только после. */
   const сторона = d => !reset || d > reset;
+  pays.forEach(pay => { pay.left = pay.amount; });
+  /* Выплата ровно на сумму сделки закрывает именно её (v281). Владелец
+     16.10.2026: «ввёл 11 600 по Мухтар-Ленину — оно должно уйти из долга,
+     остаётся только неотданное». Без этого 11 600 гасили самую старую сделку
+     на 13 800 (частично), а нужная оставалась в долге. Первый проход — для всех
+     выплат сразу, иначе очередь одной выплаты съест сделку другой. */
+  /* Две выплаты одного дня и одной таблицы хранятся одной суммой (11 600 +
+     11 300 = 22 900), поэтому ищем не одну сделку, а набор до четырёх сделок,
+     дающий ровно эту сумму; первым — из самых старых. */
+  const подбор = (list, цель) => {
+    const t = Math.round(цель * 100);
+    const dfs = (from, left, k, got) => {
+      if (left === 0) return got;
+      if (k === 0) return null;
+      for (let i = from; i < list.length; i++) {
+        const v = Math.round(list[i].sum * 100);
+        if (v <= left) { const r = dfs(i + 1, left - v, k - 1, got.concat(list[i])); if (r) return r; }
+      }
+      return null;
+    };
+    return t > 0 ? dfs(0, t, 4, []) : null;
+  };
   pays.forEach(pay => {
-    pay.left = pay.amount;
+    const cand = order.filter(x => x.group === pay.group && x.payDate <= pay.date
+      && сторона(x.payDate) === сторона(pay.date) && x.paid === 0).slice(0, 25);
+    const набор = подбор(cand, pay.left);
+    if (набор) набор.forEach(a => { pay.left -= give(a, pay, a.sum); });
+  });
+  pays.forEach(pay => {
     for (const a of order) {
       if (pay.left <= 0.0001) break;
       if (a.group !== pay.group) continue;      // своя таблица — своя выплата
@@ -7835,13 +7862,20 @@ function openCuratorMineModal() {
   const paidRows = SET.reset ? SET.pays.filter(p => p.date > SET.reset) : SET.pays;   // v220: у каждой выплаты своя группа
   const paidTotal = paidRows.reduce((x, p) => x + p.amount, 0);
   const paidOld = SET.reset ? SET.pays.length - paidRows.length : 0;
+  const closedByPay = {};   // «дата|группа» → какие сделки закрыла выплата (v281)
+  SET.accr.forEach(a => a.closedBy.forEach(c => {
+    (closedByPay[c.date + '|' + a.group] = closedByPay[c.date + '|' + a.group] || []).push({ a, part: c.amount });
+  }));
   const paidList = (paidOld ? `<div class="cm-pay-empty">Выплаты по ${formatDateShort(SET.reset)} (${paidOld} шт.) — в прошлом, в архиве ниже.</div>` : '')
     + (paidRows.length
     ? paidRows.map(p => `
         <div class="cm-pay-row">
           <span class="cm-pay-date">${formatDateShort(p.date)}</span>
           <span class="cm-pay-amt">${fmt(p.amount)}<span style="font-family:var(--font-ui);font-size:10px;
-            color:var(--muted);font-weight:400;margin-left:6px">${p.group === 'rynok' ? 'Вейс(рук)-Рынок' : 'остальные пары'}</span></span>
+            color:var(--muted);font-weight:400;margin-left:6px">${p.group === 'rynok' ? 'Вейс(рук)-Рынок' : 'остальные пары'}</span>
+            ${(closedByPay[p.date + '|' + p.group] || []).map(c => `<div style="font-family:var(--font-ui);font-size:11px;
+              color:var(--muted);font-weight:400;margin-top:2px">${formatDateShort(c.a.date)} · ${escapeHtml(c.a.pair)} · ${fmt(c.a.amount)} → ${fmt(c.part)}</div>`).join('')}
+            ${p.left > 0.5 ? `<div style="font-family:var(--font-ui);font-size:11px;color:#ffb74d;font-weight:400;margin-top:2px">сверх сделок осталось ${fmt(p.left)}</div>` : ''}</span>
           <button class="cm-pay-del no-print" onclick="removeCuratorPayment('${p.date}','${p.group}')" title="Убрать отметку об отдаче за этот день">✕</button>
         </div>
       `).join('')
