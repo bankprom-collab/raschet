@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v293</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v294</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3099,6 +3099,7 @@ function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     saveOk();
     syncMarkDirty();
+    зеркалоПланировать();
   } catch (e) {
     // Хранилище переполнено или закрыто браузером. Молчать здесь нельзя:
     // на экране записи есть, а в браузере их нет — закрыл вкладку и потерял
@@ -12719,11 +12720,62 @@ async function autoBackup(rawSnapshot) {
 }
 
 function backupSlot(name) {
-  // Служебный слот (перезаписывается): pre-sync / pre-import / pre-restore
+  // Служебный слот (перезаписывается): pre-sync / pre-import / pre-restore.
+  // v294: слот с большим числом дней не затирается состоянием, где дней намного
+  // меньше: иначе вторая синхронизация стирала копию, спасавшую данные.
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) idbSet(BACKUP_PREFIX + name, raw).catch(e => console.warn('backupSlot:', e));
+    if (!raw) return;
+    const key = BACKUP_PREFIX + name;
+    (async () => {
+      let ключ = key;
+      try {
+        const было = await idbGet(key), новоеДней = днейВ(JSON.parse(raw));
+        if (было && новоеДней < днейВ(JSON.parse(was2(было))) * 0.5) ключ = key + '-прежняя';   // большая копия остаётся, маленькая — рядом
+      } catch (e) {}
+      await idbSet(ключ, raw);
+    })().catch(e => console.warn('backupSlot:', e));
   } catch (e) { console.warn('backupSlot:', e); }
+}
+const was2 = x => (typeof x === 'string' ? x : JSON.stringify(x));
+
+/* Зеркало и «самая полная копия» в IndexedDB (v294). localStorage — единственное
+   место данных на устройстве: если его очистили или повредили, данные пропадали.
+   Теперь после каждого сохранения (через 2 с) то же состояние кладётся в
+   IndexedDB — другое хранилище браузера, — и отдельно хранится самая полная копия
+   (по числу дней): её не вытесняет ничего меньшее. При запуске, если данных почти
+   нет, а копия большая — восстанавливаем из неё сами. */
+let _зеркалоТаймер = null;
+function зеркалоПланировать() {
+  clearTimeout(_зеркалоТаймер);
+  _зеркалоТаймер = setTimeout(async () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      await idbSet('ledger_mirror', raw);
+      const n = днейВ(state), мета = (await idbGet('ledger_best_meta')) || { days: 0 };
+      if (n >= мета.days) { await idbSet(BACKUP_PREFIX + 'best', raw); await idbSet('ledger_best_meta', { days: n, at: Date.now() }); }
+    } catch (e) { console.warn('Зеркало:', e); }
+  }, 2000);
+}
+
+async function восстановитьЕслиПусто() {
+  try {
+    if (днейВ(state) > 2) return;
+    let лучшее = null;
+    for (const k of ['ledger_mirror', BACKUP_PREFIX + 'best']) {
+      const raw = await idbGet(k);
+      if (!raw) continue;
+      let d = 0; try { d = днейВ(JSON.parse(raw)); } catch (e) { continue; }
+      if (!лучшее || d > лучшее.d) лучшее = { raw, d, k };
+    }
+    if (!лучшее || лучшее.d < 10 || лучшее.d < днейВ(state) * 3) return;
+    backupSlot('pre-mirror-restore');
+    state = migrateState(JSON.parse(лучшее.raw));
+    saveState();
+    try { render(); } catch (e) {}
+    showToast('Данные были потеряны в памяти браузера — восстановлены из копии (' + лучшее.d + ' дн.)', true);
+  } catch (e) { console.warn('Восстановление из зеркала:', e); }
 }
 
 function backupKeyLabel(key) {
@@ -12735,6 +12787,9 @@ function backupKeyLabel(key) {
   if (suffix === 'pre-fix-samv15') return 'До удаления выдачи 15 сен (Мухтар-Самв)';
   if (suffix === 'pre-fix-co1oct') return 'До правки остатка 1 окт';
   if (suffix === 'pre-fix-cur12oct') return 'До удаления выплаты куратору 12 окт (16 600)';
+  if (suffix === 'best') return 'Самая полная копия (больше всего дней) — на случай потери';
+  if (suffix === 'pre-mirror-restore') return 'До восстановления из копии в браузере';
+  if (/-прежняя$/.test(suffix)) return 'Меньшая копия (большая сохранена в основном слоте): ' + backupKeyLabel(BACKUP_PREFIX + suffix.replace(/-прежняя$/, ''));
   if (suffix === 'pre-wipe-guard') return 'Данные до остановленной синхронизации (на Диске стало намного меньше)';
   if (suffix === 'sync-other') return 'Версия с другого устройства (спорные места при совмещении)';
   if (/^\d{4}-\d{2}-\d{2}$/.test(suffix)) {
@@ -13074,8 +13129,12 @@ function refreshSyncUI() {
   const accLine = document.getElementById('sync-account');
   if (lastSync) {
     const dt = new Date(parseInt(lastSync));
+    const bkDay = localStorage.getItem('gdrive_bk_day_v1'), bkDays = localStorage.getItem('gdrive_bk_days_v1');
+    const bkOld = bkDay && (Date.now() - new Date(bkDay + 'T12:00:00').getTime()) > 3 * 864e5;
     accLine.textContent = 'Последняя синхронизация: ' + dt.toLocaleString('ru-RU')
-      + (syncDirty() ? ' · есть правки, ещё не отправленные на Диск' : '');
+      + (syncDirty() ? ' · есть правки, ещё не отправленные на Диск' : '')
+      + ' · копия на Диске: ' + (bkDay ? formatDateShort(bkDay) + ' (' + bkDays + ' дн.)' : 'ещё не было')
+      + (bkOld ? ' ⚠ давно' : '');   // v294: видно, что защита работает
   } else {
     accLine.textContent = '';
   }
@@ -13373,9 +13432,14 @@ async function резервНаДиск(folderId) {
       });
       files.push({ name: имя });
     }
-    // хранить 14 последних
-    files.filter(f => f.id).sort((a, b) => b.name < a.name ? -1 : 1).slice(14)
-      .forEach(f => { try { gapi.client.drive.files.delete({ fileId: f.id }); } catch (e) {} });
+    /* Хранить: 14 последних ежедневных и понедельничные за 90 дней (v294) —
+       если беда медленная, хорошая копия остаётся и спустя месяц. */
+    files.filter(f => f.id).sort((a, b) => b.name < a.name ? -1 : 1).slice(14).forEach(f => {
+      const m = /data_backup_(\d{4}-\d{2}-\d{2})/.exec(f.name || '');
+      const дата = m ? new Date(m[1] + 'T12:00:00') : null;
+      const понедельник = дата && дата.getDay() === 1 && (Date.now() - дата.getTime()) < 90 * 864e5;
+      if (!понедельник) { try { gapi.client.drive.files.delete({ fileId: f.id }); } catch (e) {} }
+    });
     localStorage.setItem('gdrive_bk_day_v1', сегодня);
     localStorage.setItem('gdrive_bk_days_v1', String(n));
   } catch (e) { console.warn('Копия на Диск:', e); }
@@ -13428,6 +13492,8 @@ async function saveToGDrive() {
   gapi.client.setToken({ access_token: accessToken });
   try {
     const { folderId, fileId } = await ensureFolderAndFile();
+    let nb = 0; try { nb = днейВ(JSON.parse(localStorage.getItem(GDRIVE_BASE_KEY) || 'null')); } catch (e) {}
+    if (nb >= 10 && днейВ(state) < nb * 0.5 && !confirm('⚠️ В программе дней ' + днейВ(state) + ', а при последней синхронизации было ' + nb + '.\n\nОтправка сотрёт хорошую копию на Диске. Не отправлять!\n\nВсё равно отправить?')) return;   // v294
     if (fileId) {
       const meta = await gapi.client.drive.files.get({ fileId, fields: 'id, modifiedTime' });
       if (meta.result.modifiedTime !== localStorage.getItem(GDRIVE_CLOUD_VER_KEY) && !confirm(
@@ -13784,6 +13850,7 @@ if (localStorage.getItem(GDRIVE_DIRTY_KEY) === null) {
   try { localStorage.setItem(GDRIVE_DIRTY_KEY, (state._modifiedAt || 0) > last + 2000 ? '1' : '0'); } catch (e) {}
 }
 restoreSavedToken();
+восстановитьЕслиПусто();   // v294: память браузера пуста, а копия в IndexedDB есть — вернуть
 initLoginScreen();
 bootstrapAutoSync();
 markSyncStale();
