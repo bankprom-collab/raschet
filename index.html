@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v286</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v287</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -11768,6 +11768,62 @@ function ensureHtml2Pdf() {
 }
 
 // Кнопка «Сохранить как PDF» — формирует PDF-файл и сохраняет его
+/* Раскладка отчёта по листам A4 для PDF (v287). Владелец 17.10.2026: «отчёт
+   распечатывается очень плохо, прерывается; сделай, чтобы аккуратно печатался
+   и переносился на вторую страницу». html2pdf снимает страницу ОДНОЙ картинкой
+   и режет её по высоте листа — правила «строка целиком» (v271) он не выполнял:
+   строка «14 авг» рвалась между листами, сверху первого листа стояла пустота,
+   заголовок «Выдано на руки» оставался внизу без таблицы.
+   Теперь листы считаем сами: у элемента фиксированная ширина (она ровно 190 мм
+   листа), высота листа в пикселях — cap. Строка, которая не помещается, уходит
+   на следующий лист: таблица делится, шапка повторяется, заголовок идёт
+   вместе со своей таблицей. Между листами — пустой блок-распорка до границы,
+   поэтому html2pdf режет по границе, где ничего нет. */
+function abPaginate(el, cap) {
+  const SAFE = 10;                                   // запас до границы листа, px
+  const isHead = n => /^H[1-3]$/.test(n.tagName);
+  const rowsOf = t => [...t.querySelectorAll(':scope > tr, :scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr')];
+  const spacer = (before, h) => {
+    const d = document.createElement('div');
+    d.className = 'abpg'; d.style.cssText = 'height:' + h + 'px;overflow:hidden';
+    before.parentNode.insertBefore(d, before); return d;
+  };
+  for (let guard = 0; guard < 600; guard++) {
+    const base = el.getBoundingClientRect().top;
+    const units = [];
+    [...el.children].forEach(ch => {
+      if (ch.classList.contains('abpg')) return;
+      if (ch.tagName === 'TABLE') units.push(...rowsOf(ch)); else units.push(ch);
+    });
+    let hit = null;
+    for (const u of units) {
+      const r = u.getBoundingClientRect(), top = r.top - base, bot = r.bottom - base;
+      const page = Math.floor((top + 1) / cap);
+      if (bot > (page + 1) * cap - SAFE && top > page * cap + 2 && r.height < cap - SAFE) { hit = { u, page }; break; }
+    }
+    if (!hit) return;
+    const { u, page } = hit;
+    let target = u;                                  // перед чем вставлять распорку
+    if (u.tagName === 'TR') {
+      const t = u.closest('table'), rows = rowsOf(t);
+      const head = rows[0].querySelector('th') ? rows[0] : null;
+      const i = rows.indexOf(u);
+      if (i <= (head ? 1 : 0)) target = t;           // первая строка таблицы — уходит вся таблица
+      else {                                         // делим таблицу: хвост — в новую, с повтором шапки
+        const t2 = t.cloneNode(false);
+        if (head) t2.appendChild(head.cloneNode(true));
+        rows.slice(i).forEach(r => t2.appendChild(r));
+        t.parentNode.insertBefore(t2, t.nextSibling);
+        target = t2;
+      }
+    }
+    while (target.previousElementSibling && isHead(target.previousElementSibling)) target = target.previousElementSibling;
+    const sp = spacer(target, 0);
+    const y = sp.getBoundingClientRect().top - base;
+    sp.style.height = Math.max(1, (page + 1) * cap - y) + 'px';
+  }
+}
+
 async function abSavePdf() {
   const el = document.getElementById('abPrintContent');
   if (!el) return;
@@ -11780,18 +11836,29 @@ async function abSavePdf() {
     }
   }
   showToast('Готовлю PDF-файл…');
-  html2pdf().set({
-    margin: [10, 10, 12, 10],
-    filename: (_abPdfFilename || 'Аналитика_база') + '.pdf',
-    image: { type: 'jpeg', quality: 0.97 },
-    html2canvas: { scale: 2, backgroundColor: '#ffffff' },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    pagebreak: { mode: ['css', 'legacy'], avoid: ['tr'] }   // строка таблицы — целиком на одном листе (v271)
-  }).from(el).save().then(function () {
+  const overlay = document.getElementById('abPrintOverlay');
+  const saved = { html: el.innerHTML, css: el.style.cssText, top: overlay ? overlay.scrollTop : 0 };
+  if (overlay) overlay.scrollTop = 0;
+  // Ширина 718 px = 190 мм (лист A4 без полей 10+10 мм), без внутренних отступов
+  el.style.cssText = 'width:718px;max-width:none;margin:0;padding:0;box-sizing:content-box';
+  try {
+    abPaginate(el, 718 * 275 / 190);                 // 275 мм — высота листа без полей 10+12
+    await html2pdf().set({
+      margin: [10, 10, 12, 10],
+      filename: (_abPdfFilename || 'Аналитика_база') + '.pdf',
+      image: { type: 'jpeg', quality: 0.97 },
+      html2canvas: { scale: 2, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: [] }                        // листы разложены выше — своих разрывов не надо
+    }).from(el).save();
     showToast('PDF сохранён');
-  }).catch(function () {
+  } catch (e) {
+    console.warn('PDF:', e);
     showToast('Не удалось сохранить PDF', true);
-  });
+  } finally {
+    el.innerHTML = saved.html; el.style.cssText = saved.css;   // вернуть отчёт как был
+    if (overlay) overlay.scrollTop = saved.top;
+  }
 }
 
 function renderAudit() {
