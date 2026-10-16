@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v288</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v289</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3309,22 +3309,30 @@ function computeTagRunningTotals(dayStr) {
    в «Задолженность за неделю».
 
    «Число отдачи» и ручная коррекция применяются поверх, как раньше. */
-/* Перенос излишка по 2-му проценту (v288). Приход закрыт выдачей по 1-му %
-   (982 900), а по 2-му к отдаче меньше (949 800): разница 33 100 — излишек.
+/* Перенос излишка по 2-му проценту (v288, уточнён в v289). Приход закрыт выдачей
+   по 1-му % (982 900), по 2-му к отдаче 949 800: разница 33 100 — излишек.
    Владелец 17.10.2026: «вычиталось 949 800, а разница переносилась на другую
-   сумму, иначе к выдаче по второму проценту не бьётся». Ответы: 1а — излишек
-   вычитается из самого старого ещё не выданного прихода этой пары; 2б — из всех
-   закрытых приходов сразу (до этого, с 05.09.2026, излишек оставался сделке
-   и никуда не шёл); 3 — и в отчёте, и в шапке пары.
-   items — приходы пары по порядку дат: ex — излишек закрытого, left2 — остаток
-   по 2-му % открытого. Возвращает, сколько вычесть из каждого. */
+   сумму — на 135 191,72, где 116 300: из неё вычитается 50 200 (17 100 + 33 100),
+   остаток 66 100». Общий перенос «на самый старый приход» (v288) он отверг:
+   излишек идёт на приход, по которому выдача прошла В ТОТ ЖЕ ДЕНЬ, что и выдача,
+   закрывшая приход с излишком. Иначе старые излишки (320 100 за все месяцы)
+   растворились бы в чужих приходах.
+   items — приходы пары по порядку дат:
+     закрытый: { ex, date } — излишек и день закрывающей выдачи;
+     открытый: { room, dates } — сколько ещё можно списать (после 2-го % минус
+     фактически выданное) и дни, когда по нему была выдача.
+   Возвращает, сколько списать с каждого открытого. */
 function перенестиИзлишек(items) {
-  let pool = items.reduce((a, x) => a + (x.ex || 0), 0);
+  const pool = {};
+  items.forEach(x => { if (x.ex > 0 && x.date) pool[x.date] = (pool[x.date] || 0) + x.ex; });
   return items.map(x => {
-    if (!(x.left2 > 0) || pool <= 0) return 0;
-    const t = Math.min(pool, x.left2);
-    pool -= t;
-    return t;
+    if (!(x.room > 0) || !x.dates) return 0;
+    let got = 0;
+    [...x.dates].sort().forEach(d => {
+      const t = Math.min(pool[d] || 0, x.room - got);
+      if (t > 0) { pool[d] -= t; got += t; }
+    });
+    return got;
   });
 }
 
@@ -3335,6 +3343,7 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
      правило, что в форме выдачи и в счёте куратора: пока выдачу не подтянули
      к приходу, приход считается невыданным. */
   const cover = pairPaidCoverage(dayStr, 'fifo', undefined, true);
+  const partsOf = incomeCoverParts(dayStr, true);   // дни выдач по каждому приходу (v289)
   const dOut = state.debtOutDates || {};
   const start = pairStart(pair);   // v205: у пары может быть своя дата
   const cur = { base: 0, v1: 0, v2: 0, has2: false, pct1: null, pct2: null, markedGiven: null };
@@ -3361,7 +3370,8 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
       const left = 1 - frac;
       if (left <= ДОЛЯ_EPS) {
         // закрыт целиком: разница между 1-м и 2-м % — излишек для переноса (v288)
-        if (hasSecondPct(r)) items.push({ ex: Math.max(0, (calcInRowFinal(r) || 0) - r100(r.total2)), left2: 0 });
+        const pts = ((partsOf[pair + '#' + d + '#' + idx] || {}).parts) || [];
+        if (hasSecondPct(r) && pts.length) items.push({ ex: Math.max(0, (calcInRowFinal(r) || 0) - r100(r.total2)), date: pts[pts.length - 1].date });
         return;
       }
       const box = (wk >= weekStart) ? cur : ovd;
@@ -3386,13 +3396,17 @@ function pairDebtByIncomes(dayStr, pair, weekStart) {
          пары расходилась с отчётом на 100 ₽ — там каждая строка округляется
          отдельно. Нашлось сквозной ревизией 08.09.2026. */
       if (hasSecondPct(r)) {
-        items.push({ ex: 0, left2: r100(r100(r.total2) * left), box });
+        const pts = ((partsOf[pair + '#' + d + '#' + idx] || {}).parts) || [];
+        items.push({ ex: 0, box, left2: r100(r100(r.total2) * left),
+                     room: Math.max(0, r100(r.total2) - r100(paid)), dates: pts.map(x => x.date) });
         box.has2 = true; box.pct2 = r.pct2;
       }
     });
   }
   const перенос = перенестиИзлишек(items);
-  items.forEach((it, i) => { if (it.box) it.box.v2 += it.left2 - перенос[i]; });
+  /* Есть перенос — остаток = после 2-го % − фактически выдано − перенос
+     (50 200 из 116 300 → 66 100); нет — по доле, как с v214. */
+  items.forEach((it, i) => { if (it.box) it.box.v2 += перенос[i] > 0 ? Math.max(0, it.room - перенос[i]) : it.left2; });
   [cur, ovd].forEach(b => {
     /* Базу НЕ округляем (v196): это сумма приходов как есть. Владелец
        28.08.2026: «сумма должна быть 1 600 411,3, а ты пишешь 1 600 400».
@@ -11594,9 +11608,12 @@ function pairReportTableHtml(pair, from, to, second) {
   /* Перенос излишка (v288): только в отчёте по 2-му проценту, по приходам
      периода. «Выдано» по открытому приходу растёт на перенос. */
   if (second) {
-    const c = перенестиИзлишек(rows.map(r => ({
-      ex: (r.after2 !== null && r.frac >= 1 - ДОЛЯ_EPS) ? Math.max(0, r.after1 - r.after2) : 0,
-      left2: r.after2 !== null ? Math.max(0, r.after2 - r100(r.after2 * (r.frac || 0))) : 0 })));
+    const c = перенестиИзлишек(rows.map(r => {
+      const dts = (r.payParts || []).map(x => x.date);
+      if (r.after2 !== null && r.frac >= 1 - ДОЛЯ_EPS)
+        return { ex: Math.max(0, r.after1 - r.after2), date: dts[dts.length - 1] };
+      return { room: r.after2 !== null ? Math.max(0, r.after2 - r.paid) : 0, dates: dts };
+    }));
     rows.forEach((r, i) => { r._c = c[i]; });
   }
   /* Во втором отчёте выданное — та же доля от суммы по 2-му проценту (v214,
@@ -11605,7 +11622,8 @@ function pairReportTableHtml(pair, from, to, second) {
   const paidOf = (r) => {
     const v = val(r);
     if (v === null || v === undefined) return null;
-    return second ? r100(v * (r.frac || 0)) + (r._c || 0) : r.paid;
+    if (!second) return r.paid;
+    return r._c > 0 ? r.paid + r._c : r100(v * (r.frac || 0));   // с переносом — фактически выданное + перенос
   };
   const leftOf = (r) => {
     const v = val(r);
