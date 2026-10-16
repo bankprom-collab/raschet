@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v292</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v293</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2776,10 +2776,18 @@ function todayStr() {
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
+    /* v293: данных нет, а метка «синхронизировались с Диском» осталась — память
+       браузера очистили или повредили. Пустое состояние не должно считаться
+       «актуальным»: снимаем метки, и первая синхронизация СКАЧАЕТ Диск, а не
+       отправит пустое поверх него (так 17.10.2026 мог пропасть весь файл). */
+    if (!raw && localStorage.getItem(GDRIVE_CLOUD_VER_KEY)) {
+      try { localStorage.removeItem(GDRIVE_CLOUD_VER_KEY); localStorage.removeItem(GDRIVE_BASE_KEY); localStorage.setItem(GDRIVE_DIRTY_KEY, '0'); } catch (e2) {}
+    }
     const s = raw ? JSON.parse(raw) : defaultState();
     return migrateState(s);
   }
   catch (e) {
+    try { localStorage.removeItem(GDRIVE_CLOUD_VER_KEY); localStorage.removeItem(GDRIVE_BASE_KEY); localStorage.setItem(GDRIVE_DIRTY_KEY, '0'); } catch (e2) {}   // v293: то же при повреждении
     // Данные повреждены: сохраняем их отдельно (не затираем) — можно будет
     // восстановиться из резервной копии в окне «Синхронизация»
     console.error('Данные в браузере повреждены:', e);
@@ -13337,11 +13345,55 @@ function предупредитьОПотере(текст) {
   showToast(текст, true);
 }
 
+/* Ежедневная копия на Диск отдельным файлом (v293). У Диска только 100 версий
+   одного файла, и 17.10.2026 их быстро вытеснили пустыми. Копия — самостоятельный
+   файл `data_backup_ГГГГ-ММ-ДД.json` рядом с data.json: не вытесняется отправками,
+   хранится 14 дней. Раз в сутки, только если данные не выглядят потерянными
+   (дней не меньше половины от прошлой копии). Любая ошибка — молча: копия не
+   должна мешать синхронизации. */
+async function резервНаДиск(folderId) {
+  try {
+    const сегодня = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem('gdrive_bk_day_v1') === сегодня) return;
+    const n = днейВ(state), прошлое = parseInt(localStorage.getItem('gdrive_bk_days_v1') || '0', 10);
+    if (n < 1 || (прошлое >= 10 && n < прошлое * 0.5)) return;
+    const имя = 'data_backup_' + сегодня + '.json';
+    const q = `name contains 'data_backup_' and '${folderId}' in parents and trashed=false`;
+    const files = ((await gapi.client.drive.files.list({ q, fields: 'files(id, name)', pageSize: 100 })).result.files) || [];
+    if (!files.some(f => f.name === имя)) {
+      const boundary = '-------BkBoundary' + Date.now(), d = `\r\n--${boundary}\r\n`;
+      await gapi.client.request({
+        path: '/upload/drive/v3/files?uploadType=multipart', method: 'POST',
+        params: { uploadType: 'multipart', fields: 'id' },
+        headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
+        body: d + 'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+          + JSON.stringify({ name: имя, mimeType: 'application/json', parents: [folderId],
+              description: 'Ежедневная копия · дней ' + n }) + d + 'Content-Type: application/json\r\n\r\n'
+          + JSON.stringify(state) + `\r\n--${boundary}--`
+      });
+      files.push({ name: имя });
+    }
+    // хранить 14 последних
+    files.filter(f => f.id).sort((a, b) => b.name < a.name ? -1 : 1).slice(14)
+      .forEach(f => { try { gapi.client.drive.files.delete({ fileId: f.id }); } catch (e) {} });
+    localStorage.setItem('gdrive_bk_day_v1', сегодня);
+    localStorage.setItem('gdrive_bk_days_v1', String(n));
+  } catch (e) { console.warn('Копия на Диск:', e); }
+}
+
 // Отправить текущие данные на Диск (без проверок — их делает вызывающий)
 async function uploadState(fileId, folderId) {
   const gen = syncGen, body = JSON.stringify(state, null, 2);
   const metadata = { name: GDRIVE_FILE_NAME, mimeType: 'application/json' };
   if (!fileId) metadata.parents = [folderId];
+  /* Кто записал файл (v293): в Drive это видно в «Информация о файле → Описание».
+     17.10.2026 пустой файл на Диске записало неизвестное устройство — теперь
+     будет видно, какое. */
+  try {
+    let dev = localStorage.getItem('gdrive_dev_v1');
+    if (!dev) { dev = Math.random().toString(36).slice(2, 6); localStorage.setItem('gdrive_dev_v1', dev); }
+    metadata.description = 'v293 · устройство ' + dev + ' · дней ' + днейВ(state) + ' · ' + new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC · ' + (/Android/i.test(navigator.userAgent) ? 'Android' : /iPhone|iPad/i.test(navigator.userAgent) ? 'iPhone' : 'компьютер');
+  } catch (e) {}
   const boundary = '-------RasčëtBoundary' + Date.now();
   const delim = `\r\n--${boundary}\r\n`;
   const closeDelim = `\r\n--${boundary}--`;
@@ -13536,7 +13588,7 @@ async function smartSyncOnce(opts) {
   try {
     if (!silent) showToast('🔄 Синхронизация...');
     const { folderId, fileId } = await ensureFolderAndFile();
-    if (!fileId) { await uploadState(null, folderId); return { status: 'uploaded-fresh' }; }
+    if (!fileId) { await uploadState(null, folderId); await резервНаДиск(folderId); return { status: 'uploaded-fresh' }; }
 
     const meta = await gapi.client.drive.files.get({ fileId, fields: 'id, modifiedTime' });
     const cloudVer = meta.result.modifiedTime;
@@ -13547,6 +13599,7 @@ async function smartSyncOnce(opts) {
         localStorage.setItem(GDRIVE_LAST_SYNC_KEY, String(Date.now()));
         refreshSyncUI();
         if (!silent) showToast('✓ Уже синхронизировано');
+        await резервНаДиск(folderId);
         return { status: 'in-sync' };
       }
       /* v292: данных стало намного меньше, чем при последней синхронизации, —
@@ -13559,6 +13612,7 @@ async function smartSyncOnce(opts) {
       }
       await uploadState(fileId, folderId);   // на Диске никто не менял — отправляем своё
       if (!silent) showToast('⬆ Отправлено на Диск');
+      await резервНаДиск(folderId);
       return { status: 'uploaded' };
     }
 
@@ -13601,6 +13655,7 @@ async function smartSyncOnce(opts) {
         await uploadState(fileId, folderId);
       }
       if (!silent) showToast('⬇ Загружено с Диска');
+      await резервНаДиск(folderId);
       return { status: 'downloaded' };
     }
     let base = null;
@@ -13631,6 +13686,7 @@ async function smartSyncOnce(opts) {
       showToast('🔀 Совмещено с другим устройством. Спорных мест: ' + m.conflicts.length
         + ' — взята более поздняя правка. Версия с другого устройства — в «Резервных копиях».', true);
     } else if (!silent) showToast('🔀 Совмещено с другим устройством');
+    await резервНаДиск(folderId);
     return { status: 'merged', conflicts: m.conflicts };
   } catch (e) {
     console.error('Smart sync error:', e);
