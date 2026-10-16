@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v289</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v290</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -3323,9 +3323,9 @@ function computeTagRunningTotals(dayStr) {
      фактически выданное) и дни, когда по нему была выдача.
    Возвращает, сколько списать с каждого открытого. */
 function перенестиИзлишек(items) {
-  const pool = {};
-  items.forEach(x => { if (x.ex > 0 && x.date) pool[x.date] = (pool[x.date] || 0) + x.ex; });
-  return items.map(x => {
+  const pool = {}, init = {};
+  items.forEach(x => { if (x.ex > 0 && x.date) pool[x.date] = init[x.date] = (pool[x.date] || 0) + x.ex; });
+  const res = items.map(x => {
     if (!(x.room > 0) || !x.dates) return 0;
     let got = 0;
     [...x.dates].sort().forEach(d => {
@@ -3334,6 +3334,13 @@ function перенестиИзлишек(items) {
     });
     return got;
   });
+  // сколько излишка каждого закрытого прихода реально перенесено (для подписи в отчёте)
+  const spent = {}; Object.keys(init).forEach(d => { spent[d] = init[d] - pool[d]; });
+  res.used = items.map(x => {
+    if (!(x.ex > 0) || !x.date) return 0;
+    const t = Math.min(spent[x.date] || 0, x.ex); spent[x.date] -= t; return t;
+  });
+  return res;
 }
 
 function pairDebtByIncomes(dayStr, pair, weekStart) {
@@ -11615,6 +11622,20 @@ function pairReportTableHtml(pair, from, to, second) {
       return { room: r.after2 !== null ? Math.max(0, r.after2 - r.paid) : 0, dates: dts };
     }));
     rows.forEach((r, i) => { r._c = c[i]; });
+    /* Закрытый приход в отчёте по 2-му %: закрывается суммой после 2-го % (949 800),
+       а не фактической выдачей (982 900) — излишек вычитаем из последних порций
+       и пишем отдельной пометкой (v290). */
+    rows.forEach((r, i) => {
+      if (!(r.after2 !== null && r.frac >= 1 - ДОЛЯ_EPS && r.after1 > r.after2)) return;
+      let ex = r.after1 - r.after2;
+      const pp = (r.payParts || []).map(x => Object.assign({}, x));
+      for (let k = pp.length - 1; k >= 0 && ex > 0; k--) { const t = Math.min(pp[k].amount, ex); pp[k].amount -= t; ex -= t; }
+      r._pp = pp.filter(x => x.amount > 0);
+      const used = c.used[i] || 0, ex0 = r.after1 - r.after2;
+      r._exNote = used > 0 ? 'излишек ' + fmt(used) + ' перенесён на другой приход'
+        + (ex0 - used > 0 ? ', ' + fmt(ex0 - used) + ' остаётся сделке' : '')
+        : 'излишек ' + fmt(ex0) + ' остаётся сделке';
+    });
   }
   /* Во втором отчёте выданное — та же доля от суммы по 2-му проценту (v214,
      возврат к исходному): тогда «к отдаче − выдано = остаток» сходится
@@ -11643,10 +11664,11 @@ function pairReportTableHtml(pair, from, to, second) {
       <td style="text-align:right">${pf(second ? r.pct2 : r.pct)}</td>
       <td style="text-align:right">${(v === null || v === undefined) ? '—' : fmt(v)}</td>
       <td style="text-align:right">${pd ? fmt(pd) : '—'}${
-        (r.payParts && r.payParts.length)
-          ? '<br><span class="bd">' + r.payParts.map(x =>
+        ((r._pp || r.payParts) && (r._pp || r.payParts).length)
+          ? '<br><span class="bd">' + (r._pp || r.payParts).map(x =>
               formatDateShort(x.date) + ' — ' + fmt(x.amount)).join('<br>') + '</span>'
-          : ''}${r._c ? '<br><span class="bd">+ перенос излишка ' + fmt(r._c) + '</span>' : ''}</td>
+          : ''}${r._c ? '<br><span class="bd">+ перенос излишка ' + fmt(r._c) + '</span>' : ''}${
+        r._exNote ? '<br><span class="bd" style="color:#888">' + r._exNote + '</span>' : ''}</td>
       <td style="text-align:right"><b>${(lf !== null && lf > 0) ? fmt(lf) : '—'}</b></td>
     </tr>`;
   }).join('');
