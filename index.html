@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v290</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v291</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -8825,6 +8825,84 @@ function qeRenderUnpaid() {
 /* Выдача больше остатка выбранного прихода? Избыток ни к какому приходу
    не отнесётся (v170) — деньги не гасят приход, который владелец не указал.
    Предупреждаем, чтобы он разбил запись на две. */
+/* Выдача больше остатка прихода — спрашиваем, куда отнести остаток (v291).
+   Владелец 17.10.2026: вносит реальную сумму (1 000 000), а программа сама
+   закрывает приход (982 900) и спрашивает, на какой приход отнести остаток
+   (17 100). Раньше лишнее «не относилось ни к какому приходу». По 1-му %
+   расчёт прежний — это просто две обычные записи выдачи, по одной на приход;
+   перенос излишка по 2-му % считается сам (в тот же день, v289).
+   Возвращает через cb список [{ key: 'дата#номер', amount }] — по записи на
+   каждый приход — или null, если отменили. */
+function offerOverpay(pair, aimKey, amount, cb) {
+  const rows = pairUnpaidRows(pair, currentDate);
+  const keyOf = x => x.date + '#' + x.idx;
+  const total = Math.round(amount * 100) / 100;
+  const splits = [];
+  let left = total, key = aimKey;
+  const close = () => { const m = document.getElementById('overpay-modal'); if (m) m.remove(); };
+  const finish = (res) => { close(); cb(res); };
+  const asIs = () => finish([{ key: aimKey, amount: total }]);
+  const step = () => {
+    const r = rows.find(x => keyOf(x) === key);
+    if (!r) return asIs();
+    const take = Math.min(left, r.left);
+    splits.push({ key, amount: take });
+    left = Math.round((left - take) * 100) / 100;
+    if (left <= 0.5) return finish(splits);
+    const cand = rows.filter(x => !splits.some(sp => sp.key === keyOf(x)));
+    if (!cand.length) {
+      close();
+      if (confirm('Остаток ' + fmt(left) + ' некуда отнести — других невыданных приходов у пары нет.\n\n'
+        + 'Он ни к какому приходу не отнесётся: ни куратору, ни на руки не пойдёт.\n\nСохранить как есть?')) return asIs();
+      return cb(null);
+    }
+    close();
+    const m = document.createElement('div');
+    m.id = 'overpay-modal';
+    m.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center';
+    m.innerHTML = `<div role="dialog" aria-label="Куда отнести остаток" style="background:var(--card,#1c1d21);color:var(--text,#e9e3d6);width:100%;max-width:520px;max-height:86vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))">
+      <div style="font-size:15px;line-height:1.5;margin-bottom:12px">Выдача <b>${fmt(total)}</b>: приход от ${formatDateShort(r.date)} закрыт на ${fmt(take)}.<br>
+        Остаток <b>${fmt(left)}</b> — на какой приход отнести?</div>
+      ${cand.map((c, i) => `<button type="button" data-i="${i}" style="display:block;width:100%;text-align:left;margin:0 0 8px;padding:12px 14px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:14px;cursor:pointer">
+        <b>${formatDateShort(c.date)}</b> · приход ${fmt(c.amount !== undefined ? c.amount : c.full)} · осталось <b>${fmt(c.left)}</b></button>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button type="button" data-a="asis" style="flex:1;padding:11px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:none;color:var(--muted,#8e8a80);font:inherit;font-size:13px;cursor:pointer">Не относить</button>
+        <button type="button" data-a="cancel" style="flex:1;padding:11px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer">Отмена</button></div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) { if (e.target === m) { close(); cb(null); } return; }
+      if (b.dataset.a === 'cancel') { close(); return cb(null); }
+      if (b.dataset.a === 'asis') return asIs();
+      key = keyOf(cand[+b.dataset.i]); step();
+    });
+  };
+  step();
+}
+
+/* Записать выдачи по приходам из offerOverpay. Поля out-* уже заполнены
+   формой (пара, примечание, срок): примечание и срок — только первой записи. */
+function записатьВыдачиПоПриходам(pair, splits) {
+  const g = id => document.getElementById(id);
+  const note = g('out-note') ? g('out-note').value : '', due = g('out-due') ? g('out-due').value : '';
+  let n = 0;
+  splits.forEach((sp, i) => {
+    g('out-client').value = pair;
+    g('out-amount').value = String(Math.round(sp.amount * 100) / 100);
+    g('out-note').value = i ? '' : note;
+    if (g('out-due')) g('out-due').value = i ? '' : due;
+    const before = getDay(currentDate).out.length;
+    qeSubmitting = true;
+    try { addRow('out'); } finally { qeSubmitting = false; }
+    const outs = getDay(currentDate).out;
+    if (outs.length > before) { outs[outs.length - 1].forIn = sp.key; n++; }
+  });
+  recalcCarryoversAfter(currentDate);
+  saveState();
+  render();
+  showToast(n > 1 ? 'Записано выдач: ' + n + ' — по одной на приход' : 'Выдача записана');
+  return n;
+}
+
 function qeConfirmOverpay(amount) {
   if (!qeAimedIn || !(amount > 0)) return true;
   const r = (qeUnpaid || []).find(x => x.date + '#' + x.idx === qeAimedIn);
@@ -9104,7 +9182,19 @@ function qeSubmit() {
   /* Владелец 25.08.2026: «надо спрашивать, по какому приходу». Раньше выдача
      без отметки уходила на самый ранний долг пары, и деньги оказывались не
      там, где он их видел. Есть невыданные приходы — приход обязателен. */
-  if (qeType === 'out' && qeAimedIn && !qeConfirmOverpay(qeSums.reduce((a, x) => a + (qeParseSum(x) || 0), 0))) return;
+  if (qeType === 'out' && qeAimedIn) {
+    const сумма = qeSums.reduce((a, x) => a + (qeParseSum(x) || 0), 0);
+    const rr = (qeUnpaid || []).find(x => x.date + '#' + x.idx === qeAimedIn);
+    if (rr && сумма > rr.left + 0.5) {            // больше остатка — спросим, куда отнести остаток (v291)
+      const pair = document.getElementById('out-client').value;
+      offerOverpay(pair, qeAimedIn, сумма, splits => {
+        if (!splits) return;
+        записатьВыдачиПоПриходам(pair, splits);
+        qeAimedIn = null; qeAfterSubmit();
+      });
+      return;
+    }
+  }
   if (qeType === 'out' && !qeAimedIn && qeUnpaid && qeUnpaid.length) {
     const field = document.getElementById('qe-unpaid-field');
     if (field) {
@@ -9136,6 +9226,11 @@ function qeSubmit() {
     }
     qeAimedIn = null;
   }
+  qeAfterSubmit();
+}
+
+// Конец отправки крупной формы: очистить поля и закрыть (общий для обычной записи и разнесения, v291)
+function qeAfterSubmit() {
   const g = (id) => document.getElementById(id);
   qeSums = [''];
   qeRenderSumRows();
@@ -11495,13 +11590,17 @@ function kbFormSave() {
     const невыдано = pairUnpaidRows(pair, currentDate);
     if (невыдано.length && !f.aim) return ошибка('Укажите приход, за который выдаёте, — нажмите на него в списке.');
     const r = невыдано.find(x => x.date + '#' + x.idx === f.aim);
-    if (r && amount > r.left + 0.5 && !confirm(
-        'Выдача ' + fmt(amount) + ' больше остатка прихода от '
-        + formatDateShort(r.date) + ' — там осталось ' + fmt(r.left) + '.\n\n'
-        + 'Лишние ' + fmt(amount - r.left) + ' ни к какому приходу не отнесутся: '
-        + 'ни куратору, ни на руки они не пойдут.\n\n'
-        + 'Лучше записать двумя выдачами — по одной на каждый приход.\n\n'
-        + 'Всё равно сохранить?')) return;
+    if (r && amount > r.left + 0.5) {              // больше остатка — спросим, куда отнести остаток (v291)
+      g('out-client').value = pair;
+      g('out-note').value = g('kbfNote').value;
+      if (g('out-due')) g('out-due').value = g('kbfDue').value;
+      offerOverpay(pair, f.aim, amount, splits => {
+        if (!splits) return;
+        записатьВыдачиПоПриходам(pair, splits);
+        kbCloseForm();
+      });
+      return;
+    }
     g('out-client').value = pair;
     g('out-amount').value = сумма;
     g('out-note').value = g('kbfNote').value;
