@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v296</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v297</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -8924,7 +8924,31 @@ function планРаспределения(rows, aimKey, amount) {
   return { plan, rest: left > 0.5 ? left : 0 };
 }
 
-function offerOverpay(pair, aimKey, amount, cb) {
+/* Вторая сумма (по 2-му %) на несколько приходов (v297). Владелец 29.10.2026:
+   внёс 1 000 000 (по 1-му % — 982 900 на первый приход и 17 100 на второй), а по 2-му
+   вводит 950 000 — она идёт по тому же порядку приходов, закрывая каждый на его
+   сумму по 2-му %: 949 800 на первый и 200 на второй. У каждого прихода потолок —
+   «после 2-го % минус уже выданное по нему раньше»; лишнее игнорируется.
+   splits — [{ key:'дата#номер', amount }] из плана; возвращает [число|undefined]. */
+function вторыеСуммы(pair, splits, amount2) {
+  let left = amount2;
+  return splits.map(sp => {
+    const [d, i] = String(sp.key).split('#');
+    const inc = ((state.days[d] || {}).in || [])[+i];
+    if (!inc || !hasSecondPct(inc)) return undefined;
+    let ранее = 0;
+    Object.keys(state.days).forEach(dd => ((state.days[dd] || {}).out || []).forEach(o => {
+      if ((o.client || '').trim() === pair && o.forIn === sp.key)
+        ранее += (o.amount2 !== undefined && o.amount2 !== null && !isNaN(o.amount2)) ? o.amount2 : (o.amount || 0);
+    }));
+    const потолок = Math.max(0, r100(inc.total2) - ранее);
+    const t = Math.min(left, потолок);
+    left = Math.round((left - t) * 100) / 100;
+    return t;
+  });
+}
+
+function offerOverpay(pair, aimKey, amount, cb, amount2) {
   const rows = pairUnpaidRows(pair, currentDate);
   const keyOf = x => x.date + '#' + x.idx;
   const total = Math.round(amount * 100) / 100;
@@ -8970,6 +8994,11 @@ function offerOverpay(pair, aimKey, amount, cb) {
       <span>${formatDateShort(x.row.date)} · приход ${fmt(x.row.amount !== undefined ? x.row.amount : x.row.full)}</span>
       <b>${fmt(x.amount)}${x.amount >= x.row.left - 0.5 ? ' <span style="color:var(--accent,#8fe8c9);font-weight:400;font-size:12px">закрыт</span>' : ' <span style="color:var(--muted,#8e8a80);font-weight:400;font-size:12px">из ' + fmt(x.row.left) + '</span>'}</b></div>`).join('');
   overlay(`<div style="font-size:15px;line-height:1.5;margin-bottom:8px">Выдача <b>${fmt(total)}</b> больше остатка одного прихода. Распределю по приходам, от старых к новым:</div>${строки}`
+    + ((amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? (() => {
+        const v2 = вторыеСуммы(pair, plan, amount2);
+        return `<div style="margin-top:10px;font-size:13px;line-height:1.5"><b>По 2-му %</b> (введено ${fmt(amount2)}): `
+          + plan.map((x, k) => formatDateShort(x.row.date) + ' — ' + fmt(v2[k] === undefined ? 0 : v2[k])).join(' · ') + '</div>';
+      })() : '')
     + (rest ? `<div style="margin-top:8px;font-size:13px;color:#ffb74d;line-height:1.4">Ещё ${fmt(rest)} некуда отнести — других невыданных приходов нет; они останутся на последнем.</div>` : '')
     + `<div style="margin-top:14px"><button type="button" data-a="ok" style="${btn};background:var(--accent,#8fe8c9);color:#0d1f19;border-color:transparent;font-weight:700;text-align:center">Записать так</button>
        <div style="display:flex;gap:8px"><button type="button" data-a="hand" style="${small}">Выбрать вручную</button><button type="button" data-a="asis" style="${small}">Не относить</button><button type="button" data-a="cancel" style="${small}">Отмена</button></div></div>`,
@@ -8988,6 +9017,7 @@ function offerOverpay(pair, aimKey, amount, cb) {
    формой (пара, примечание, срок): примечание и срок — только первой записи. */
 function записатьВыдачиПоПриходам(pair, splits, amount2) {
   const g = id => document.getElementById(id);
+  const доли2 = (amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? вторыеСуммы(pair, splits, amount2) : null;   // считаем ДО записи
   const note = g('out-note') ? g('out-note').value : '', due = g('out-due') ? g('out-due').value : '';
   let n = 0;
   splits.forEach((sp, i) => {
@@ -9001,7 +9031,7 @@ function записатьВыдачиПоПриходам(pair, splits, amount2)
     const outs = getDay(currentDate).out;
     if (outs.length > before) {
       outs[outs.length - 1].forIn = sp.key; n++;
-      if (i === 0 && amount2 !== undefined && !isNaN(amount2)) outs[outs.length - 1].amount2 = amount2;   // своя сумма по 2-му % — к первому приходу (v295)
+      if (доли2 && доли2[i] !== undefined) outs[outs.length - 1].amount2 = доли2[i];   // своя доля второй суммы у каждого прихода (v297)
     }
   });
   recalcCarryoversAfter(currentDate);
@@ -9303,7 +9333,7 @@ function qeSubmit() {
         if (!splits) return;
         записатьВыдачиПоПриходам(pair, splits, qeAmount2Value());
         qeAimedIn = null; qeAfterSubmit();
-      });
+      }, qeAmount2Value());
       return;
     }
   }
@@ -11732,7 +11762,7 @@ function kbFormSave() {
         if (!splits) return;
         записатьВыдачиПоПриходам(pair, splits, kbAmount2Value());
         kbCloseForm();
-      });
+      }, kbAmount2Value());
       return;
     }
     g('out-client').value = pair;
