@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v298</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v299</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -8991,9 +8991,13 @@ function offerOverpay(pair, aimKey, amount, cb, amount2) {
 
   const { plan, rest } = планРаспределения(rows, aimKey, total);
   if (!plan.length) return asIs();
-  const строки = plan.map(x => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px dashed rgba(255,255,255,.1);font-size:14px">
+  const noteIn = (document.getElementById('out-note') || { value: '' }).value || '';   // примечание из формы — к первой части
+  const строки = plan.map((x, k) => `<div style="padding:6px 0;border-top:1px dashed rgba(255,255,255,.1);font-size:14px">
+      <div style="display:flex;justify-content:space-between;gap:10px">
       <span>${formatDateShort(x.row.date)} · приход ${fmt(x.row.amount !== undefined ? x.row.amount : x.row.full)}</span>
-      <b>${fmt(x.amount)}${x.amount >= x.row.left - 0.5 ? ' <span style="color:var(--accent,#8fe8c9);font-weight:400;font-size:12px">закрыт</span>' : ' <span style="color:var(--muted,#8e8a80);font-weight:400;font-size:12px">из ' + fmt(x.row.left) + '</span>'}</b></div>`).join('');
+      <b>${fmt(x.amount)}${x.amount >= x.row.left - 0.5 ? ' <span style="color:var(--accent,#8fe8c9);font-weight:400;font-size:12px">закрыт</span>' : ' <span style="color:var(--muted,#8e8a80);font-weight:400;font-size:12px">из ' + fmt(x.row.left) + '</span>'}</b></div>
+      <input type="text" data-n="${k}" value="${escapeHtml(k === 0 ? noteIn : '')}" placeholder="Примечание к этой части — откуда эта сумма" autocomplete="off"
+        style="width:100%;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:13px"></div>`).join('');
   overlay(`<div style="font-size:15px;line-height:1.5;margin-bottom:8px">Выдача <b>${fmt(total)}</b> больше остатка одного прихода. Распределю по приходам, от старых к новым:</div>${строки}`
     + ((amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? (() => {
         const v2 = вторыеСуммы(pair, plan, amount2);
@@ -9008,7 +9012,11 @@ function offerOverpay(pair, aimKey, amount, cb, amount2) {
       if (a === 'cancel') { close(); return cb(null); }
       if (a === 'asis') return asIs();
       if (a === 'hand') return вручную();
-      const splits = plan.map(x => ({ key: x.key, amount: x.amount }));
+      const mm = document.getElementById('overpay-modal');
+      const splits = plan.map((x, k) => {
+        const inp = mm ? mm.querySelector('input[data-n="' + k + '"]') : null;
+        return { key: x.key, amount: x.amount, note: inp ? inp.value.trim() : undefined };   // своё примечание у каждой части (v299)
+      });
       if (rest) splits[splits.length - 1].amount = Math.round((splits[splits.length - 1].amount + rest) * 100) / 100;
       finish(splits);
     });
@@ -9024,7 +9032,7 @@ function записатьВыдачиПоПриходам(pair, splits, amount2)
   splits.forEach((sp, i) => {
     g('out-client').value = pair;
     g('out-amount').value = String(Math.round(sp.amount * 100) / 100);
-    g('out-note').value = i ? '' : note;
+    g('out-note').value = (sp.note !== undefined) ? sp.note : (i ? '' : note);   // примечание части (v299), иначе из формы — первой
     if (g('out-due')) g('out-due').value = i ? '' : due;
     const before = getDay(currentDate).out.length;
     qeSubmitting = true;
