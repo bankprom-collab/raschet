@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v299</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v300</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2008,6 +2008,10 @@
       <input type="text" id="qe-amount2" class="qe-input" inputmode="decimal" autocomplete="off"
              placeholder="по умолчанию — та же, что по 1-му %" oninput="numericInputFilter(event)">
     </div>
+    <div class="qe-field" id="qe-note2-field" style="display:none">
+      <label>Примечание к сумме по 2-му % — запишется в отчёт по 2-му %</label>
+      <input type="text" id="qe-note2" class="qe-input" placeholder="например: перевод на карту" autocomplete="off">
+    </div>
     <div class="qe-field" id="qe-pcts">
       <label>Проценты — %1 обязателен, остальные по желанию</label>
       <div class="qe-pct-row">
@@ -2024,8 +2028,8 @@
       <input type="date" id="qe-due" class="qe-input qe-input-date" oninput="qeOnDue()"
              title="Нажмите — откроется календарь">
     </div>
-    <div class="qe-field">
-      <label>Примечание — на расчёт не влияет</label>
+    <div class="qe-field" id="qe-note-field">
+      <label id="qe-note-label">Примечание — на расчёт не влияет</label>
       <input type="text" id="qe-note" class="qe-input" placeholder="необязательно" oninput="qeOnInput()">
     </div>
     <div class="qe-preview" id="qe-preview">—</div>
@@ -3388,6 +3392,19 @@ function manual2ByIncome(pair) {
   return res;
 }
 
+/* Выдачи пары по приходам — для примечаний в отчётах (v300). Владелец 29.10.2026:
+   «под каждой суммой выдачи должно быть примечание, которое будет записано в
+   отчётности». Отчёт по 1-му % показывает `note`, отчёт по 2-му — `note2`
+   (если второй суммы нет — тот же `note`, ведь сумма одна). */
+function payoutsByIncome(pair) {
+  const p = (pair || '').trim(), res = {};
+  Object.keys(state.days).sort().forEach(d => ((state.days[d] || {}).out || []).forEach(o => {
+    if ((o.client || '').trim() !== p || !o.forIn) return;
+    (res[o.forIn] = res[o.forIn] || []).push({ date: d, amount: o.amount || 0, amount2: o.amount2, note: (o.note || '').trim(), note2: (o.note2 || '').trim() });
+  }));
+  return res;
+}
+
 function pairDebtByIncomes(dayStr, pair, weekStart) {
   /* realOnly (v194): приход закрывает только выдача, привязанная к нему.
      Владелец 28.08.2026: «722 500 в расчётах больше не учитывается, у нас
@@ -4715,7 +4732,7 @@ function renderOutBody(day) {
       <tr>
         <td class="client-name">${escapeHtml(r.client)}${dueChipEditableHtml(r, 'out', i)}${noteHtml}${outForInHtml(COVER, i, r.amount)}</td>
         <td class="amount neg">${fmt(r.amount)}${(r.amount2 !== undefined && r.amount2 !== null && !isNaN(r.amount2))
-          ? `<div style="font-family:var(--font-ui);font-size:10.5px;font-weight:400;color:#8fb4ff;margin-top:3px;white-space:nowrap" title="Своя сумма по 2-му %: по ней считается отчёт по 2-му проценту">по 2-му %: ${fmt(r.amount2)}</div>` : ''}</td>
+          ? `<div style="font-family:var(--font-ui);font-size:10.5px;font-weight:400;color:#8fb4ff;margin-top:3px;white-space:nowrap" title="Своя сумма по 2-му %: по ней считается отчёт по 2-му проценту">по 2-му %: ${fmt(r.amount2)}${r.note2 ? ' · 📝 ' + escapeHtml(r.note2) : ''}</div>` : ''}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="openQuickEntryEdit('out',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="deleteRow('out',${i})" title="Удалить">🗑</button>
@@ -8702,6 +8719,7 @@ function openQuickEntry(type) {
   qeSums = [''];
   qeAimedIn = null;
   document.getElementById('qe-amount2').value = '';
+  document.getElementById('qe-note2').value = '';
   qeSetType(t);
   document.getElementById('quick-entry-modal').classList.add('open');
 }
@@ -8732,12 +8750,16 @@ function openQuickEntryEdit(type, i) {
   }
   qeSetType(type);
   document.getElementById('qe-amount2').value = (type === 'out' && r.amount2 !== undefined && r.amount2 !== null) ? fmtExact(r.amount2) : '';
+  document.getElementById('qe-note2').value = (type === 'out' && r.note2) ? r.note2 : '';
   document.getElementById('quick-entry-modal').classList.add('open');
 }
 
 /* Неверной считается только введённая и неразборчивая: пустая — это «не задана» (v296:
    isNaN(undefined) === true, из-за этого v295 не давал записать выдачу без второй суммы). */
 function qeAmount2Неверна() { const v = qeAmount2Value(); return v !== undefined && isNaN(v); }
+
+/* Примечание ко второй сумме (v300): '' — нет. */
+function qeNote2Value() { const el = document.getElementById('qe-note2'); return el ? String(el.value || '').trim() : ''; }
 
 /* Сумма по 2-му % из формы: undefined — не задана, NaN — введена неверно (v295). */
 function qeAmount2Value() {
@@ -8760,6 +8782,13 @@ function qeSetType(type) {
   title.style.color = isIn ? 'var(--income)' : 'var(--expense)';
   g('qe-pcts').style.display = isIn ? '' : 'none';
   g('qe-amount2-field').style.display = isIn ? 'none' : '';   // v295: только у выдачи
+  /* v300: у выдачи примечание стоит ПОД каждой суммой — под первой (1-й %) и под второй
+     (2-й %), и каждое попадает в свой отчёт. Для прихода — как было, внизу. */
+  g('qe-note2-field').style.display = isIn ? 'none' : '';
+  const noteF = g('qe-note-field'), a2F = g('qe-amount2-field');
+  if (isIn) { const pv = g('qe-preview'); if (pv && noteF.nextElementSibling !== pv) pv.parentNode.insertBefore(noteF, pv); }
+  else if (a2F.previousElementSibling !== noteF) a2F.parentNode.insertBefore(noteF, a2F);
+  g('qe-note-label').textContent = isIn ? 'Примечание — на расчёт не влияет' : 'Примечание к сумме по 1-му % — запишется в отчёт по 1-му %';
   const sub = g('qe-submit');
   sub.dataset.t = qeType;
   const editing = !!qeEditing;
@@ -8949,7 +8978,7 @@ function вторыеСуммы(pair, splits, amount2) {
   });
 }
 
-function offerOverpay(pair, aimKey, amount, cb, amount2) {
+function offerOverpay(pair, aimKey, amount, cb, amount2, note2) {
   const rows = pairUnpaidRows(pair, currentDate);
   const keyOf = x => x.date + '#' + x.idx;
   const total = Math.round(amount * 100) / 100;
@@ -8996,8 +9025,10 @@ function offerOverpay(pair, aimKey, amount, cb, amount2) {
       <div style="display:flex;justify-content:space-between;gap:10px">
       <span>${formatDateShort(x.row.date)} · приход ${fmt(x.row.amount !== undefined ? x.row.amount : x.row.full)}</span>
       <b>${fmt(x.amount)}${x.amount >= x.row.left - 0.5 ? ' <span style="color:var(--accent,#8fe8c9);font-weight:400;font-size:12px">закрыт</span>' : ' <span style="color:var(--muted,#8e8a80);font-weight:400;font-size:12px">из ' + fmt(x.row.left) + '</span>'}</b></div>
-      <input type="text" data-n="${k}" value="${escapeHtml(k === 0 ? noteIn : '')}" placeholder="Примечание к этой части — откуда эта сумма" autocomplete="off"
-        style="width:100%;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:13px"></div>`).join('');
+      <input type="text" data-n="${k}" value="${escapeHtml(k === 0 ? noteIn : '')}" placeholder="Примечание к сумме по 1-му % — откуда эта часть" autocomplete="off"
+        style="width:100%;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:13px">
+      ${(amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? `<input type="text" data-n2="${k}" value="${escapeHtml(k === 0 ? (note2 || '') : '')}" placeholder="Примечание к сумме по 2-му %" autocomplete="off"
+        style="width:100%;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:13px">` : ''}</div>`).join('');
   overlay(`<div style="font-size:15px;line-height:1.5;margin-bottom:8px">Выдача <b>${fmt(total)}</b> больше остатка одного прихода. Распределю по приходам, от старых к новым:</div>${строки}`
     + ((amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? (() => {
         const v2 = вторыеСуммы(pair, plan, amount2);
@@ -9015,7 +9046,9 @@ function offerOverpay(pair, aimKey, amount, cb, amount2) {
       const mm = document.getElementById('overpay-modal');
       const splits = plan.map((x, k) => {
         const inp = mm ? mm.querySelector('input[data-n="' + k + '"]') : null;
-        return { key: x.key, amount: x.amount, note: inp ? inp.value.trim() : undefined };   // своё примечание у каждой части (v299)
+        const inp2 = mm ? mm.querySelector('input[data-n2="' + k + '"]') : null;
+        return { key: x.key, amount: x.amount, note: inp ? inp.value.trim() : undefined,   // своё примечание у каждой части (v299)
+                 note2: inp2 ? inp2.value.trim() : undefined };                              // и ко второй сумме (v300)
       });
       if (rest) splits[splits.length - 1].amount = Math.round((splits[splits.length - 1].amount + rest) * 100) / 100;
       finish(splits);
@@ -9024,7 +9057,7 @@ function offerOverpay(pair, aimKey, amount, cb, amount2) {
 
 /* Записать выдачи по приходам из offerOverpay. Поля out-* уже заполнены
    формой (пара, примечание, срок): примечание и срок — только первой записи. */
-function записатьВыдачиПоПриходам(pair, splits, amount2) {
+function записатьВыдачиПоПриходам(pair, splits, amount2, note2) {
   const g = id => document.getElementById(id);
   const доли2 = (amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? вторыеСуммы(pair, splits, amount2) : null;   // считаем ДО записи
   const note = g('out-note') ? g('out-note').value : '', due = g('out-due') ? g('out-due').value : '';
@@ -9041,6 +9074,8 @@ function записатьВыдачиПоПриходам(pair, splits, amount2)
     if (outs.length > before) {
       outs[outs.length - 1].forIn = sp.key; n++;
       if (доли2 && доли2[i] !== undefined) outs[outs.length - 1].amount2 = доли2[i];   // своя доля второй суммы у каждого прихода (v297)
+      const n2 = (sp.note2 !== undefined) ? sp.note2 : (i === 0 ? (note2 || '') : '');   // примечание ко второй сумме (v300)
+      if (n2) outs[outs.length - 1].note2 = n2;
     }
   });
   recalcCarryoversAfter(currentDate);
@@ -9288,6 +9323,7 @@ function qeSaveEdit() {
     r.forIn = qeAimedIn || null;
     const a2 = qeAmount2Value();
     if (a2 === undefined) delete r.amount2; else r.amount2 = a2;   // v295
+    if (qeNote2Value()) r.note2 = qeNote2Value(); else delete r.note2;   // v300
   } else {
     const parsed = parseSumString(g('in-amount').value);
     if (!parsed || parsed.sum <= 0) { showToast('Введите сумму', true); return; }
@@ -9340,9 +9376,9 @@ function qeSubmit() {
       const pair = document.getElementById('out-client').value;
       offerOverpay(pair, qeAimedIn, сумма, splits => {
         if (!splits) return;
-        записатьВыдачиПоПриходам(pair, splits, qeAmount2Value());
+        записатьВыдачиПоПриходам(pair, splits, qeAmount2Value(), qeNote2Value());
         qeAimedIn = null; qeAfterSubmit();
-      }, qeAmount2Value());
+      }, qeAmount2Value(), qeNote2Value());
       return;
     }
   }
@@ -9373,6 +9409,7 @@ function qeSubmit() {
       last.forIn = qeAimedIn;
       const a2 = qeAmount2Value();
       if (a2 !== undefined && !isNaN(a2)) last.amount2 = a2;   // v295: своя сумма по 2-му %
+      if (qeNote2Value()) last.note2 = qeNote2Value();         // v300: примечание ко второй сумме
       recalcCarryoversAfter(currentDate);
       saveState();
       render();
@@ -9387,6 +9424,7 @@ function qeAfterSubmit() {
   const g = (id) => document.getElementById(id);
   qeSums = [''];
   if (g('qe-amount2')) g('qe-amount2').value = '';
+  if (g('qe-note2')) g('qe-note2').value = '';
   qeRenderSumRows();
   const totalEl = g('qe-sum-total');
   if (totalEl) totalEl.textContent = '0 ₽';
@@ -11452,6 +11490,7 @@ function kbOpenEdit(type, ключ) {
   if (type === 'out') {
     g('kbfSum').value = fmtExact(r.amount || 0);
     g('kbfSum2').value = (r.amount2 !== undefined && r.amount2 !== null) ? fmtExact(r.amount2) : '';   // v295
+    g('kbfNote2').value = r.note2 || '';   // v300
   }
   if (type === 'in') { g('kbfP1').value = пц(r.pct); g('kbfP2').value = пц(r.pct2); g('kbfPc').value = пц(r.pctCur); g('kbfPctNote').textContent = ''; }
   g('kbfDue').value = r.dueDate || '';
@@ -11564,8 +11603,10 @@ function kbFormHtml() {
     ${isIn ? `<div class="kbf"><span>Суммы прихода — по одной в строке</span><div id="kbfSums">${kbSumsHtml()}</div></div>`
     : `<label class="kbf"><span>Получено на руки — по 1-му %</span>
       <input id="kbfSum" class="kbf-sum" inputmode="decimal" autocomplete="off" oninput="kbFormPreview()" placeholder="0"></label>
+      <label class="kbf"><span>Примечание к сумме по 1-му % — в отчёт по 1-му %</span><input id="kbfNote" autocomplete="off" placeholder="например: наличные от Ивана"></label>
       <label class="kbf"><span>Получено по 2-му % — если другая (иначе та же)</span>
-      <input id="kbfSum2" inputmode="decimal" autocomplete="off" placeholder="по умолчанию — та же, что по 1-му %"></label>`}
+      <input id="kbfSum2" inputmode="decimal" autocomplete="off" placeholder="по умолчанию — та же, что по 1-му %"></label>
+      <label class="kbf"><span>Примечание к сумме по 2-му % — в отчёт по 2-му %</span><input id="kbfNote2" autocomplete="off" placeholder="например: перевод на карту"></label>`}
     ${isIn ? `<div class="kbf-row">
       <label class="kbf"><span>1-й %</span><input id="kbfP1" inputmode="decimal" autocomplete="off" value="${прошлые ? пц(прошлые.pct) : ''}" oninput="kbFormPreview()"></label>
       <label class="kbf"><span>2-й %</span><input id="kbfP2" inputmode="decimal" autocomplete="off" value="${прошлые ? пц(прошлые.pct2) : ''}" oninput="kbFormPreview()"></label>
@@ -11574,7 +11615,7 @@ function kbFormHtml() {
     <div class="kb-hint" id="kbfPctNote">${прошлые ? 'Проценты — как в прошлом приходе этой пары. Проверьте.' : ''}</div>
     <div class="kbf-preview" id="kbfPreview"></div>` : ''}
     <label class="kbf"><span>Отдать до</span><input type="date" id="kbfDue"></label>
-    <label class="kbf"><span>Примечание</span><input id="kbfNote" autocomplete="off" placeholder="необязательно"></label>
+    ${isIn ? '<label class="kbf"><span>Примечание</span><input id="kbfNote" autocomplete="off" placeholder="необязательно"></label>' : ''}
     <div class="kbf-err" id="kbfErr" role="alert"></div>
     <div class="kb-nav">
       <button type="button" class="kb-ghost" onclick="kbCloseForm()">Отмена</button>
@@ -11713,6 +11754,7 @@ function kbSaveEdit(pair, сумма) {
     r.forIn = f.aim || null;
     const a2 = kbAmount2Value();
     if (a2 === undefined) delete r.amount2; else r.amount2 = a2;   // v295
+    if (kbNote2Value()) r.note2 = kbNote2Value(); else delete r.note2;   // v300
   }
   recalcCarryoversAfter(f.edit.date);
   saveState();
@@ -11722,6 +11764,9 @@ function kbSaveEdit(pair, сумма) {
 }
 
 function kbAmount2Неверна() { const v = kbAmount2Value(); return v !== undefined && isNaN(v); }
+
+/* Примечание ко второй сумме из бланка книги (v300). */
+function kbNote2Value() { const el = document.getElementById('kbfNote2'); return el ? String(el.value || '').trim() : ''; }
 
 /* Сумма по 2-му % из бланка книги: undefined — не задана, NaN — неверно (v295). */
 function kbAmount2Value() {
@@ -11769,9 +11814,9 @@ function kbFormSave() {
       if (g('out-due')) g('out-due').value = g('kbfDue').value;
       offerOverpay(pair, f.aim, amount, splits => {
         if (!splits) return;
-        записатьВыдачиПоПриходам(pair, splits, kbAmount2Value());
+        записатьВыдачиПоПриходам(pair, splits, kbAmount2Value(), kbNote2Value());
         kbCloseForm();
-      }, kbAmount2Value());
+      }, kbAmount2Value(), kbNote2Value());
       return;
     }
     g('out-client').value = pair;
@@ -11787,6 +11832,7 @@ function kbFormSave() {
       outs[outs.length - 1].forIn = f.aim;   // как в qeSubmit (v126)
       const a2 = kbAmount2Value();
       if (a2 !== undefined && !isNaN(a2)) outs[outs.length - 1].amount2 = a2;   // v295
+      if (kbNote2Value()) outs[outs.length - 1].note2 = kbNote2Value();         // v300
       recalcCarryoversAfter(currentDate);
       saveState();
       render();
@@ -11857,7 +11903,7 @@ function pairReportPayouts(pair, from, to) {
     if (!dd || !Array.isArray(dd.out)) continue;
     dd.out.forEach(o => {
       if ((o.client || '').trim() !== p) return;
-      out.push({ date: d, amount: o.amount || 0, note: o.note || '' });
+      out.push({ date: d, amount: o.amount || 0, note: o.note || '', amount2: o.amount2, note2: o.note2 || '' });
     });
   }
   return out;
@@ -11872,7 +11918,7 @@ function pairReportTableHtml(pair, from, to, second) {
   }
   if (!rows.length) {
     return `<h2>${escapeHtml(pair)}</h2><p class="bd">Приходов за период нет.</p>`
-      + pairPayoutsTableHtml(pays);
+      + pairPayoutsTableHtml(pays, second);
   }
   const pf = (x) => (x === null || x === undefined) ? '—' : String(x).replace('.', ',') + '%';
   /* second = отчёт для второй стороны пары (v152): та же таблица, но «к отдаче»
@@ -11889,6 +11935,7 @@ function pairReportTableHtml(pair, from, to, second) {
   /* Перенос излишка (v288): только в отчёте по 2-му проценту, по приходам
      периода. «Выдано» по открытому приходу растёт на перенос. */
   const ручные2 = second ? manual2ByIncome(pair) : {};
+  const выдачиПо = payoutsByIncome(pair);
   if (second) rows.forEach(r => { if (r.after2 !== null) r._m = ручные2[r.date + '#' + r.idx] || null; });
   if (second) {
     const c = перенестиИзлишек(rows.map(r => {
@@ -11947,7 +11994,11 @@ function pairReportTableHtml(pair, from, to, second) {
           ? '<br><span class="bd">' + (r._pp || r.payParts).map(x =>
               formatDateShort(x.date) + ' — ' + fmt(x.amount)).join('<br>') + '</span>'
           : ''}${r._c ? '<br><span class="bd">+ перенос излишка ' + fmt(r._c) + '</span>' : ''}${
-        r._exNote ? '<br><span class="bd" style="color:#888">' + r._exNote + '</span>' : ''}</td>
+        r._exNote ? '<br><span class="bd" style="color:#888">' + r._exNote + '</span>' : ''}${
+        (выдачиПо[r.date + '#' + r.idx] || []).map(o => {
+          const t = second ? (o.note2 || ((o.amount2 === undefined || o.amount2 === null) ? o.note : '')) : o.note;   // v300
+          return t ? '<br><span class="bd">📝 ' + formatDateShort(o.date) + ': ' + escapeHtml(t) + '</span>' : '';
+        }).join('')}</td>
       <td style="text-align:right"><b>${(lf !== null && lf > 0) ? fmt(lf) : '—'}</b></td>
     </tr>`;
   }).join('');
@@ -11965,12 +12016,18 @@ function pairReportTableHtml(pair, from, to, second) {
         <td style="text-align:right"><b>${fmt(sumBy(paidOf))}</b></td>
         <td style="text-align:right"><b>${fmt(sumBy(leftOf))}</b></td>
       </tr>
-    </table>` + pairPayoutsTableHtml(pays);
+    </table>` + pairPayoutsTableHtml(pays, second);
 }
 
 /** Таблица выдач: когда и сколько отдали (v151). */
-function pairPayoutsTableHtml(pays) {
+function pairPayoutsTableHtml(pays, second) {
   if (!pays || !pays.length) return '<p class="bd">Выдач за период не было.</p>';
+  /* Отчёт по 2-му % (v300): в таблице выдач — суммы и примечания по 2-му %
+     (своя сумма `amount2` и `note2`; если второй суммы нет — те же, что по 1-му). */
+  if (second) pays = pays.map(x => {
+    const has = x.amount2 !== undefined && x.amount2 !== null && !isNaN(x.amount2);
+    return Object.assign({}, x, { amount: has ? x.amount2 : x.amount, note: has ? x.note2 : x.note });
+  });
   const total = pays.reduce((a, x) => a + x.amount, 0);
   return `<h3>Выдано на руки</h3>
     <table>
