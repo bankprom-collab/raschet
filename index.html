@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v295</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v296</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -8734,6 +8734,10 @@ function openQuickEntryEdit(type, i) {
   document.getElementById('quick-entry-modal').classList.add('open');
 }
 
+/* Неверной считается только введённая и неразборчивая: пустая — это «не задана» (v296:
+   isNaN(undefined) === true, из-за этого v295 не давал записать выдачу без второй суммы). */
+function qeAmount2Неверна() { const v = qeAmount2Value(); return v !== undefined && isNaN(v); }
+
 /* Сумма по 2-му % из формы: undefined — не задана, NaN — введена неверно (v295). */
 function qeAmount2Value() {
   const el = document.getElementById('qe-amount2');
@@ -8897,58 +8901,87 @@ function qeRenderUnpaid() {
 /* Выдача больше остатка выбранного прихода? Избыток ни к какому приходу
    не отнесётся (v170) — деньги не гасят приход, который владелец не указал.
    Предупреждаем, чтобы он разбил запись на две. */
-/* Выдача больше остатка прихода — спрашиваем, куда отнести остаток (v291).
-   Владелец 17.10.2026: вносит реальную сумму (1 000 000), а программа сама
-   закрывает приход (982 900) и спрашивает, на какой приход отнести остаток
-   (17 100). Раньше лишнее «не относилось ни к какому приходу». По 1-му %
-   расчёт прежний — это просто две обычные записи выдачи, по одной на приход;
-   перенос излишка по 2-му % считается сам (в тот же день, v289).
-   Возвращает через cb список [{ key: 'дата#номер', amount }] — по записи на
-   каждый приход — или null, если отменили. */
+/* Выдача больше остатка прихода — распределяется сама (v296). Владелец 29.10.2026:
+   «если приходов несколько, а отдают одной суммой — ввожу одну сумму, например
+   миллион; самый первый приход закрывается, всё остальное переносится на следующий,
+   и из этого считается остаток». Порядок: сначала приход, который выбрали в форме,
+   дальше остальные невыданные приходы пары от старых к новым. Перед записью — план
+   на экране (записать / выбрать остаток вручную / не относить / отмена).
+   В v291 здесь был вопрос «на какой приход отнести остаток» — он остался как
+   запасной путь «Выбрать вручную». */
+function планРаспределения(rows, aimKey, amount) {
+  const keyOf = x => x.date + '#' + x.idx;
+  const order = rows.filter(x => keyOf(x) === aimKey).concat(rows.filter(x => keyOf(x) !== aimKey));
+  let left = Math.round(amount * 100) / 100;
+  const plan = [];
+  for (const r of order) {
+    if (left <= 0.5) break;
+    const take = Math.min(left, r.left);
+    if (take <= 0) continue;
+    plan.push({ key: keyOf(r), amount: take, row: r });
+    left = Math.round((left - take) * 100) / 100;
+  }
+  return { plan, rest: left > 0.5 ? left : 0 };
+}
+
 function offerOverpay(pair, aimKey, amount, cb) {
   const rows = pairUnpaidRows(pair, currentDate);
   const keyOf = x => x.date + '#' + x.idx;
   const total = Math.round(amount * 100) / 100;
-  const splits = [];
-  let left = total, key = aimKey;
   const close = () => { const m = document.getElementById('overpay-modal'); if (m) m.remove(); };
   const finish = (res) => { close(); cb(res); };
   const asIs = () => finish([{ key: aimKey, amount: total }]);
-  const step = () => {
-    const r = rows.find(x => keyOf(x) === key);
-    if (!r) return asIs();
-    const take = Math.min(left, r.left);
-    splits.push({ key, amount: take });
-    left = Math.round((left - take) * 100) / 100;
-    if (left <= 0.5) return finish(splits);
-    const cand = rows.filter(x => !splits.some(sp => sp.key === keyOf(x)));
-    if (!cand.length) {
-      close();
-      if (confirm('Остаток ' + fmt(left) + ' некуда отнести — других невыданных приходов у пары нет.\n\n'
-        + 'Он ни к какому приходу не отнесётся: ни куратору, ни на руки не пойдёт.\n\nСохранить как есть?')) return asIs();
-      return cb(null);
-    }
+  const overlay = (html, onClick) => {
     close();
     const m = document.createElement('div');
     m.id = 'overpay-modal';
     m.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center';
-    m.innerHTML = `<div role="dialog" aria-label="Куда отнести остаток" style="background:var(--card,#1c1d21);color:var(--text,#e9e3d6);width:100%;max-width:520px;max-height:86vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))">
-      <div style="font-size:15px;line-height:1.5;margin-bottom:12px">Выдача <b>${fmt(total)}</b>: приход от ${formatDateShort(r.date)} закрыт на ${fmt(take)}.<br>
-        Остаток <b>${fmt(left)}</b> — на какой приход отнести?</div>
-      ${cand.map((c, i) => `<button type="button" data-i="${i}" style="display:block;width:100%;text-align:left;margin:0 0 8px;padding:12px 14px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:14px;cursor:pointer">
-        <b>${formatDateShort(c.date)}</b> · приход ${fmt(c.amount !== undefined ? c.amount : c.full)} · осталось <b>${fmt(c.left)}</b></button>`).join('')}
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <button type="button" data-a="asis" style="flex:1;padding:11px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:none;color:var(--muted,#8e8a80);font:inherit;font-size:13px;cursor:pointer">Не относить</button>
-        <button type="button" data-a="cancel" style="flex:1;padding:11px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer">Отмена</button></div></div>`;
+    m.innerHTML = '<div role="dialog" style="background:var(--card,#1c1d21);color:var(--text,#e9e3d6);width:100%;max-width:520px;max-height:86vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))">' + html + '</div>';
     document.body.appendChild(m);
-    m.addEventListener('click', e => {
-      const b = e.target.closest('button'); if (!b) { if (e.target === m) { close(); cb(null); } return; }
-      if (b.dataset.a === 'cancel') { close(); return cb(null); }
-      if (b.dataset.a === 'asis') return asIs();
-      key = keyOf(cand[+b.dataset.i]); step();
-    });
+    m.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) { if (e.target === m) { close(); cb(null); } return; } onClick(b); });
   };
-  step();
+  const btn = 'display:block;width:100%;text-align:left;margin:0 0 8px;padding:12px 14px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:14px;cursor:pointer';
+  const small = 'flex:1;padding:11px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:none;color:var(--muted,#8e8a80);font:inherit;font-size:13px;cursor:pointer';
+
+  // запасной путь: выбрать приход для остатка вручную (v291)
+  const вручную = () => {
+    const splits = [];
+    let left = total, key = aimKey;
+    const step = () => {
+      const r = rows.find(x => keyOf(x) === key);
+      if (!r) return asIs();
+      const take = Math.min(left, r.left);
+      splits.push({ key, amount: take });
+      left = Math.round((left - take) * 100) / 100;
+      if (left <= 0.5) return finish(splits);
+      const cand = rows.filter(x => !splits.some(sp => sp.key === keyOf(x)));
+      if (!cand.length) { splits[splits.length - 1].amount += left; return finish(splits); }
+      overlay(`<div style="font-size:15px;line-height:1.5;margin-bottom:12px">Приход от ${formatDateShort(r.date)} закрыт на ${fmt(take)}.<br>Остаток <b>${fmt(left)}</b> — на какой приход отнести?</div>`
+        + cand.map((c, i) => `<button type="button" data-i="${i}" style="${btn}"><b>${formatDateShort(c.date)}</b> · приход ${fmt(c.amount !== undefined ? c.amount : c.full)} · осталось <b>${fmt(c.left)}</b></button>`).join('')
+        + `<div style="display:flex;gap:8px;margin-top:6px"><button type="button" data-a="cancel" style="${small}">Отмена</button></div>`,
+        b => { if (b.dataset.a === 'cancel') { close(); return cb(null); } key = keyOf(cand[+b.dataset.i]); step(); });
+    };
+    step();
+  };
+
+  const { plan, rest } = планРаспределения(rows, aimKey, total);
+  if (!plan.length) return asIs();
+  const строки = plan.map(x => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px dashed rgba(255,255,255,.1);font-size:14px">
+      <span>${formatDateShort(x.row.date)} · приход ${fmt(x.row.amount !== undefined ? x.row.amount : x.row.full)}</span>
+      <b>${fmt(x.amount)}${x.amount >= x.row.left - 0.5 ? ' <span style="color:var(--accent,#8fe8c9);font-weight:400;font-size:12px">закрыт</span>' : ' <span style="color:var(--muted,#8e8a80);font-weight:400;font-size:12px">из ' + fmt(x.row.left) + '</span>'}</b></div>`).join('');
+  overlay(`<div style="font-size:15px;line-height:1.5;margin-bottom:8px">Выдача <b>${fmt(total)}</b> больше остатка одного прихода. Распределю по приходам, от старых к новым:</div>${строки}`
+    + (rest ? `<div style="margin-top:8px;font-size:13px;color:#ffb74d;line-height:1.4">Ещё ${fmt(rest)} некуда отнести — других невыданных приходов нет; они останутся на последнем.</div>` : '')
+    + `<div style="margin-top:14px"><button type="button" data-a="ok" style="${btn};background:var(--accent,#8fe8c9);color:#0d1f19;border-color:transparent;font-weight:700;text-align:center">Записать так</button>
+       <div style="display:flex;gap:8px"><button type="button" data-a="hand" style="${small}">Выбрать вручную</button><button type="button" data-a="asis" style="${small}">Не относить</button><button type="button" data-a="cancel" style="${small}">Отмена</button></div></div>`,
+    b => {
+      const a = b.dataset.a;
+      if (a === 'cancel') { close(); return cb(null); }
+      if (a === 'asis') return asIs();
+      if (a === 'hand') return вручную();
+      const splits = plan.map(x => ({ key: x.key, amount: x.amount }));
+      if (rest) splits[splits.length - 1].amount = Math.round((splits[splits.length - 1].amount + rest) * 100) / 100;
+      finish(splits);
+    });
 }
 
 /* Записать выдачи по приходам из offerOverpay. Поля out-* уже заполнены
@@ -9207,7 +9240,7 @@ function qeSaveEdit() {
       showToast('Укажите приход, за который выдаёте — нажмите день в списке');
       return;
     }
-    if (isNaN(qeAmount2Value())) { showToast('Сумма по 2-му % введена неверно', true); return; }
+    if (qeAmount2Неверна()) { showToast('Сумма по 2-му % введена неверно', true); return; }
     if (!qeConfirmOverpay(amount)) return;
     r.client = g('out-client').value || r.client;
     r.amount = amount;
@@ -9260,7 +9293,7 @@ function qeSubmit() {
   /* Владелец 25.08.2026: «надо спрашивать, по какому приходу». Раньше выдача
      без отметки уходила на самый ранний долг пары, и деньги оказывались не
      там, где он их видел. Есть невыданные приходы — приход обязателен. */
-  if (qeType === 'out' && isNaN(qeAmount2Value())) { showToast('Сумма по 2-му % введена неверно', true); return; }
+  if (qeType === 'out' && qeAmount2Неверна()) { showToast('Сумма по 2-му % введена неверно', true); return; }
   if (qeType === 'out' && qeAimedIn) {
     const сумма = qeSums.reduce((a, x) => a + (qeParseSum(x) || 0), 0);
     const rr = (qeUnpaid || []).find(x => x.date + '#' + x.idx === qeAimedIn);
@@ -11649,6 +11682,8 @@ function kbSaveEdit(pair, сумма) {
   kbCloseForm();
 }
 
+function kbAmount2Неверна() { const v = kbAmount2Value(); return v !== undefined && isNaN(v); }
+
 /* Сумма по 2-му % из бланка книги: undefined — не задана, NaN — неверно (v295). */
 function kbAmount2Value() {
   const el = document.getElementById('kbfSum2');
@@ -11662,7 +11697,7 @@ function kbFormSave() {
   const f = kbForm, g = id => document.getElementById(id);
   const ошибка = t => { g('kbfErr').textContent = t; };
   ошибка('');
-  if (f.type === 'out' && isNaN(kbAmount2Value())) { g('kbfSum2').focus(); return ошибка('Сумма по 2-му % введена неверно.'); }
+  if (f.type === 'out' && kbAmount2Неверна()) { g('kbfSum2').focus(); return ошибка('Сумма по 2-му % введена неверно.'); }
   const pair = g('kbfPair').value;
   if (!pair || pair === '__add__') return ошибка('Выберите пару.');
   const сумма = g('kbfSum').value.replace(/\s/g, '');
