@@ -1794,7 +1794,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v297</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v298</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2004,7 +2004,7 @@
       </div>
     </div>
     <div class="qe-field" id="qe-amount2-field" style="display:none">
-      <label>Сумма по 2-му % — только если она другая (иначе оставьте пустой)</label>
+      <label>Получено по 2-му % — вторая часть, если она другая (иначе считается та же, что по 1-му)</label>
       <input type="text" id="qe-amount2" class="qe-input" inputmode="decimal" autocomplete="off"
              placeholder="по умолчанию — та же, что по 1-му %" oninput="numericInputFilter(event)">
     </div>
@@ -4714,7 +4714,8 @@ function renderOutBody(day) {
       return `
       <tr>
         <td class="client-name">${escapeHtml(r.client)}${dueChipEditableHtml(r, 'out', i)}${noteHtml}${outForInHtml(COVER, i, r.amount)}</td>
-        <td class="amount neg">${fmt(r.amount)}</td>
+        <td class="amount neg">${fmt(r.amount)}${(r.amount2 !== undefined && r.amount2 !== null && !isNaN(r.amount2))
+          ? `<div style="font-family:var(--font-ui);font-size:10.5px;font-weight:400;color:#8fb4ff;margin-top:3px;white-space:nowrap" title="Своя сумма по 2-му %: по ней считается отчёт по 2-му проценту">по 2-му %: ${fmt(r.amount2)}</div>` : ''}</td>
         <td><div class="row-actions">
           <button class="icon-btn" onclick="openQuickEntryEdit('out',${i})" title="Редактировать">✏️</button>
           <button class="icon-btn" onclick="deleteRow('out',${i})" title="Удалить">🗑</button>
@@ -8771,7 +8772,7 @@ function qeSetType(type) {
   g('qe-tab-out').disabled = editing;
   g('qe-tab-in').style.opacity = (editing && !isIn) ? '.35' : '';
   g('qe-tab-out').style.opacity = (editing && isIn) ? '.35' : '';
-  g('qe-amount-label').textContent = isIn ? 'Суммы — каждая своей строкой' : 'Сумма';
+  g('qe-amount-label').textContent = isIn ? 'Суммы — каждая своей строкой' : 'Получено на руки — по 1-му %';
   // То, что уже набрано в компактной форме, раскладываем обратно по строкам
   const parsedRaw = parseSumString(g(isIn ? 'in-amount' : 'out-amount').value || '');
   qeSums = (parsedRaw && parsedRaw.parts.length) ? parsedRaw.parts.map(n => fmtExact(n)) : [''];
@@ -11553,9 +11554,9 @@ function kbFormHtml() {
     <label class="kbf"><span>Пара</span><select id="kbfPair" onchange="kbFormPair(this.value)">${варианты}</select></label>
     ${isIn ? '' : `<div class="kbf"><span>За какой приход</span><div id="kbfUnpaid">${kbUnpaidHtml()}</div></div>`}
     ${isIn ? `<div class="kbf"><span>Суммы прихода — по одной в строке</span><div id="kbfSums">${kbSumsHtml()}</div></div>`
-    : `<label class="kbf"><span>Сумма выдачи</span>
+    : `<label class="kbf"><span>Получено на руки — по 1-му %</span>
       <input id="kbfSum" class="kbf-sum" inputmode="decimal" autocomplete="off" oninput="kbFormPreview()" placeholder="0"></label>
-      <label class="kbf"><span>Сумма по 2-му % — только если другая</span>
+      <label class="kbf"><span>Получено по 2-му % — если другая (иначе та же)</span>
       <input id="kbfSum2" inputmode="decimal" autocomplete="off" placeholder="по умолчанию — та же, что по 1-му %"></label>`}
     ${isIn ? `<div class="kbf-row">
       <label class="kbf"><span>1-й %</span><input id="kbfP1" inputmode="decimal" autocomplete="off" value="${прошлые ? пц(прошлые.pct) : ''}" oninput="kbFormPreview()"></label>
