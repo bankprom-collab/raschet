@@ -1495,6 +1495,9 @@
   .kb-ledger { background:var(--kb-wash); border-radius:14px; padding:2px 14px; }
   .kb-ledger div { display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--kb-hair); font-size:14px; color:var(--kb-soft); }
   .kb-ledger div:last-child { border-bottom:0; color:var(--kb-text); font-weight:600; }
+  .kb-ledger .kb-bl { display:block; padding:2px 0 8px 12px; font-size:13px; color:var(--kb-muted); font-weight:400; }
+  .kb-ledger .kb-bl > span { display:flex; justify-content:space-between; gap:10px; padding:3px 0; }
+  .kb-ledger .kb-bl b { font-weight:600; color:var(--kb-soft); }
   .kb-ledger b { font-weight:700; color:var(--kb-text); white-space:nowrap; }
   .kb-stamps { display:flex; flex-wrap:wrap; gap:10px; }
   .kb-stamp { font-size:12px; letter-spacing:.04em; text-transform:uppercase; border:1.5px solid var(--kb-soft); color:var(--kb-soft); border-radius:4px; padding:4px 9px; transform:rotate(-3deg); }
@@ -1794,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v300</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v301</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -11000,7 +11003,7 @@ function kbMonthData(ym) {
     };
     return Object.assign(ch, {
       loose: ch.loose || [],
-      weeks, owe: sum(all, 'left1'), give: sum(all, 'left2'), base: sum(open, 'amount'),
+      weeks, owe: sum(all, 'left1'), give: sum(all, 'left2'), base: sum(open, 'amount'), baseList: open,
       came: sum(weeks.filter(w => !w.carry).flatMap(w => w.incomes), 'amount'), carried: sum(ch.carry, 'left1'),
       counted: all.some(i => i.counted), outside: all.some(i => !i.counted),
       late: all.some(i => i.late), dues: open.filter(i => i.due), p1: один('pct'), p2: один('pct2'),
@@ -11221,7 +11224,8 @@ const KB_VIEWS = {
       <div class="kb-title">${escapeHtml(c.name)}</div>
       <div><div class="kb-lbl">Нам должны</div><div class="kb-big"${c.owe ? '' : ' style="color:var(--kb-ok)"'}>${c.owe ? fmt(c.owe) : (c.counted ? 'всё выдано' : 'вне счёта')}</div></div>
       ${c.owe ? `<div class="kb-ledger">
-        <div><span>База</span><b>${fmt(c.base)}</b></div>
+        <div><span>База${c.baseList.length > 1 ? ' · ' + kbPl(c.baseList.length, 'приход', 'прихода', 'приходов') : ''}</span><b>${fmt(c.base)}</b></div>
+        ${c.baseList.length > 1 ? `<div class="kb-bl">${c.baseList.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.idx - b.idx).map(i => `<span><span>${formatDateShort(i.date)}${i.parts && i.parts.length > 1 ? ' · ' + i.parts.map(fmt).join(' + ') : ''}</span><b>${fmt(i.amount)}</b></span>`).join('')}</div>` : ''}
         <div><span>${l1} · нам должны</span><b style="color:var(--kb-owe)">${fmt(c.owe)}</b></div>
         <div><span>${l2} · отдаём</span><b>${fmt(c.give)}</b></div>
         <div><span>Разница</span><b>${fmt(c.owe - c.give)}</b></div>
