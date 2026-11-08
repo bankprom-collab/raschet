@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v305</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v306</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2478,6 +2478,10 @@
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px">🗄 Резервные копии — автоматически, последние 14 дней</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">Раз в день перед первым изменением программа сохраняет копию всех данных в этом браузере. Отдельные копии создаются перед синхронизацией, импортом и восстановлением.</div>
       <div id="backup-list" style="max-height:200px;overflow-y:auto;font-size:12px;border:1px solid var(--border);border-radius:8px">—</div>
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--muted)">Журнал входа в Google (для диагностики)</summary>
+        <pre id="trace-box" style="white-space:pre-wrap;font-size:11px;max-height:200px;overflow:auto;margin:6px 0 0;color:var(--muted)"></pre>
+      </details>
     </div>
 
     <div class="modal-footer">
@@ -13269,6 +13273,16 @@ const GDRIVE_GRANTED_KEY = 'gdrive_granted_v1';
 let tokenAskInteractive = false;
 let tokenRetriedConsent = false;
 let lastTokenError = '';        // что именно ответил Google (v141)
+/* Журнал входа в Google (v306): что происходило при последних попытках. Нужен, чтобы видеть
+   на телефоне, где рвётся вход, — без компьютера и отладчика. Показывается в окне «Синхр.». */
+const GDRIVE_TRACE_KEY = 'gdrive_trace_v1';
+function трасса(msg) {
+  try {
+    const a = JSON.parse(localStorage.getItem(GDRIVE_TRACE_KEY) || '[]');
+    a.push(new Date().toLocaleTimeString('ru-RU') + ' ' + msg);
+    localStorage.setItem(GDRIVE_TRACE_KEY, JSON.stringify(a.slice(-30)));
+  } catch (e) {}
+}
 const GDRIVE_LAST_SYNC_KEY = 'gdrive_last_sync_v1';
 const GDRIVE_TOKEN_KEY = 'gdrive_token_v1';
 const GDRIVE_FOLDER_NAME = 'Расчётная_программа';
@@ -13340,6 +13354,10 @@ function resetSyncConfig() {
 }
 
 function refreshSyncUI() {
+  try {
+    const tb = document.getElementById('trace-box');
+    if (tb) tb.textContent = JSON.parse(localStorage.getItem(GDRIVE_TRACE_KEY) || '[]').join('\n') || 'пока пусто';
+  } catch (e) {}
   markSyncStale();            // после ручной отправки кнопка гаснет сразу
   const connected = !!accessToken;
   document.getElementById('sync-not-connected').style.display = connected ? 'none' : 'block';
@@ -13416,6 +13434,7 @@ function initGoogleApis() {
            ensureToken висел, и вместе с ним вся синхронизация устройства до перезагрузки страницы. */
         error_callback: (err) => {
           lastTokenError = (err && (err.message || err.type)) || 'окно Google не открылось';
+          трасса('окно Google: ' + ((err && err.type) || 'без ответа'));
           tokenRetriedConsent = false;
           flushTokenWaiters(false);
         },
@@ -13426,6 +13445,7 @@ function initGoogleApis() {
                (один раз). Если это была фоновая синхронизация, просто снимаем
                отметку о разрешении, чтобы следующий ручной клик спросил. */
             lastTokenError = resp.error_description || resp.error || '';
+            трасса('Google ответил ошибкой: ' + (resp.error || '') + ' ' + (resp.error_description || ''));
             try { localStorage.removeItem(GDRIVE_GRANTED_KEY); } catch (e) {}
             if (tokenAskInteractive && !tokenRetriedConsent && tokenClient) {
               tokenRetriedConsent = true;
@@ -13438,6 +13458,7 @@ function initGoogleApis() {
           }
           tokenRetriedConsent = false;
           lastTokenError = '';
+          трасса('Google выдал доступ');
           accessToken = resp.access_token;
           tokenExpiresAt = Date.now() + (((resp.expires_in || 3600) - 300) * 1000);
           // Запоминаем токен (действует ~1 час), чтобы не входить заново при каждом открытии
@@ -13500,6 +13521,7 @@ function ensureToken(interactive) {
     if (tokenWaiters.length > 1) return;      // запрос уже в пути — просто ждём
     tokenAskInteractive = !!interactive;
     tokenRetriedConsent = false;
+    if (interactive) трасса('запрос доступа вручную' + (granted ? '' : ', нужно согласие'));
     try {
       tokenClient.requestAccessToken({ prompt: granted ? '' : 'consent' });
       if (!interactive) setTimeout(() => flushTokenWaiters(false), 90000);   // страховка для фона: ответа нет 90 с — не ждём вечно (ручной вход ждёт сколько нужно)
@@ -13907,7 +13929,7 @@ function mergeStates(base, local, remote) {
 let _syncRun = null, _syncAgain = false;
 function smartSync(opts) {
   if (_syncRun) { _syncAgain = true; return _syncRun; }
-  _syncRun = smartSyncOnce(opts || {}).finally(() => {
+  _syncRun = smartSyncOnce(opts || {}).then(r => { if (!(opts && opts.silent) || (r && r.status !== 'in-sync' && r.status !== 'no-auth')) трасса('синхронизация: ' + (r && r.status)); return r; }).finally(() => {
     _syncRun = null;
     if (_syncAgain) { _syncAgain = false; smartSync({ silent: true }).catch(() => {}); }
   });
@@ -14124,6 +14146,10 @@ if (localStorage.getItem(GDRIVE_DIRTY_KEY) === null) {
   const last = parseInt(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || '0', 10);
   try { localStorage.setItem(GDRIVE_DIRTY_KEY, (state._modifiedAt || 0) > last + 2000 ? '1' : '0'); } catch (e) {}
 }
+try {
+  const нав = (performance.getEntriesByType('navigation')[0] || {}).type;
+  трасса('страница загружена (' + (нав || '?') + ')' + (document.wasDiscarded ? ' · вкладку выгрузила система' : '') + (inAndroidApp() ? ' · иконка' : ''));
+} catch (e) {}
 restoreSavedToken();
 восстановитьЕслиПусто();   // v294: память браузера пуста, а копия в IndexedDB есть — вернуть
 initLoginScreen();
@@ -14151,6 +14177,7 @@ function syncOnReturn() {
   }
 }
 document.addEventListener('visibilitychange', () => {
+  трасса('страница ' + (document.visibilityState === 'visible' ? 'на экране' : 'скрыта'));
   if (document.visibilityState === 'visible') syncOnReturn();
   // v277: уходим с вкладки (телефон заблокировали, переключились) — отправить
   // то, что ещё не ушло, не дожидаясь трёх секунд
