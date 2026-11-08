@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v304</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v305</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2599,6 +2599,10 @@ function unlock() {
       smartSync({ silent: false }).catch(e => console.warn('Init sync failed:', e));
     }
   }, 1500);
+  // Открыто из иконки на Android ради входа в Google (v305): сразу окно подключения
+  if (/[?&]connect=1/.test(location.search) && !inAndroidApp() && getClientId() && !accessToken) {
+    setTimeout(() => { openSyncModal(); showToast('Нажмите «Подключить Google Drive», затем вернитесь в приложение на иконке'); }, 600);
+  }
 }
 
 function lockApp() {
@@ -13466,48 +13470,27 @@ function initGoogleApis() {
  * interactive=false — для автосинхронизации: не вышло тихо, просто ждём
  * следующего раза. Никаких всплывающих окон за спиной у человека.
  */
-/* Вход Google без окна — для программы, запущенной с иконки на Android (v304).
+/* Вход Google для программы, запущенной с иконки на Android (v305).
    Окно входа (GIS) в установленном приложении открывается отдельной вкладкой и не может
-   вернуть ответ: человек подтверждает доступ, а программа остаётся без токена.
-   Здесь вместо окна — обычный переход на страницу Google и возврат на адрес программы с
-   токеном в адресе (#access_token=…). В Google Cloud у Client ID должен быть
-   «Разрешённый URI перенаправления» https://bankprom-collab.github.io/raschet/ . */
-const GDRIVE_OAUTH_STATE_KEY = 'gdrive_oauth_state_v1';
+   вернуть ответ: человек подтверждает доступ, а программа остаётся без токена. Поэтому
+   с иконки вход делается в Chrome: программа открывает саму себя там (?connect=1), токен
+   ложится в общее хранилище, а иконка при возвращении подхватывает его (syncOnReturn).
+   Настроек в Google Cloud это не требует. */
 function inAndroidApp() {
   try { return /Android/i.test(navigator.userAgent) && (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true); }
   catch (e) { return false; }
 }
-function startRedirectLogin() {
-  const st = Math.random().toString(36).slice(2) + Date.now().toString(36);
-  try { localStorage.setItem(GDRIVE_OAUTH_STATE_KEY, st); } catch (e) {}
-  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
-    client_id: getClientId(), redirect_uri: location.origin + location.pathname.replace(/index\.html$/, ''),
-    response_type: 'token', scope: GDRIVE_SCOPES, state: st, include_granted_scopes: 'true' });
-}
-// Возврат со страницы Google: забираем токен из адреса. true — токен принят.
-function takeRedirectToken(hash) {
-  const p = new URLSearchParams(String(hash || '').replace(/^#/, ''));
-  if (!p.get('access_token') && !p.get('error')) return false;
-  let ждали = null; try { ждали = localStorage.getItem(GDRIVE_OAUTH_STATE_KEY); } catch (e) {}
-  try { localStorage.removeItem(GDRIVE_OAUTH_STATE_KEY); } catch (e) {}
-  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
-  if (!ждали || p.get('state') !== ждали) return false;      // чужой или устаревший ответ
-  if (p.get('error')) { lastTokenError = p.get('error_description') || p.get('error'); return false; }
-  accessToken = p.get('access_token');
-  tokenExpiresAt = Date.now() + (((+p.get('expires_in') || 3600) - 300) * 1000);
-  lastTokenError = '';
-  try {
-    localStorage.setItem(GDRIVE_TOKEN_KEY, JSON.stringify({ token: accessToken, expiresAt: tokenExpiresAt }));
-    localStorage.setItem(GDRIVE_GRANTED_KEY, '1');
-  } catch (e) {}
-  return true;
+function openChromeToConnect() {
+  const u = location.origin + location.pathname.replace(/index\.html$/, '') + '?connect=1';
+  showToast('Открываю Chrome для входа в Google. Не открылся — меню ⋮ → «Открыть в Chrome»', true);
+  location.href = 'intent://' + u.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(u) + ';end';
 }
 
 function ensureToken(interactive) {
   return new Promise((resolve) => {
     if (tokenAlive()) { resolve(true); return; }
-    if (inAndroidApp()) {                     // с иконки на Android окно Google не работает — уходим на страницу входа
-      if (interactive && getClientId()) { showToast('Открываю вход Google…'); startRedirectLogin(); setTimeout(() => resolve(false), 4000); }
+    if (inAndroidApp()) {                     // с иконки на Android окно Google не работает — вход делаем в Chrome
+      if (interactive && getClientId()) { openChromeToConnect(); setTimeout(() => resolve(false), 4000); }
       else resolve(false);
       return;
     }
@@ -13588,7 +13571,7 @@ async function connectGDrive() {
   const ok = await ensureToken(true);
   if (ok) {
     localStorage.setItem(GDRIVE_GRANTED_KEY, '1');
-    showToast('Подключено к Google Drive');
+    showToast(/[?&]connect=1/.test(location.search) ? '✅ Подключено. Вернитесь в приложение на иконке — оно подхватит доступ' : 'Подключено к Google Drive');
   } else {
     showToast(lastTokenError
       ? googleErrorHint(lastTokenError)
@@ -14141,7 +14124,6 @@ if (localStorage.getItem(GDRIVE_DIRTY_KEY) === null) {
   const last = parseInt(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || '0', 10);
   try { localStorage.setItem(GDRIVE_DIRTY_KEY, (state._modifiedAt || 0) > last + 2000 ? '1' : '0'); } catch (e) {}
 }
-if (takeRedirectToken(location.hash)) setTimeout(() => showToast('Подключено к Google Drive'), 800);
 restoreSavedToken();
 восстановитьЕслиПусто();   // v294: память браузера пуста, а копия в IndexedDB есть — вернуть
 initLoginScreen();
