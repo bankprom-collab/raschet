@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v306</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v307</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -13459,6 +13459,7 @@ function initGoogleApis() {
           tokenRetriedConsent = false;
           lastTokenError = '';
           трасса('Google выдал доступ');
+          try { sessionStorage.removeItem('gdrive_connecting_v1'); } catch (e) {}
           accessToken = resp.access_token;
           tokenExpiresAt = Date.now() + (((resp.expires_in || 3600) - 300) * 1000);
           // Запоминаем токен (действует ~1 час), чтобы не входить заново при каждом открытии
@@ -13523,7 +13524,11 @@ function ensureToken(interactive) {
     tokenRetriedConsent = false;
     if (interactive) трасса('запрос доступа вручную' + (granted ? '' : ', нужно согласие'));
     try {
-      tokenClient.requestAccessToken({ prompt: granted ? '' : 'consent' });
+      /* v307: prompt всегда '' — Google сам спрашивает согласие, только если оно нужно. Раньше без
+         отметки «разрешение давали» окно согласия (длинное, с прокруткой) показывалось при каждой
+         попытке; на телефоне вкладку с программой успевало выгрузить из памяти, пока человек его читал. */
+      if (interactive) { try { sessionStorage.setItem('gdrive_connecting_v1', String(Date.now())); } catch (e) {} }   // только ручной вход
+      tokenClient.requestAccessToken({ prompt: '' });
       if (!interactive) setTimeout(() => flushTokenWaiters(false), 90000);   // страховка для фона: ответа нет 90 с — не ждём вечно (ручной вход ждёт сколько нужно)
     } catch (e) {
       flushTokenWaiters(false);
@@ -14153,6 +14158,18 @@ try {
 restoreSavedToken();
 восстановитьЕслиПусто();   // v294: память браузера пуста, а копия в IndexedDB есть — вернуть
 initLoginScreen();
+/* v307: страница перезагрузилась, пока шёл вход в Google (на телефоне вкладку выгружает система) —
+   заново пароль не спрашиваем: человек только что был внутри. Только в этой же вкладке, 10 минут,
+   один раз; сразу открываем окно подключения. */
+try {
+  const было = +sessionStorage.getItem('gdrive_connecting_v1') || 0;
+  if (было && Date.now() - было < 600000 && localStorage.getItem(PWD_KEY) && !/[?&]connect=1/.test(location.search)) {
+    sessionStorage.removeItem('gdrive_connecting_v1');
+    трасса('страница перезагрузилась во время входа — пароль не спрашиваем');
+    unlock();
+    setTimeout(() => { openSyncModal(); showToast('Страница перезагрузилась во время входа в Google. Нажмите «Подключить Google Drive» ещё раз — теперь быстрее', true); }, 700);
+  }
+} catch (e) {}
 bootstrapAutoSync();
 markSyncStale();
 // Если токен ещё действует — заранее поднимаем Google API для тихой синхронизации
@@ -14177,7 +14194,6 @@ function syncOnReturn() {
   }
 }
 document.addEventListener('visibilitychange', () => {
-  трасса('страница ' + (document.visibilityState === 'visible' ? 'на экране' : 'скрыта'));
   if (document.visibilityState === 'visible') syncOnReturn();
   // v277: уходим с вкладки (телефон заблокировали, переключились) — отправить
   // то, что ещё не ушло, не дожидаясь трёх секунд
