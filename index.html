@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v303</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v304</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -13466,9 +13466,51 @@ function initGoogleApis() {
  * interactive=false — для автосинхронизации: не вышло тихо, просто ждём
  * следующего раза. Никаких всплывающих окон за спиной у человека.
  */
+/* Вход Google без окна — для программы, запущенной с иконки на Android (v304).
+   Окно входа (GIS) в установленном приложении открывается отдельной вкладкой и не может
+   вернуть ответ: человек подтверждает доступ, а программа остаётся без токена.
+   Здесь вместо окна — обычный переход на страницу Google и возврат на адрес программы с
+   токеном в адресе (#access_token=…). В Google Cloud у Client ID должен быть
+   «Разрешённый URI перенаправления» https://bankprom-collab.github.io/raschet/ . */
+const GDRIVE_OAUTH_STATE_KEY = 'gdrive_oauth_state_v1';
+function inAndroidApp() {
+  try { return /Android/i.test(navigator.userAgent) && (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true); }
+  catch (e) { return false; }
+}
+function startRedirectLogin() {
+  const st = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  try { localStorage.setItem(GDRIVE_OAUTH_STATE_KEY, st); } catch (e) {}
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+    client_id: getClientId(), redirect_uri: location.origin + location.pathname.replace(/index\.html$/, ''),
+    response_type: 'token', scope: GDRIVE_SCOPES, state: st, include_granted_scopes: 'true' });
+}
+// Возврат со страницы Google: забираем токен из адреса. true — токен принят.
+function takeRedirectToken(hash) {
+  const p = new URLSearchParams(String(hash || '').replace(/^#/, ''));
+  if (!p.get('access_token') && !p.get('error')) return false;
+  let ждали = null; try { ждали = localStorage.getItem(GDRIVE_OAUTH_STATE_KEY); } catch (e) {}
+  try { localStorage.removeItem(GDRIVE_OAUTH_STATE_KEY); } catch (e) {}
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  if (!ждали || p.get('state') !== ждали) return false;      // чужой или устаревший ответ
+  if (p.get('error')) { lastTokenError = p.get('error_description') || p.get('error'); return false; }
+  accessToken = p.get('access_token');
+  tokenExpiresAt = Date.now() + (((+p.get('expires_in') || 3600) - 300) * 1000);
+  lastTokenError = '';
+  try {
+    localStorage.setItem(GDRIVE_TOKEN_KEY, JSON.stringify({ token: accessToken, expiresAt: tokenExpiresAt }));
+    localStorage.setItem(GDRIVE_GRANTED_KEY, '1');
+  } catch (e) {}
+  return true;
+}
+
 function ensureToken(interactive) {
   return new Promise((resolve) => {
     if (tokenAlive()) { resolve(true); return; }
+    if (inAndroidApp()) {                     // с иконки на Android окно Google не работает — уходим на страницу входа
+      if (interactive && getClientId()) { showToast('Открываю вход Google…'); startRedirectLogin(); setTimeout(() => resolve(false), 4000); }
+      else resolve(false);
+      return;
+    }
     if (!tokenClient) { initGoogleApis(); resolve(false); return; }
     const granted = localStorage.getItem(GDRIVE_GRANTED_KEY) === '1';
     tokenWaiters.push(resolve);
@@ -14099,6 +14141,7 @@ if (localStorage.getItem(GDRIVE_DIRTY_KEY) === null) {
   const last = parseInt(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || '0', 10);
   try { localStorage.setItem(GDRIVE_DIRTY_KEY, (state._modifiedAt || 0) > last + 2000 ? '1' : '0'); } catch (e) {}
 }
+if (takeRedirectToken(location.hash)) setTimeout(() => showToast('Подключено к Google Drive'), 800);
 restoreSavedToken();
 восстановитьЕслиПусто();   // v294: память браузера пуста, а копия в IndexedDB есть — вернуть
 initLoginScreen();
@@ -14110,6 +14153,7 @@ if (accessToken && getClientId()) { initGoogleApis(); }
 // При возвращении вкладки в фокус — проверяем, нет ли свежих данных
 let lastVisibilitySync = 0;
 function syncOnReturn() {
+  if (!tokenAlive()) { restoreSavedToken(); refreshSyncUI(); }   // вход мог завершиться в другой вкладке (v304)
   markSyncStale();          // вернулся на вкладку — увидел, свежа ли копия
   // Не чаще раз в 30 секунд
   const now = Date.now();
