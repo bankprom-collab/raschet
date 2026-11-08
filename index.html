@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v307</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v308</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -2603,10 +2603,6 @@ function unlock() {
       smartSync({ silent: false }).catch(e => console.warn('Init sync failed:', e));
     }
   }, 1500);
-  // Открыто из иконки на Android ради входа в Google (v305): сразу окно подключения
-  if (/[?&]connect=1/.test(location.search) && !inAndroidApp() && getClientId() && !accessToken) {
-    setTimeout(() => { openSyncModal(); showToast('Нажмите «Подключить Google Drive», затем вернитесь в приложение на иконке'); }, 600);
-  }
 }
 
 function lockApp() {
@@ -13492,28 +13488,25 @@ function initGoogleApis() {
  * interactive=false — для автосинхронизации: не вышло тихо, просто ждём
  * следующего раза. Никаких всплывающих окон за спиной у человека.
  */
-/* Вход Google для программы, запущенной с иконки на Android (v305).
-   Окно входа (GIS) в установленном приложении открывается отдельной вкладкой и не может
-   вернуть ответ: человек подтверждает доступ, а программа остаётся без токена. Поэтому
-   с иконки вход делается в Chrome: программа открывает саму себя там (?connect=1), токен
-   ложится в общее хранилище, а иконка при возвращении подхватывает его (syncOnReturn).
-   Настроек в Google Cloud это не требует. */
+/* Установленное приложение на Android (иконка без адресной строки): окно входа Google (GIS)
+   там открывается отдельной вкладкой и не может вернуть ответ. Переход в Chrome из приложения
+   не помог (v305): ссылка перехватывалась самим приложением, и страница перезагружалась по кругу.
+   Поэтому (v308) здесь вход не пытаемся, а объясняем, как сделать иконку-ярлык Chrome; манифест
+   объявлен как display: browser — новая иконка получается ярлыком, а не приложением. */
 function inAndroidApp() {
   try { return /Android/i.test(navigator.userAgent) && (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true); }
   catch (e) { return false; }
-}
-function openChromeToConnect() {
-  const u = location.origin + location.pathname.replace(/index\.html$/, '') + '?connect=1';
-  showToast('Открываю Chrome для входа в Google. Не открылся — меню ⋮ → «Открыть в Chrome»', true);
-  location.href = 'intent://' + u.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(u) + ';end';
 }
 
 function ensureToken(interactive) {
   return new Promise((resolve) => {
     if (tokenAlive()) { resolve(true); return; }
-    if (inAndroidApp()) {                     // с иконки на Android окно Google не работает — вход делаем в Chrome
-      if (interactive && getClientId()) { openChromeToConnect(); setTimeout(() => resolve(false), 4000); }
-      else resolve(false);
+    if (inAndroidApp()) {                     // иконка-приложение на Android: вход Google здесь не работает
+      if (interactive) {
+        трасса('вход из установленного приложения — не поддерживается');
+        showToast('Из этой иконки войти в Google нельзя. Удалите её и добавьте ярлык: Chrome ⋮ → «Добавить на главный экран» → «Создать ярлык»', true);
+      }
+      resolve(false);
       return;
     }
     if (!tokenClient) { initGoogleApis(); resolve(false); return; }
@@ -13598,7 +13591,7 @@ async function connectGDrive() {
   const ok = await ensureToken(true);
   if (ok) {
     localStorage.setItem(GDRIVE_GRANTED_KEY, '1');
-    showToast(/[?&]connect=1/.test(location.search) ? '✅ Подключено. Вернитесь в приложение на иконке — оно подхватит доступ' : 'Подключено к Google Drive');
+    showToast('Подключено к Google Drive');
   } else {
     showToast(lastTokenError
       ? googleErrorHint(lastTokenError)
@@ -14163,7 +14156,7 @@ initLoginScreen();
    один раз; сразу открываем окно подключения. */
 try {
   const было = +sessionStorage.getItem('gdrive_connecting_v1') || 0;
-  if (было && Date.now() - было < 600000 && localStorage.getItem(PWD_KEY) && !/[?&]connect=1/.test(location.search)) {
+  if (было && Date.now() - было < 600000 && localStorage.getItem(PWD_KEY)) {
     sessionStorage.removeItem('gdrive_connecting_v1');
     трасса('страница перезагрузилась во время входа — пароль не спрашиваем');
     unlock();
