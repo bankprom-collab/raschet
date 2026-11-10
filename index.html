@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v310</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v311</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -11155,8 +11155,8 @@ const KB_VIEWS = {
       <div class="kb-title">${escapeHtml(c.name)}</div>
       <div><div class="kb-lbl">Нам должны</div><div class="kb-big"${c.owe ? '' : ' style="color:var(--kb-ok)"'}>${c.owe ? fmt(c.owe) : (c.counted ? 'всё выдано' : 'вне счёта')}</div></div>
       ${c.owe ? `<div class="kb-ledger">
-        <div><span>База${c.baseList.length > 1 ? ' · ' + kbPl(c.baseList.length, 'приход', 'прихода', 'приходов') : ''}</span><b>${fmt(c.base)}</b></div>
-        ${c.baseList.length > 1 ? `<div class="kb-bl">${c.baseList.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.idx - b.idx).map(i => `<span><span>${formatDateShort(i.date)}${i.parts && i.parts.length > 1 ? ' · ' + i.parts.map(fmt).join(' + ') : ''}</span><b>${fmt(i.amount)}</b></span>`).join('')}</div>` : ''}
+        <div><span>База · ${kbPl(c.baseList.length, 'приход', 'прихода', 'приходов')}</span><b>${fmt(c.base)}</b></div>
+        ${c.baseList.length ? `<div class="kb-bl">${c.baseList.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.idx - b.idx).map(i => `<span><span>${formatDateShort(i.date)}${i.parts && i.parts.length > 1 ? ' · ' + i.parts.map(fmt).join(' + ') : ''}${i.left1 < i.after1 ? ' · выдан частично, осталось ' + fmt(i.left1) : ''}</span><b>${fmt(i.amount)}</b></span>`).join('')}</div>` : ''}
         <div><span>${l1} · нам должны</span><b style="color:var(--kb-owe)">${fmt(c.owe)}</b></div>
         <div><span>${l2} · отдаём</span><b>${fmt(c.give)}</b></div>
         <div><span>Разница</span><b>${fmt(c.owe - c.give)}</b></div>
