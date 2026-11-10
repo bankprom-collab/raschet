@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v309</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v310</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -10865,6 +10865,7 @@ function kbMonthData(ym) {
   const cover = pairPaidCoverage(день, 'fifo', undefined, true);
   const PARTS = incomeCoverParts(день, true);
   const map = {};
+  const ручные = {};   // приходы со своей суммой по 2-му % (v295) — по парам, считаем один раз
   const начало = ym + '-01';
   for (const d of Object.keys(state.days).sort()) {
     if (d > день) break;
@@ -10881,7 +10882,11 @@ function kbMonthData(ym) {
       const after1 = calcInRowFinal(r) || 0;
       const after2 = hasSecondPct(r) ? r100(r.total2) : null;
       const left1 = counted ? r100(after1 * (1 - frac)) : 0;
-      const left2 = !counted ? 0 : (after2 !== null ? r100(after2 * (1 - frac)) : left1);
+      /* По 2-му % введена своя сумма — остаток считаем от неё, как в блоке задолженности (v310);
+         до этого книга считала долей и расходилась с шапкой пары (13 окт: 224 100 вместо 240 400). */
+      const man = (counted && after2 !== null) ? (ручные[p] || (ручные[p] = manual2ByIncome(p)))[d + '#' + idx] : null;
+      const left2 = !counted ? 0 : man ? Math.max(0, after2 - Math.min(after2, man.sum))
+        : (after2 !== null ? r100(after2 * (1 - frac)) : left1);
       // С прошлых месяцев берём только то, что в счёте и ещё не выдано
       if (!свой && !(counted && left1 > 0)) return;
       const ch = map[p] || (map[p] = { name: p, group: pairGroupName(p), start: pairStart(p), weeks: {}, carry: [] });
