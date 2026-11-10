@@ -1797,7 +1797,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v308</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v309</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -8932,7 +8932,7 @@ function qeRenderUnpaid() {
     + `<div class="qe-unpaid-all"><span>Не выдано всего</span><b>${fmt(total)}</b></div>`
     + (qeAimedIn
         ? '<div style="font-size:10.5px;color:var(--accent);margin-top:6px;line-height:1.4">Выдача зачтётся именно за отмеченный день. Нажмите на него ещё раз, чтобы снять привязку.</div>'
-        : '<div style="font-size:10.5px;color:var(--expense);margin-top:6px;line-height:1.4">Отметьте приход, за который выдаёте, — без этого выдача не сохранится.</div>');
+        : '<div style="font-size:10.5px;color:var(--muted-bright);margin-top:6px;line-height:1.4">Приход можно не выбирать: сумма сама распределится по приходам, от старых к новым.</div>');
 }
 
 /* Выдача больше остатка выбранного прихода? Избыток ни к какому приходу
@@ -8985,85 +8985,20 @@ function вторыеСуммы(pair, splits, amount2) {
   });
 }
 
-function offerOverpay(pair, aimKey, amount, cb, amount2, note2) {
-  const rows = pairUnpaidRows(pair, currentDate);
-  const keyOf = x => x.date + '#' + x.idx;
-  const total = Math.round(amount * 100) / 100;
-  const close = () => { const m = document.getElementById('overpay-modal'); if (m) m.remove(); };
-  const finish = (res) => { close(); cb(res); };
-  const asIs = () => finish([{ key: aimKey, amount: total }]);
-  const overlay = (html, onClick) => {
-    close();
-    const m = document.createElement('div');
-    m.id = 'overpay-modal';
-    m.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center';
-    m.innerHTML = '<div role="dialog" style="background:var(--card,#1c1d21);color:var(--text,#e9e3d6);width:100%;max-width:520px;max-height:86vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))">' + html + '</div>';
-    document.body.appendChild(m);
-    m.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) { if (e.target === m) { close(); cb(null); } return; } onClick(b); });
-  };
-  const btn = 'display:block;width:100%;text-align:left;margin:0 0 8px;padding:12px 14px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:14px;cursor:pointer';
-  const small = 'flex:1;padding:11px;border-radius:12px;border:1px solid var(--border,#2a2b30);background:none;color:var(--muted,#8e8a80);font:inherit;font-size:13px;cursor:pointer';
-
-  // запасной путь: выбрать приход для остатка вручную (v291)
-  const вручную = () => {
-    const splits = [];
-    let left = total, key = aimKey;
-    const step = () => {
-      const r = rows.find(x => keyOf(x) === key);
-      if (!r) return asIs();
-      const take = Math.min(left, r.left);
-      splits.push({ key, amount: take });
-      left = Math.round((left - take) * 100) / 100;
-      if (left <= 0.5) return finish(splits);
-      const cand = rows.filter(x => !splits.some(sp => sp.key === keyOf(x)));
-      if (!cand.length) { splits[splits.length - 1].amount += left; return finish(splits); }
-      overlay(`<div style="font-size:15px;line-height:1.5;margin-bottom:12px">Приход от ${formatDateShort(r.date)} закрыт на ${fmt(take)}.<br>Остаток <b>${fmt(left)}</b> — на какой приход отнести?</div>`
-        + cand.map((c, i) => `<button type="button" data-i="${i}" style="${btn}"><b>${formatDateShort(c.date)}</b> · приход ${fmt(c.amount !== undefined ? c.amount : c.full)} · осталось <b>${fmt(c.left)}</b></button>`).join('')
-        + `<div style="display:flex;gap:8px;margin-top:6px"><button type="button" data-a="cancel" style="${small}">Отмена</button></div>`,
-        b => { if (b.dataset.a === 'cancel') { close(); return cb(null); } key = keyOf(cand[+b.dataset.i]); step(); });
-    };
-    step();
-  };
-
-  const { plan, rest } = планРаспределения(rows, aimKey, total);
-  if (!plan.length) return asIs();
-  const noteIn = (document.getElementById('out-note') || { value: '' }).value || '';   // примечание из формы — к первой части
-  const строки = plan.map((x, k) => `<div style="padding:6px 0;border-top:1px dashed rgba(255,255,255,.1);font-size:14px">
-      <div style="display:flex;justify-content:space-between;gap:10px">
-      <span>${formatDateShort(x.row.date)} · приход ${fmt(x.row.amount !== undefined ? x.row.amount : x.row.full)}</span>
-      <b>${fmt(x.amount)}${x.amount >= x.row.left - 0.5 ? ' <span style="color:var(--accent,#8fe8c9);font-weight:400;font-size:12px">закрыт</span>' : ' <span style="color:var(--muted,#8e8a80);font-weight:400;font-size:12px">из ' + fmt(x.row.left) + '</span>'}</b></div>
-      <input type="text" data-n="${k}" value="${escapeHtml(k === 0 ? noteIn : '')}" placeholder="Примечание к сумме по 1-му % — откуда эта часть" autocomplete="off"
-        style="width:100%;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:13px">
-      ${(amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? `<input type="text" data-n2="${k}" value="${escapeHtml(k === 0 ? (note2 || '') : '')}" placeholder="Примечание к сумме по 2-му %" autocomplete="off"
-        style="width:100%;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#2a2b30);background:var(--surface,#24252a);color:inherit;font:inherit;font-size:13px">` : ''}</div>`).join('');
-  overlay(`<div style="font-size:15px;line-height:1.5;margin-bottom:8px">Выдача <b>${fmt(total)}</b> больше остатка одного прихода. Распределю по приходам, от старых к новым:</div>${строки}`
-    + ((amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? (() => {
-        const v2 = вторыеСуммы(pair, plan, amount2);
-        return `<div style="margin-top:10px;font-size:13px;line-height:1.5"><b>По 2-му %</b> (введено ${fmt(amount2)}): `
-          + plan.map((x, k) => formatDateShort(x.row.date) + ' — ' + fmt(v2[k] === undefined ? 0 : v2[k])).join(' · ') + '</div>';
-      })() : '')
-    + (rest ? `<div style="margin-top:8px;font-size:13px;color:#ffb74d;line-height:1.4">Ещё ${fmt(rest)} некуда отнести — других невыданных приходов нет; они останутся на последнем.</div>` : '')
-    + `<div style="margin-top:14px"><button type="button" data-a="ok" style="${btn};background:var(--accent,#8fe8c9);color:#0d1f19;border-color:transparent;font-weight:700;text-align:center">Записать так</button>
-       <div style="display:flex;gap:8px"><button type="button" data-a="hand" style="${small}">Выбрать вручную</button><button type="button" data-a="asis" style="${small}">Не относить</button><button type="button" data-a="cancel" style="${small}">Отмена</button></div></div>`,
-    b => {
-      const a = b.dataset.a;
-      if (a === 'cancel') { close(); return cb(null); }
-      if (a === 'asis') return asIs();
-      if (a === 'hand') return вручную();
-      const mm = document.getElementById('overpay-modal');
-      const splits = plan.map((x, k) => {
-        const inp = mm ? mm.querySelector('input[data-n="' + k + '"]') : null;
-        const inp2 = mm ? mm.querySelector('input[data-n2="' + k + '"]') : null;
-        return { key: x.key, amount: x.amount, note: inp ? inp.value.trim() : undefined,   // своё примечание у каждой части (v299)
-                 note2: inp2 ? inp2.value.trim() : undefined };                              // и ко второй сумме (v300)
-      });
-      if (rest) splits[splits.length - 1].amount = Math.round((splits[splits.length - 1].amount + rest) * 100) / 100;
-      finish(splits);
-    });
+/* Выдача сама распределяется по приходам (v309). Владелец 11.11.2026: «ввожу общую
+   сумму, а ты распределяешь; чего не хватает — переносится на следующую строку; подтверждать
+   каждый приход не нужно». Сначала приход, выбранный в форме (если выбран), дальше невыданные
+   приходы пары от старых к новым. Что не поместилось никуда — остаётся на последнем. */
+function автоСплиты(pair, aimKey, сумма) {
+  const { plan, rest } = планРаспределения(pairUnpaidRows(pair, currentDate), aimKey, Math.round(сумма * 100) / 100);
+  const splits = plan.map(x => ({ key: x.key, amount: x.amount }));
+  if (rest && splits.length) splits[splits.length - 1].amount = Math.round((splits[splits.length - 1].amount + rest) * 100) / 100;
+  return splits;
 }
 
-/* Записать выдачи по приходам из offerOverpay. Поля out-* уже заполнены
-   формой (пара, примечание, срок): примечание и срок — только первой записи. */
+/* Записать выдачи по приходам из автоСплиты. Поля out-* уже заполнены формой (пара,
+   примечание, срок): срок — только первой записи, примечания (к 1-му и ко 2-му %) — каждой
+   части: это «откуда деньги», оно одно на всю выдачу. */
 function записатьВыдачиПоПриходам(pair, splits, amount2, note2) {
   const g = id => document.getElementById(id);
   const доли2 = (amount2 !== undefined && amount2 !== null && !isNaN(amount2)) ? вторыеСуммы(pair, splits, amount2) : null;   // считаем ДО записи
@@ -9072,7 +9007,7 @@ function записатьВыдачиПоПриходам(pair, splits, amount2,
   splits.forEach((sp, i) => {
     g('out-client').value = pair;
     g('out-amount').value = String(Math.round(sp.amount * 100) / 100);
-    g('out-note').value = (sp.note !== undefined) ? sp.note : (i ? '' : note);   // примечание части (v299), иначе из формы — первой
+    g('out-note').value = (sp.note !== undefined) ? sp.note : note;   // примечание части (v299), иначе из формы — каждой (v309)
     if (g('out-due')) g('out-due').value = i ? '' : due;
     const before = getDay(currentDate).out.length;
     qeSubmitting = true;
@@ -9081,14 +9016,14 @@ function записатьВыдачиПоПриходам(pair, splits, amount2,
     if (outs.length > before) {
       outs[outs.length - 1].forIn = sp.key; n++;
       if (доли2 && доли2[i] !== undefined) outs[outs.length - 1].amount2 = доли2[i];   // своя доля второй суммы у каждого прихода (v297)
-      const n2 = (sp.note2 !== undefined) ? sp.note2 : (i === 0 ? (note2 || '') : '');   // примечание ко второй сумме (v300)
+      const n2 = (sp.note2 !== undefined) ? sp.note2 : (note2 || '');   // примечание ко второй сумме (v300; каждой части — v309)
       if (n2) outs[outs.length - 1].note2 = n2;
     }
   });
   recalcCarryoversAfter(currentDate);
   saveState();
   render();
-  showToast(n > 1 ? 'Записано выдач: ' + n + ' — по одной на приход' : 'Выдача записана');
+  showToast(n > 1 ? 'Выдача разнесена на ' + n + ' прихода: ' + splits.map(sp => formatDateShort(sp.key.slice(0, 10)) + ' — ' + fmt(sp.amount)).join(' · ') : 'Выдача записана');
   return n;
 }
 
@@ -9372,33 +9307,20 @@ function qeSaveEdit() {
 function qeSubmit() {
   qeOnInput();
   if (qeEditing) { qeSaveEdit(); return; }
-  /* Владелец 25.08.2026: «надо спрашивать, по какому приходу». Раньше выдача
-     без отметки уходила на самый ранний долг пары, и деньги оказывались не
-     там, где он их видел. Есть невыданные приходы — приход обязателен. */
+  /* Было (v166, 25.08.2026): приход обязателен — «надо спрашивать, по какому».
+     С v309 владелец отказался от подтверждений (11.11.2026): приход не выбран —
+     сумма сама идёт по приходам от старых к новым (автоСплиты). */
   if (qeType === 'out' && qeAmount2Неверна()) { showToast('Сумма по 2-му % введена неверно', true); return; }
-  if (qeType === 'out' && qeAimedIn) {
+  if (qeType === 'out' && qeUnpaid && qeUnpaid.length) {
     const сумма = qeSums.reduce((a, x) => a + (qeParseSum(x) || 0), 0);
     const rr = (qeUnpaid || []).find(x => x.date + '#' + x.idx === qeAimedIn);
-    if (rr && сумма > rr.left + 0.5) {            // больше остатка — спросим, куда отнести остаток (v291)
+    // приход не выбран или сумма больше его остатка — распределяем сами (v309)
+    if (сумма > 0 && (!qeAimedIn || (rr && сумма > rr.left + 0.5))) {
       const pair = document.getElementById('out-client').value;
-      offerOverpay(pair, qeAimedIn, сумма, splits => {
-        if (!splits) return;
-        записатьВыдачиПоПриходам(pair, splits, qeAmount2Value(), qeNote2Value());
-        qeAimedIn = null; qeAfterSubmit();
-      }, qeAmount2Value(), qeNote2Value());
+      записатьВыдачиПоПриходам(pair, автоСплиты(pair, qeAimedIn, сумма), qeAmount2Value(), qeNote2Value());
+      qeAimedIn = null; qeAfterSubmit();
       return;
     }
-  }
-  if (qeType === 'out' && !qeAimedIn && qeUnpaid && qeUnpaid.length) {
-    const field = document.getElementById('qe-unpaid-field');
-    if (field) {
-      field.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      field.style.transition = 'box-shadow .2s';
-      field.style.boxShadow = '0 0 0 2px var(--expense)';
-      setTimeout(() => { field.style.boxShadow = ''; }, 1600);
-    }
-    showToast('Укажите приход, за который выдаёте — нажмите день в списке');
-    return;
   }
   const day = getDay(currentDate);
   const before = (day[qeType] || []).length;
@@ -11586,7 +11508,7 @@ function kbLastPct(pair) {
 function kbUnpaidHtml() {
   const rows = kbUnpaidRowsForForm();
   if (!rows.length) return '<div class="kb-hint">Невыданных приходов у пары нет — выдача запишется без привязки.</div>';
-  return (kbForm.edit ? '<div class="kb-hint">Остатки — без учёта этой выдачи.</div>' : '')
+  return (kbForm.edit ? '<div class="kb-hint">Остатки — без учёта этой выдачи.</div>' : '<div class="kb-hint">Приход можно не выбирать: сумма сама распределится по приходам, от старых к новым.</div>')
     + rows.map(r => `<button type="button" class="kbf-pick${kbForm.aim === r.date + '#' + r.idx ? ' on' : ''}" onclick="kbFormAim('${r.date}#${r.idx}')">
       <span><b>${formatDateShort(r.date)}</b> · приход ${fmt(r.amount)}${r.текущий ? ' · <b>сейчас привязана</b>' : ''}</span>
       <span>осталось <b>${fmt(r.left)}</b>${r.dueDate ? ' · отдать до ' + formatDateShort(r.dueDate) : ''}</span>
@@ -11814,17 +11736,14 @@ function kbFormSave() {
     const amount = parseDecimal(сумма);
     if (!(amount > 0)) { g('kbfSum').focus(); return ошибка('Введите сумму выдачи.'); }
     const невыдано = pairUnpaidRows(pair, currentDate);
-    if (невыдано.length && !f.aim) return ошибка('Укажите приход, за который выдаёте, — нажмите на него в списке.');
     const r = невыдано.find(x => x.date + '#' + x.idx === f.aim);
-    if (r && amount > r.left + 0.5) {              // больше остатка — спросим, куда отнести остаток (v291)
+    // приход не выбран или сумма больше его остатка — распределяем сами (v309)
+    if (невыдано.length && (!f.aim || (r && amount > r.left + 0.5))) {
       g('out-client').value = pair;
       g('out-note').value = g('kbfNote').value;
       if (g('out-due')) g('out-due').value = g('kbfDue').value;
-      offerOverpay(pair, f.aim, amount, splits => {
-        if (!splits) return;
-        записатьВыдачиПоПриходам(pair, splits, kbAmount2Value(), kbNote2Value());
-        kbCloseForm();
-      }, kbAmount2Value(), kbNote2Value());
+      записатьВыдачиПоПриходам(pair, автоСплиты(pair, f.aim, amount), kbAmount2Value(), kbNote2Value());
+      kbCloseForm();
       return;
     }
     g('out-client').value = pair;
