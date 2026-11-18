@@ -1130,26 +1130,46 @@
   /* ── БЫСТРЫЙ ВВОД (крупная форма) ──────────────────────────────────────────
      Тот же ввод, что в компактной форме под таблицами, только пальцем.
      Значения живут в тех же полях формы — запись добавляет addRow(). */
-  #quick-entry-modal .modal { padding: 18px 16px 16px; }
-  .qe-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  /* v312: форма переделана. Владелец 18.11.2026: «в этом месте совершенно не нравится
+     дизайн; сделай удобным и красивым». Один цвет на форму — цвет типа записи
+     (--qe-c: мятный приход, коралловый выдача): им подсвечены вкладка, выбранная пара,
+     поле в фокусе и кнопка. Пары — строками по группам, кнопка «Добавить» прилипает
+     к низу окна, на телефоне окно — шторка снизу. */
+  #quick-entry-modal { --qe-c: var(--income); --qe-on: #04231b; --qe-soft: rgba(0,229,176,.12); }
+  #quick-entry-modal[data-t="out"] { --qe-c: var(--expense); --qe-on: #fff; --qe-soft: rgba(255,107,74,.13); }
+  #quick-entry-modal .modal { max-width: 540px; padding: 0 20px; background: var(--surface); }
+  .qe-head {
+    position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
+    margin: 0 -20px 14px; padding: 16px 20px 12px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  #quick-entry-modal .qe-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 700; color: var(--text); }
+  .qe-x {
+    flex: 0 0 36px; height: 36px; border-radius: 50%; cursor: pointer;
+    background: var(--card); border: 1px solid var(--border); color: var(--muted-bright);
+    font-size: 20px; line-height: 1;
+  }
+  .qe-x:hover { color: var(--text); border-color: var(--muted); }
+  .qe-tabs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 18px;
+    padding: 4px; border-radius: 14px; background: var(--bg); border: 1px solid var(--border);
+  }
   .qe-tab {
-    padding: 13px 8px; border-radius: 10px; cursor: pointer;
-    background: var(--card); border: 1px solid var(--border); color: var(--muted);
-    font-family: var(--font-ui); font-size: 12px; font-weight: 600;
-    letter-spacing: .3px; line-height: 1.2;
+    padding: 11px 8px; border-radius: 10px; cursor: pointer; border: 0; background: transparent;
+    color: var(--muted); font-family: var(--font-ui); font-size: 14px; font-weight: 600; line-height: 1.2;
+    transition: background .15s, color .15s;
   }
-  .qe-tab.on { color: #000; }
-  .qe-tab.on[data-t="in"]  { background: var(--income);  border-color: var(--income); }
-  .qe-tab.on[data-t="out"] { background: var(--expense); border-color: var(--expense); color: #fff; }
-  .qe-field { margin-bottom: 14px; }
+  .qe-tab:hover:not(.on):not(:disabled) { color: var(--text); }
+  .qe-tab.on { background: var(--qe-c); color: var(--qe-on); }
+  .qe-field { margin-bottom: 18px; }
   .qe-field > label {
-    display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 7px;
-    letter-spacing: .8px; text-transform: uppercase;
+    display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35;
+    color: var(--muted-bright); margin-bottom: 8px;
   }
+  .qe-field > label .qe-sub, .qe-field > label .qe-pair-cur { font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .qe-field > label .qe-pair-cur { color: var(--qe-c); font-weight: 600; }
   .qe-pairs { display: flex; flex-wrap: wrap; gap: 7px; }
-  /* Пары по группам — колонками, одна группа = одна колонка (v241).
-     Владелец нарисовал именно так: «Пр.Мира-…» столбиком слева,
-     «Мухтар-…» столбиком справа, имя в каждой строке целиком. */
+  /* Пары по группам — колонками (v241): осталось для выбора отчёта по паре. */
   .qe-cols {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 8px 10px; align-items: start;
@@ -1165,52 +1185,60 @@
   }
   .qe-pair.on { background: var(--accent3); border-color: var(--accent3); color: #fff; font-weight: 700; }
   .qe-pair.add { color: var(--accent); border-style: dashed; }
-  /* Выбор пары плитками (v273). Владелец 01.10.2026: «слишком слитно, друг за
-     другом; хочу плитками, хорошо рассортировать, чтобы удобно смотреть и
-     выбирать». Группа — заголовок («Мухтар», «Пр.Мира»), под ним плитки с
-     ВТОРОЙ частью имени: первая уже в заголовке. Полное имя — в title и
-     aria-label. */
-  .qe-grp { margin-bottom: 14px; }
+  /* Выбор пары (v312): группа — строка, слева её имя, справа пары кнопками по ширине
+     текста. На кнопке вторая часть имени («Ленин»), первая — подпись группы; полное
+     имя — в title и aria-label. На узком экране подпись встаёт над кнопками. */
+  #qe-pairs { display: block; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); }
+  .qe-grp { display: grid; grid-template-columns: 86px 1fr; gap: 10px; align-items: start; padding: 10px 12px; }
+  .qe-grp + .qe-grp { border-top: 1px solid var(--border); }
   .qe-grp-h {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
-    font-family: var(--font-ui); font-size: 12px; font-weight: 600;
-    letter-spacing: .04em; color: var(--muted);
+    padding-top: 9px; font-size: 12.5px; font-weight: 600; color: var(--muted);
+    overflow-wrap: anywhere; line-height: 1.25;
   }
-  .qe-grp-h::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-  .qe-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .qe-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
   .qe-tile {
-    min-height: 46px; padding: 8px 6px; border-radius: 12px; cursor: pointer;
+    min-height: 36px; padding: 7px 13px; border-radius: 999px; cursor: pointer;
     background: var(--card); border: 1px solid var(--border);
-    color: var(--muted-bright); font-family: var(--font-ui); font-size: 13.5px; line-height: 1.2;
-    text-align: center; word-break: break-word; overflow-wrap: anywhere;
-    display: flex; align-items: center; justify-content: center;
+    color: var(--text); font-family: var(--font-ui); font-size: 14px; line-height: 1.25;
+    text-align: left; overflow-wrap: anywhere; transition: border-color .15s, background .15s;
   }
-  .qe-tile.on { background: var(--accent3); border-color: var(--accent3); color: #fff; font-weight: 700; }
-  .qe-tile.add { color: var(--accent); border-style: dashed; }
+  .qe-tile:hover { border-color: var(--muted); }
+  .qe-tile.on { background: var(--qe-c); border-color: var(--qe-c); color: var(--qe-on); font-weight: 700; }
+  .qe-tile.add { color: var(--accent); border-style: dashed; background: transparent; }
+  .qe-grp.qe-grp-add { padding: 10px 12px; display: block; }
   /* Крупные поля — попасть пальцем с первого раза */
-  .qe-input, .qe-input-big, .qe-input-num {
+  #quick-entry-modal .qe-input, #quick-entry-modal .qe-input-big, #quick-entry-modal .qe-input-num {
     width: 100%; background: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 10px;
-    font-family: var(--font-num);
+    border: 1px solid var(--border); border-radius: 12px;
+    font-family: var(--font-num); transition: border-color .15s, box-shadow .15s;
   }
-  .qe-input     { padding: 13px 14px; font-size: 14px; }
+  #quick-entry-modal .qe-input     { padding: 13px 14px; font-size: 15px; }
   /* Поле даты: под палец, со своим значком календаря (v143) */
-  .qe-input-date { padding: 14px; font-size: 15px; cursor: pointer; color-scheme: dark; }
-  .qe-input-date::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .85; transform: scale(1.25); }
-  .qe-input-big { padding: 15px 14px; font-size: 22px; font-weight: 700; letter-spacing: .5px; }
-  .qe-input-num { padding: 13px 8px; font-size: 18px; font-weight: 700; text-align: center; }
-  .qe-input:focus, .qe-input-big:focus, .qe-input-num:focus { outline: none; border-color: var(--accent3); }
+  #quick-entry-modal .qe-input-date { padding: 12px 14px; font-size: 15px; cursor: pointer; color-scheme: dark; }
+  #quick-entry-modal .qe-input-date::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .85; transform: scale(1.2); }
+  #quick-entry-modal .qe-input-big { padding: 14px 44px 14px 16px; font-size: 24px; font-weight: 700; }
+  #quick-entry-modal .qe-input-num { padding: 12px 30px 12px 12px; font-size: 18px; font-weight: 700; text-align: center; }
+  #quick-entry-modal .qe-input:focus, #quick-entry-modal .qe-input-big:focus, #quick-entry-modal .qe-input-num:focus {
+    outline: none; border-color: var(--qe-c); box-shadow: 0 0 0 3px var(--qe-soft);
+  }
+  #quick-entry-modal .qe-input::placeholder, #quick-entry-modal .qe-input-big::placeholder, #quick-entry-modal .qe-input-num::placeholder { color: #5d6068; font-weight: 400; }
+  /* Знак ₽ и % внутри поля */
+  .qe-unit { position: relative; flex: 1; min-width: 0; }
+  .qe-unit::after {
+    content: attr(data-u); position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); font-size: 16px; pointer-events: none;
+  }
   /* Невыданные приходы пары — строка-кнопка на каждый день */
   .qe-unpaid-row {
     display: flex; justify-content: space-between; align-items: center; gap: 10px;
-    width: 100%; margin-bottom: 7px; padding: 12px 14px; cursor: pointer;
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    font-family: var(--font-num); text-align: left;
+    width: 100%; margin-bottom: 6px; padding: 11px 14px; cursor: pointer;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+    font-family: var(--font-num); text-align: left; color: var(--text);
   }
-  .qe-unpaid-row:hover { border-color: var(--expense); }
-  .qe-unpaid-row.on { border-color: var(--accent); background: rgba(0,229,176,.10); }
-  .qe-unpaid-row.on .d { color: var(--accent); font-weight: 700; }
-  .qe-unpaid-row .d { font-size: 13px; color: var(--muted-bright); }
+  .qe-unpaid-row:hover { border-color: var(--muted); }
+  .qe-unpaid-row.on { border-color: var(--qe-c); background: var(--qe-soft); }
+  .qe-unpaid-row.on .d { color: var(--text); font-weight: 700; }
+  .qe-unpaid-row .d { font-size: 13.5px; color: var(--muted-bright); }
   .qe-unpaid-row .s { font-size: 15px; font-weight: 700; color: var(--expense); white-space: nowrap; }
   .qe-unpaid-row .chip {
     font-size: 9.5px; padding: 1px 6px; border-radius: 5px; margin-left: 6px;
@@ -1219,49 +1247,70 @@
   .qe-unpaid-all {
     display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
     margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border);
-    font-family: var(--font-num); font-size: 12px; color: var(--muted);
+    font-family: var(--font-num); font-size: 12.5px; color: var(--muted);
   }
   .qe-unpaid-all b { font-size: 15px; color: var(--expense); }
-  .qe-unpaid-empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 4px 0; }
+  .qe-unpaid-empty { color: var(--muted); font-size: 13px; padding: 4px 0; }
 
   /* Суммы прихода — каждая своей строкой, складываются внизу */
   .qe-sum-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
-  .qe-sum-row .qe-input-big { flex: 1; min-width: 0; }
   .qe-sum-del {
-    flex: 0 0 46px; border-radius: 10px; cursor: pointer;
+    flex: 0 0 48px; border-radius: 12px; cursor: pointer;
     background: var(--card); border: 1px solid var(--border);
     color: var(--muted); font-size: 18px; line-height: 1;
   }
   .qe-sum-del:hover { color: var(--expense); border-color: var(--expense); }
   .qe-add-sum {
-    width: 100%; padding: 12px; border-radius: 10px; cursor: pointer;
+    width: 100%; padding: 11px; border-radius: 12px; cursor: pointer;
     background: transparent; border: 1px dashed var(--border);
-    color: var(--accent); font-family: var(--font-ui); font-size: 12.5px; font-weight: 600;
+    color: var(--accent); font-family: var(--font-ui); font-size: 13.5px; font-weight: 600;
   }
   .qe-add-sum:hover { border-color: var(--accent); background: rgba(0,229,176,.06); }
+  #quick-entry-modal .qe-add-sum { width: auto; padding: 6px 2px; border: 0; color: var(--qe-c); }
+  #quick-entry-modal .qe-add-sum:hover { background: none; text-decoration: underline; }
   .qe-sum-total {
     display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-    margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border);
+    margin-top: 8px; padding: 10px 14px; border-radius: 12px; background: var(--qe-soft);
     font-family: var(--font-num);
   }
-  .qe-sum-total .l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
-  .qe-sum-total .v { font-size: 19px; font-weight: 700; color: var(--accent); }
+  .qe-sum-total .l { font-size: 13px; color: var(--muted-bright); font-weight: 600; }
+  .qe-sum-total .v { font-size: 19px; font-weight: 700; color: var(--qe-c); }
   .qe-pct-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .qe-pct-row > div > span {
-    display: block; text-align: center; font-size: 10px; color: var(--muted); margin-bottom: 5px;
+    display: block; text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 6px;
   }
+  .qe-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .qe-two > .qe-field { min-width: 0; }
   .qe-preview {
-    font-family: var(--font-num); font-size: 12px; color: var(--muted-bright);
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    padding: 11px 13px; margin-bottom: 14px; white-space: pre-line; line-height: 1.45;
-    min-height: 42px;
+    font-family: var(--font-num); font-size: 13px; color: var(--muted-bright);
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 4px; white-space: pre-line; line-height: 1.5;
+    min-height: 44px;
+  }
+  .qe-foot {
+    position: sticky; bottom: 0; z-index: 2; margin: 0 -20px; padding: 12px 20px 18px;
+    background: linear-gradient(to bottom, rgba(26,27,31,0), var(--surface) 22%);
   }
   .qe-submit {
-    width: 100%; padding: 16px; border: none; border-radius: 12px; cursor: pointer;
-    font-family: var(--font-ui); font-size: 14px; font-weight: 700; letter-spacing: .5px;
+    width: 100%; padding: 16px; border: none; border-radius: 14px; cursor: pointer;
+    font-family: var(--font-ui); font-size: 16px; font-weight: 700;
+    background: var(--qe-c); color: var(--qe-on); box-shadow: 0 8px 24px rgba(0,0,0,.35);
   }
-  .qe-submit[data-t="in"]  { background: var(--income);  color: #000; }
-  .qe-submit[data-t="out"] { background: var(--expense); color: #fff; }
+  .qe-submit:active { transform: translateY(1px); }
+  @media (max-width: 600px) {
+    #quick-entry-modal { padding: 0; align-items: flex-end; }
+    #quick-entry-modal .modal {
+      max-width: none; max-height: 94vh; border-radius: 22px 22px 0 0; border-bottom: 0; padding: 0 16px;
+    }
+    .qe-head { margin: 0 -16px 14px; padding: 14px 16px 12px; }
+    .qe-foot { margin: 0 -16px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); }
+  }
+  @media (max-width: 440px) {
+    .qe-grp { grid-template-columns: 70px 1fr; gap: 8px; padding: 8px 10px; }
+    .qe-grp-h { font-size: 12px; padding-top: 8px; }
+    .qe-tile { min-height: 34px; padding: 6px 11px; font-size: 13.5px; }
+    .qe-two { grid-template-columns: 1fr; gap: 0; }
+  }
   /* Селект пары в компактной форме открывает эту модалку — показываем это */
   #in-client, #out-client { cursor: pointer; }
 
@@ -1797,7 +1846,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v311</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v312</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1982,63 +2031,67 @@
 <!-- ── БЫСТРЫЙ ВВОД: крупная форма для телефона ──
      Открывается тапом по паре в компактной форме (in-client / out-client).
      Своего расчёта не имеет: пишет в те же поля и добавляет через addRow(). -->
-<div class="modal-overlay" id="quick-entry-modal">
-  <div class="modal" style="max-width:520px">
-    <h2 id="qe-title" style="margin-bottom:14px">➕ Новая запись</h2>
-    <div class="qe-tabs">
-      <button class="qe-tab" data-t="in"  id="qe-tab-in"  onclick="qeSetType('in')">⬇ Приход<br>от клиентов</button>
-      <button class="qe-tab" data-t="out" id="qe-tab-out" onclick="qeSetType('out')">⬆ Получено<br>на руки</button>
+<div class="modal-overlay" id="quick-entry-modal" data-t="in">
+  <div class="modal" role="dialog" aria-labelledby="qe-title">
+    <div class="qe-head">
+      <h2 id="qe-title">Новая запись</h2>
+      <button class="qe-x" onclick="closeModal('quick-entry-modal')" aria-label="Закрыть" title="Закрыть">×</button>
+    </div>
+    <div class="qe-tabs" role="tablist">
+      <button class="qe-tab" data-t="in"  id="qe-tab-in"  role="tab" onclick="qeSetType('in')">⬇ Приход</button>
+      <button class="qe-tab" data-t="out" id="qe-tab-out" role="tab" onclick="qeSetType('out')">⬆ Получено на руки</button>
     </div>
     <div class="qe-field">
-      <label>Пара</label>
+      <label>Пара <span class="qe-pair-cur" id="qe-pair-cur"></span></label>
       <div class="qe-pairs" id="qe-pairs"></div>
     </div>
     <!-- Невыданные приходы выбранной пары: нажал на день — сумма подставилась -->
     <div class="qe-field" id="qe-unpaid-field" style="display:none">
-      <label id="qe-unpaid-label">За какой приход выдаём? Нажми день — сумма подставится</label>
+      <label id="qe-unpaid-label">За какой приход выдаём <span class="qe-sub">— нажмите день, сумма подставится</span></label>
       <div id="qe-unpaid"></div>
     </div>
     <div class="qe-field">
-      <label id="qe-amount-label">Суммы — каждая своей строкой</label>
+      <label id="qe-amount-label">Сумма</label>
       <div id="qe-sum-rows"></div>
-      <button class="qe-add-sum" id="qe-add-sum" onclick="qeAddSumRow(true)">+ ещё сумма</button>
+      <button class="qe-add-sum" id="qe-add-sum" onclick="qeAddSumRow(true)">＋ ещё сумма</button>
       <div class="qe-sum-total" id="qe-sum-total-box">
         <span class="l">Итого</span><span class="v" id="qe-sum-total">0 ₽</span>
       </div>
     </div>
     <div class="qe-field" id="qe-amount2-field" style="display:none">
-      <label>Получено по 2-му % — вторая часть, если она другая (иначе считается та же, что по 1-му)</label>
-      <input type="text" id="qe-amount2" class="qe-input" inputmode="decimal" autocomplete="off"
-             placeholder="по умолчанию — та же, что по 1-му %" oninput="numericInputFilter(event)">
+      <label>Получено по 2-му % <span class="qe-sub">— если другая сумма</span></label>
+      <div class="qe-unit" data-u="₽"><input type="text" id="qe-amount2" class="qe-input" inputmode="decimal" autocomplete="off"
+             placeholder="та же, что по 1-му %" oninput="numericInputFilter(event)"></div>
     </div>
     <div class="qe-field" id="qe-note2-field" style="display:none">
-      <label>Примечание к сумме по 2-му % — запишется в отчёт по 2-му %</label>
+      <label>Примечание к сумме по 2-му % <span class="qe-sub">— в отчёт по 2-му %</span></label>
       <input type="text" id="qe-note2" class="qe-input" placeholder="например: перевод на карту" autocomplete="off">
     </div>
     <div class="qe-field" id="qe-pcts">
-      <label>Проценты — %1 обязателен, остальные по желанию</label>
+      <label>Проценты <span class="qe-sub">— первый обязателен</span></label>
       <div class="qe-pct-row">
-        <div><span>%1</span><input type="text" id="qe-pct" class="qe-input-num" inputmode="decimal"
-             oninput="numericInputFilter(event); qeOnInput()"></div>
-        <div><span>%2</span><input type="text" id="qe-pct2" class="qe-input-num" inputmode="decimal"
-             oninput="numericInputFilter(event); qeOnInput()"></div>
-        <div><span>%кур</span><input type="text" id="qe-pctcur" class="qe-input-num" inputmode="decimal"
-             oninput="numericInputFilter(event); qeOnInput()"></div>
+        <div><span>1-й</span><div class="qe-unit" data-u="%"><input type="text" id="qe-pct" class="qe-input-num" inputmode="decimal"
+             oninput="numericInputFilter(event); qeOnInput()"></div></div>
+        <div><span>2-й</span><div class="qe-unit" data-u="%"><input type="text" id="qe-pct2" class="qe-input-num" inputmode="decimal"
+             oninput="numericInputFilter(event); qeOnInput()"></div></div>
+        <div><span>Куратору</span><div class="qe-unit" data-u="%"><input type="text" id="qe-pctcur" class="qe-input-num" inputmode="decimal"
+             oninput="numericInputFilter(event); qeOnInput()"></div></div>
       </div>
     </div>
-    <div class="qe-field">
-      <label id="qe-due-label">Когда отдавать — напоминание, на расчёт не влияет</label>
-      <input type="date" id="qe-due" class="qe-input qe-input-date" oninput="qeOnDue()"
-             title="Нажмите — откроется календарь">
-    </div>
-    <div class="qe-field" id="qe-note-field">
-      <label id="qe-note-label">Примечание — на расчёт не влияет</label>
-      <input type="text" id="qe-note" class="qe-input" placeholder="необязательно" oninput="qeOnInput()">
+    <div class="qe-two" id="qe-two">
+      <div class="qe-field" id="qe-due-field">
+        <label id="qe-due-label">Отдать до <span class="qe-sub">— напоминание</span></label>
+        <input type="date" id="qe-due" class="qe-input qe-input-date" oninput="qeOnDue()"
+               title="Нажмите — откроется календарь">
+      </div>
+      <div class="qe-field" id="qe-note-field">
+        <label id="qe-note-label">Примечание</label>
+        <input type="text" id="qe-note" class="qe-input" placeholder="необязательно" oninput="qeOnInput()">
+      </div>
     </div>
     <div class="qe-preview" id="qe-preview">—</div>
-    <button class="qe-submit" id="qe-submit" onclick="qeSubmit()">Добавить запись</button>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('quick-entry-modal')">Закрыть</button>
+    <div class="qe-foot">
+      <button class="qe-submit" id="qe-submit" onclick="qeSubmit()">Добавить запись</button>
     </div>
   </div>
 </div>
@@ -8785,17 +8838,19 @@ function qeSetType(type) {
   g('qe-tab-in').classList.toggle('on', isIn);
   g('qe-tab-out').classList.toggle('on', !isIn);
   const title = g('qe-title');
-  title.textContent = isIn ? '⬇ Приход от клиентов' : '⬆ Получено на руки';
-  title.style.color = isIn ? 'var(--income)' : 'var(--expense)';
+  title.textContent = isIn ? 'Новый приход' : 'Новая выдача на руки';
+  g('quick-entry-modal').dataset.t = qeType;   // цвет формы — по типу записи (v312)
   g('qe-pcts').style.display = isIn ? '' : 'none';
   g('qe-amount2-field').style.display = isIn ? 'none' : '';   // v295: только у выдачи
   /* v300: у выдачи примечание стоит ПОД каждой суммой — под первой (1-й %) и под второй
      (2-й %), и каждое попадает в свой отчёт. Для прихода — как было, внизу. */
   g('qe-note2-field').style.display = isIn ? 'none' : '';
   const noteF = g('qe-note-field'), a2F = g('qe-amount2-field');
-  if (isIn) { const pv = g('qe-preview'); if (pv && noteF.nextElementSibling !== pv) pv.parentNode.insertBefore(noteF, pv); }
+  // у прихода примечание стоит рядом со сроком отдачи (v312)
+  if (isIn) { const due = g('qe-due-field'); if (noteF.previousElementSibling !== due) due.after(noteF); }
   else if (a2F.previousElementSibling !== noteF) a2F.parentNode.insertBefore(noteF, a2F);
-  g('qe-note-label').textContent = isIn ? 'Примечание — на расчёт не влияет' : 'Примечание к сумме по 1-му % — запишется в отчёт по 1-му %';
+  g('qe-two').style.gridTemplateColumns = isIn ? '' : '1fr';
+  g('qe-note-label').innerHTML = isIn ? 'Примечание' : 'Примечание к сумме по 1-му % <span class="qe-sub">— в отчёт по 1-му %</span>';
   const sub = g('qe-submit');
   sub.dataset.t = qeType;
   const editing = !!qeEditing;
@@ -8808,7 +8863,7 @@ function qeSetType(type) {
   g('qe-tab-out').disabled = editing;
   g('qe-tab-in').style.opacity = (editing && !isIn) ? '.35' : '';
   g('qe-tab-out').style.opacity = (editing && isIn) ? '.35' : '';
-  g('qe-amount-label').textContent = isIn ? 'Суммы — каждая своей строкой' : 'Получено на руки — по 1-му %';
+  g('qe-amount-label').innerHTML = isIn ? 'Сумма <span class="qe-sub">— по одной в строке, Enter — следующая</span>' : 'Получено на руки — по 1-му %';
   // То, что уже набрано в компактной форме, раскладываем обратно по строкам
   const parsedRaw = parseSumString(g(isIn ? 'in-amount' : 'out-amount').value || '');
   qeSums = (parsedRaw && parsedRaw.parts.length) ? parsedRaw.parts.map(n => fmtExact(n)) : [''];
@@ -9093,18 +9148,18 @@ function qeRenderSumRows() {
   // и blur на нём сработать не успевает.
   qeSums = qeSums.map(v => { const n = qeParseSum(v); return isNaN(n) ? v : fmtExact(n); });
   wrap.innerHTML = qeSums.map((v, i) => `
-    <div class="qe-sum-row">
+    <div class="qe-sum-row"><div class="qe-unit" data-u="₽">
       <input type="text" class="qe-input-big" inputmode="decimal" value="${escapeHtml(String(v))}"
-             placeholder="${i === 0 ? 'Сумма' : 'Ещё сумма'}"
+             placeholder="${i === 0 ? '0' : 'ещё сумма'}"
              oninput="qeOnSumInput(${i}, this)"
              onblur="qeBlurSum(${i}, this)"
-             onkeydown="qeSumKey(event)">
+             onkeydown="qeSumKey(event)"></div>
       ${qeSums.length > 1 ? `<button class="qe-sum-del" onclick="qeDelSumRow(${i})" title="Убрать строку">✕</button>` : ''}
     </div>`).join('');
   const addBtn = document.getElementById('qe-add-sum');
   if (addBtn) addBtn.style.display = single ? 'none' : '';
   const totalBox = document.getElementById('qe-sum-total-box');
-  if (totalBox) totalBox.style.display = single ? 'none' : '';
+  if (totalBox) totalBox.style.display = (single || qeSums.length < 2) ? 'none' : '';   // итог — когда сумм несколько (v312)
 }
 
 function qeOnSumInput(i, el) {
@@ -9174,16 +9229,18 @@ function qeRenderPairs() {
   if (!wrap) return;
   const sel = document.getElementById(qeType === 'in' ? 'in-client' : 'out-client');
   const cur = sel ? sel.value : '';
-  /* Группы — заголовками, пары — плитками (v273; до этого, в v241, — колонками).
-     На плитке вторая часть имени («Ленин»), первая — в заголовке группы. */
+  /* Группа — строка: слева её имя, справа пары кнопками (v312; v273 — плитками, v241 —
+     колонками). На кнопке вторая часть имени («Ленин»), первая — в подписи группы. */
+  const curEl = document.getElementById('qe-pair-cur');
+  if (curEl) curEl.textContent = cur ? '· ' + cur : '';
   wrap.innerHTML = groupedPairs().map(g =>
-      `<div class="qe-grp"><div class="qe-grp-h">${escapeHtml(g.группа)}</div><div class="qe-tiles">${g.items.map(x => {
+      `<div class="qe-grp"><div class="qe-grp-h">${escapeHtml(g.группа)}</div><div class="qe-chips">${g.items.map(x => {
         const короткое = x.name.length > g.группа.length + 1 && x.name.startsWith(g.группа + '-')
           ? x.name.slice(g.группа.length + 1) : x.name;
         return `<button class="qe-tile${x.name === cur ? ' on' : ''}" onclick="qePickPair(${x.idx})"
           title="${escapeHtml(x.name)}" aria-label="${escapeHtml(x.name)}">${escapeHtml(короткое)}</button>`;
       }).join('')}</div></div>`).join('')
-    + `<div class="qe-tiles"><button class="qe-tile add" onclick="qeAddPair()">＋ Пара</button></div>`;
+    + `<div class="qe-grp qe-grp-add"><button class="qe-tile add" onclick="qeAddPair()">＋ Новая пара</button></div>`;
 }
 
 /** Выбрать пару по её месту в state.clients (индекс — чтобы не экранировать имя). */
