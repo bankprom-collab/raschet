@@ -1135,12 +1135,20 @@
      (--qe-c: мятный приход, коралловый выдача): им подсвечены вкладка, выбранная пара,
      поле в фокусе и кнопка. Пары — строками по группам, кнопка «Добавить» прилипает
      к низу окна, на телефоне окно — шторка снизу. */
-  #quick-entry-modal { --qe-c: var(--income); --qe-on: #04231b; --qe-soft: rgba(0,229,176,.12); }
-  #quick-entry-modal[data-t="out"] { --qe-c: var(--expense); --qe-on: #fff; --qe-soft: rgba(255,107,74,.13); }
-  #quick-entry-modal .modal { max-width: 540px; padding: 0 20px; background: var(--surface); }
+  /* v313 «поиграй с цветами»: у типа записи два цвета — перелив на вкладке и кнопке, свечение
+     в шапке, цветная полоса сверху; у каждой группы пар свой оттенок (--g, из qeRenderPairs). */
+  #quick-entry-modal { --qe-c: var(--income); --qe-c2: #4cc9f0; --qe-on: #03211a; --qe-soft: rgba(0,229,176,.12); }
+  #quick-entry-modal[data-t="out"] { --qe-c: var(--expense); --qe-c2: #ffb347; --qe-on: #2a0d05; --qe-soft: rgba(255,107,74,.13); }
+  #quick-entry-modal { --qe-grad: linear-gradient(120deg, var(--qe-c), var(--qe-c2)); }
+  #quick-entry-modal .modal {
+    max-width: 540px; padding: 0 20px; background: var(--surface);
+    border-top: 3px solid transparent;
+    background: linear-gradient(var(--surface), var(--surface)) padding-box, var(--qe-grad) border-box;
+  }
   .qe-head {
     position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
-    margin: 0 -20px 14px; padding: 16px 20px 12px; background: var(--surface);
+    margin: 0 -20px 14px; padding: 16px 20px 12px;
+    background: radial-gradient(120% 160% at 0% 0%, var(--qe-soft), transparent 55%), var(--surface);
     border-bottom: 1px solid var(--border);
   }
   #quick-entry-modal .qe-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 700; color: var(--text); }
@@ -1160,7 +1168,7 @@
     transition: background .15s, color .15s;
   }
   .qe-tab:hover:not(.on):not(:disabled) { color: var(--text); }
-  .qe-tab.on { background: var(--qe-c); color: var(--qe-on); }
+  .qe-tab.on { background: var(--qe-grad); color: var(--qe-on); box-shadow: 0 4px 16px var(--qe-soft); }
   .qe-field { margin-bottom: 18px; }
   .qe-field > label {
     display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35;
@@ -1192,8 +1200,13 @@
   .qe-grp { display: grid; grid-template-columns: 86px 1fr; gap: 10px; align-items: start; padding: 10px 12px; }
   .qe-grp + .qe-grp { border-top: 1px solid var(--border); }
   .qe-grp-h {
-    padding-top: 9px; font-size: 12.5px; font-weight: 600; color: var(--muted);
+    display: flex; align-items: baseline; gap: 6px; min-width: 0;
+    padding-top: 9px; font-size: 12.5px; font-weight: 700; color: var(--g, var(--muted));
     overflow-wrap: anywhere; line-height: 1.25;
+  }
+  .qe-grp-h::before {
+    content: ''; flex: 0 0 7px; height: 7px; border-radius: 50%; transform: translateY(-1px);
+    background: var(--g, var(--muted)); box-shadow: 0 0 8px var(--g, transparent);
   }
   .qe-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
   .qe-tile {
@@ -1202,8 +1215,16 @@
     color: var(--text); font-family: var(--font-ui); font-size: 14px; line-height: 1.25;
     text-align: left; overflow-wrap: anywhere; transition: border-color .15s, background .15s;
   }
-  .qe-tile:hover { border-color: var(--muted); }
-  .qe-tile.on { background: var(--qe-c); border-color: var(--qe-c); color: var(--qe-on); font-weight: 700; }
+  .qe-grp .qe-tile {
+    background: color-mix(in srgb, var(--g, var(--card)) 7%, var(--card));
+    border-color: color-mix(in srgb, var(--g, var(--border)) 30%, var(--border));
+  }
+  .qe-grp .qe-tile:hover { border-color: var(--g, var(--muted)); }
+  .qe-grp .qe-tile.on {
+    background: var(--qe-grad); border-color: transparent; color: var(--qe-on); font-weight: 700;
+    box-shadow: 0 4px 14px var(--qe-soft);
+  }
+  .qe-grp .qe-tile.add { background: transparent; border-color: var(--border); }
   .qe-tile.add { color: var(--accent); border-style: dashed; background: transparent; }
   .qe-grp.qe-grp-add { padding: 10px 12px; display: block; }
   /* Крупные поля — попасть пальцем с первого раза */
@@ -1270,15 +1291,22 @@
   #quick-entry-modal .qe-add-sum:hover { background: none; text-decoration: underline; }
   .qe-sum-total {
     display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-    margin-top: 8px; padding: 10px 14px; border-radius: 12px; background: var(--qe-soft);
-    font-family: var(--font-num);
+    margin-top: 8px; padding: 10px 14px; border-radius: 12px;
+    background: linear-gradient(120deg, var(--qe-soft), transparent);
+    border: 1px solid var(--qe-soft); font-family: var(--font-num);
   }
   .qe-sum-total .l { font-size: 13px; color: var(--muted-bright); font-weight: 600; }
-  .qe-sum-total .v { font-size: 19px; font-weight: 700; color: var(--qe-c); }
+  .qe-sum-total .v {
+    font-size: 20px; font-weight: 800; background: var(--qe-grad);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
   .qe-pct-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .qe-pct-row > div > span {
-    display: block; text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 6px;
+    display: block; text-align: center; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px;
   }
+  .qe-pct-row > div:nth-child(1) > span { color: #ff8a4a; }
+  .qe-pct-row > div:nth-child(2) > span { color: var(--accent3); }
+  .qe-pct-row > div:nth-child(3) > span { color: #f0abfc; }
   .qe-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .qe-two > .qe-field { min-width: 0; }
   .qe-preview {
@@ -1287,6 +1315,9 @@
     padding: 12px 14px; margin-bottom: 4px; white-space: pre-line; line-height: 1.5;
     min-height: 44px;
   }
+  .qe-preview .qp-1 { color: #ffb48a; }
+  .qe-preview .qp-2 { color: #b7c0ff; }
+  .qe-preview .qp-cur { color: #f5c2fd; }
   .qe-foot {
     position: sticky; bottom: 0; z-index: 2; margin: 0 -20px; padding: 12px 20px 18px;
     background: linear-gradient(to bottom, rgba(26,27,31,0), var(--surface) 22%);
@@ -1294,7 +1325,7 @@
   .qe-submit {
     width: 100%; padding: 16px; border: none; border-radius: 14px; cursor: pointer;
     font-family: var(--font-ui); font-size: 16px; font-weight: 700;
-    background: var(--qe-c); color: var(--qe-on); box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    background: var(--qe-grad); color: var(--qe-on); box-shadow: 0 8px 26px var(--qe-soft), 0 6px 18px rgba(0,0,0,.35);
   }
   .qe-submit:active { transform: translateY(1px); }
   @media (max-width: 600px) {
@@ -1306,8 +1337,8 @@
     .qe-foot { margin: 0 -16px; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); }
   }
   @media (max-width: 440px) {
-    .qe-grp { grid-template-columns: 70px 1fr; gap: 8px; padding: 8px 10px; }
-    .qe-grp-h { font-size: 12px; padding-top: 8px; }
+    .qe-grp { grid-template-columns: 84px 1fr; gap: 8px; padding: 8px 10px; }
+    .qe-grp-h { font-size: 12px; padding-top: 8px; gap: 5px; }
     .qe-tile { min-height: 34px; padding: 6px 11px; font-size: 13.5px; }
     .qe-two { grid-template-columns: 1fr; gap: 0; }
   }
@@ -1846,7 +1877,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v312</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v313</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -4642,6 +4673,25 @@ function сдвигОстатковПолсотни() {
   if (менялось) saveState();
 }
 
+/* «Пр. Мира» и «Пр.Мира» — одна группа (v313). Владелец 18.11.2026: «Проспект Мира — это
+   у нас одна группа, поэтому ты её объедини». Пара «Пр. Мира-Дима Впб(химия)» (с пробелом)
+   стояла отдельной группой. Переименовываем все такие пары в «Пр.Мира-…» той же функцией,
+   что кнопка 🏷️ (записи, список пар, недельные ключи, «Счёт с»), перед этим — копия. */
+function объединитьПрМира() {
+  if (!state || state._prMiraMerged) return;
+  const ВЕРНО = 'Пр.Мира-', лишний = /^Пр\.\s+Мира\s*-\s*/;
+  const старые = new Set();
+  (state.clients || []).forEach(c => { const n = (c || '').trim(); if (лишний.test(n)) старые.add(n); });
+  Object.values(state.days || {}).forEach(d => ['in', 'out'].forEach(k => (d[k] || []).forEach(r => {
+    const n = (r.client || '').trim(); if (лишний.test(n)) старые.add(n);
+  })));
+  if (!старые.size) return;   // нечего объединять (или данные ещё не пришли) — флаг не ставим
+  backupSlot('pre-merge-prmira');
+  старые.forEach(n => renamePairEverywhere(n, n.replace(лишний, ВЕРНО)));
+  state._prMiraMerged = true;
+  saveState();
+}
+
 function render() {
   // Сдвиг — ПЕРВЫМ: он переводит остатки, посчитанные старым округлением.
   // Правка ниже пересчитывает их уже новым — в обратном порядке 50 ₽ ушли бы дважды.
@@ -4650,6 +4700,7 @@ function render() {
   try { правкаОстатка1Окт(); } catch (e) { console.warn('Правка остатка 1 окт:', e); }
   try { правкаКуратор12Окт(); } catch (e) { console.warn('Правка выплаты куратору 12 окт:', e); }
   try { чертаКуратора8Окт(); } catch (e) { console.warn('Черта куратора 8 окт:', e); }
+  try { объединитьПрМира(); } catch (e) { console.warn('Объединение Пр.Мира:', e); }
   renderDateLabel();
   const day = getDay(currentDate);
   // Carryover
@@ -9224,6 +9275,23 @@ function qeSyncSums() {
 }
 
 /** Пары крупными кнопками. Выбранная — та же, что в селекте компактной формы. */
+/* Свой оттенок у каждой группы пар (v313). Место в палитре — по имени группы, совпадения
+   разводятся на следующий свободный цвет; группы обходятся по алфавиту, поэтому цвет не прыгает
+   от того, сколько в группе пар. Мятного и кораллового в палитре нет — это цвета выбранной пары
+   и кнопки. Только вид, на расчёт не влияет. */
+const QE_HUES = ['#7dd3fc', '#a5b4fc', '#fcd34d', '#f0abfc', '#d8b4fe', '#fda4af', '#bef264', '#fdba74'];
+function qeGroupHues(names) {
+  const занят = new Set(), res = {};
+  [...names].sort((a, b) => a.localeCompare(b, 'ru')).forEach(n => {
+    let h = 0;
+    for (const ch of String(n || '')) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    let i = h % QE_HUES.length;
+    for (let k = 0; k < QE_HUES.length && занят.has(i); k++) i = (i + 1) % QE_HUES.length;
+    занят.add(i); res[n] = QE_HUES[i];
+  });
+  return res;
+}
+
 function qeRenderPairs() {
   const wrap = document.getElementById('qe-pairs');
   if (!wrap) return;
@@ -9233,8 +9301,9 @@ function qeRenderPairs() {
      колонками). На кнопке вторая часть имени («Ленин»), первая — в подписи группы. */
   const curEl = document.getElementById('qe-pair-cur');
   if (curEl) curEl.textContent = cur ? '· ' + cur : '';
-  wrap.innerHTML = groupedPairs().map(g =>
-      `<div class="qe-grp"><div class="qe-grp-h">${escapeHtml(g.группа)}</div><div class="qe-chips">${g.items.map(x => {
+  const группы = groupedPairs(), цвет = qeGroupHues(группы.map(g => g.группа));
+  wrap.innerHTML = группы.map(g =>
+      `<div class="qe-grp" style="--g:${цвет[g.группа]}"><div class="qe-grp-h">${escapeHtml(g.группа)}</div><div class="qe-chips">${g.items.map(x => {
         const короткое = x.name.length > g.группа.length + 1 && x.name.startsWith(g.группа + '-')
           ? x.name.slice(g.группа.length + 1) : x.name;
         return `<button class="qe-tile${x.name === cur ? ' on' : ''}" onclick="qePickPair(${x.idx})"
@@ -9280,7 +9349,13 @@ function qeOnInput() {
     g('in-pctcur').value = g('qe-pctcur').value;
     g('in-note').value   = g('qe-note').value;
     updateInPreview();                       // единственный расчёт предпросмотра
-    g('qe-preview').textContent = g('in-preview').textContent;
+    /* строки расчёта в цветах подписей процентов (v313): 1-й — оранжевый, 2-й — фиолетовый,
+       куратор — розовый; сама арифметика — та же строка, что в компактной форме */
+    let k = 0;
+    g('qe-preview').innerHTML = (g('in-preview').textContent || '—').split('\n').map(l => {
+      const cls = /^Куратору/.test(l) ? 'qp-cur' : /^[−-]\s*\d/.test(l) ? (k++ ? 'qp-2' : 'qp-1') : '';
+      return `<div class="${cls}">${escapeHtml(l)}</div>`;
+    }).join('');
   } else {
     g('out-note').value = g('qe-note').value;
     const n = parseDecimal(g('out-amount').value);
