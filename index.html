@@ -850,6 +850,58 @@
   /* ── LAYOUT ── */
   main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 80px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  /* ── ЛЕНТА ДНЯ (v314, вариант B) ── слева лента, справа задолженность; на телефоне — друг под другом */
+  .fd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .fd-grid { grid-template-columns: minmax(0, 1fr); } }
+  .fd-col { min-width: 0; }
+  .fd-debt:has(#week-debt-summary:empty) { display: none; }
+  .fd-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .fd-tile { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 12px 14px; min-width: 0; }
+  .fd-tile .l { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .fd-tile .v { font-size: 20px; font-weight: 800; white-space: nowrap; }
+  .fd-tile.in .v { color: var(--income); }
+  .fd-tile.out .v { color: var(--expense); }
+  .fd-tile.net { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    background: linear-gradient(120deg, rgba(0,229,176,.10), rgba(76,201,240,.05)); border-color: rgba(0,229,176,.25); }
+  .fd-tile.net.neg { background: linear-gradient(120deg, rgba(255,107,74,.11), rgba(255,179,71,.05)); border-color: rgba(255,107,74,.28); }
+  .fd-tile.net .v { font-size: 24px; color: var(--text); }
+  .fd-cnt { font-size: 12px; color: var(--muted); text-align: right; line-height: 1.45; }
+  .fd-list { background: var(--card); border: 1px solid var(--border); border-radius: 22px; padding: 4px 0; margin-bottom: 10px; }
+  .fd-empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .fd-item { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; padding: 12px 14px; }
+  .fd-item + .fd-item { border-top: 1px solid var(--border); }
+  .fd-rail { display: flex; justify-content: center; padding-top: 4px; }
+  .fd-rail i { width: 10px; height: 10px; border-radius: 50%; }
+  .fd-item.in .fd-rail i { background: var(--income); box-shadow: 0 0 0 4px rgba(0,229,176,.15); }
+  .fd-item.out .fd-rail i { background: var(--expense); box-shadow: 0 0 0 4px rgba(255,107,74,.15); }
+  .fd-kind { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; margin-bottom: 2px; }
+  .fd-item.in .fd-kind { color: var(--income); }
+  .fd-item.out .fd-kind { color: var(--expense); }
+  .fd-pair { font-weight: 700; font-size: 15px; color: var(--text); line-height: 1.3; }
+  .fd-pair i { display: inline-block; width: 7px; height: 7px; margin-right: 7px; vertical-align: 2px; border-radius: 50%;
+    background: var(--g); box-shadow: 0 0 8px var(--g); }
+  .fd-pair small { font-weight: 500; font-size: 12.5px; color: var(--muted); }
+  .fd-meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.5; overflow-wrap: anywhere; }
+  .fd-meta .p1 { color: #ff8a4a; } .fd-meta .p2 { color: var(--accent3); } .fd-meta .pc { color: #f0abfc; }
+  .fd-meta .chip { margin-left: 0; margin-right: 4px; }
+  .fd-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .fd-right .v { font-size: 16px; font-weight: 800; white-space: nowrap; color: var(--text); }
+  .fd-item.out .fd-right .v { color: var(--expense); }
+  .fd-right .v2 { font-size: 12.5px; color: var(--accent3); white-space: nowrap; }
+  .fd-dots { margin-top: 4px; width: 32px; height: 26px; border-radius: 9px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted-bright); cursor: pointer; font-size: 15px; line-height: 1; }
+  .fd-acts { display: none; grid-column: 2 / -1; gap: 6px; flex-wrap: wrap; }
+  .fd-item.open .fd-acts { display: flex; }
+  .fd-item.open .fd-dots { border-color: var(--muted); color: var(--text); }
+  .fd-acts button { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font: 600 13px var(--font-ui); cursor: pointer; }
+  .fd-acts button.del { color: var(--expense); border-color: rgba(255,107,74,.35); }
+  .fd-btns { position: sticky; bottom: 12px; z-index: 5; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  .fd-btn { border: 0; border-radius: 16px; padding: 15px 8px; font: 700 15px var(--font-ui); cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .fd-btn.in { background: linear-gradient(120deg, var(--income), #4cc9f0); color: #03211a; }
+  .fd-btn.out { background: linear-gradient(120deg, var(--expense), #ffb347); color: #2a0d05; }
+  .fd-btn:active { transform: translateY(1px); }
   @media(max-width: 700px) { .grid { grid-template-columns: 1fr; } }
 
   /* ── SUMMARY CARDS ── */
@@ -1877,7 +1929,7 @@
 </div>
 
 <header>
-  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v313</span></div>
+  <div class="logo">РАСЧЁТ <span>/ daily ledger</span> <span style="background:var(--accent);color:#000;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;margin-left:6px">v314</span></div>
   <div class="date-nav">
     <button onclick="changeDay(-1)" title="Предыдущий день">‹</button>
     <div id="currentDate" onclick="openDatePicker(event)" title="Кликни — открыть календарь">—</div>
@@ -1949,7 +2001,21 @@
     </div>
   </details>
 
-  <div class="grid">
+  <!-- v314: «Лента дня» (вариант B). Владелец 19.11.2026 выбрал из трёх образцов: приходы
+       и выдачи дня — одной лентой, итог сверху, две кнопки внизу. Таблицы и мелкие формы
+       ниже скрыты, но остаются: крупная форма пишет запись через их поля (v118). -->
+  <div class="fd-grid">
+    <div class="fd-col">
+      <div class="fd-sum" id="fd-sum"></div>
+      <div class="fd-list" id="fd-list"></div>
+      <div class="fd-btns">
+        <button class="fd-btn in" onclick="openQuickEntry('in')">⬇ Приход</button>
+        <button class="fd-btn out" onclick="openQuickEntry('out')">⬆ Выдача</button>
+      </div>
+    </div>
+    <div class="fd-col"><div class="section fd-debt"><div id="week-debt-summary"></div></div></div>
+  </div>
+  <div class="grid" id="fd-legacy" style="display:none">
     <!-- ПОЛУЧЕНО НА РУКИ -->
     <div>
       <div class="section">
@@ -2007,7 +2073,6 @@
              в архиве «🗄 Уже получено») и в окне «Куратор ко мне».
              Записи в deals-total / deals-curator / hand-total стоят
              под проверкой на существование — блок возвращается разметкой. -->
-        <div id="week-debt-summary"></div>
       </div>
     </div>
   </div>
@@ -4763,6 +4828,7 @@ function render() {
   // Out rows
   renderOutBody(day);
   renderInBody(day);
+  try { renderDayFeed(day); } catch (e) { console.warn('Лента дня:', e); }
   renderSummary(day);
   renderClientSelects();
   // Книга открыта (с v258 — сразу после входа) — держим её в синхроне:
@@ -4825,6 +4891,69 @@ function dueChipHtml(dueDate, dayStr) {
   const cls = late ? 'chip chip-warn' : (now ? 'chip' : 'chip chip-info');
   return `<span class="${cls}" style="${late || now ? 'color:' + color : ''}" title="Когда надо отдать эти деньги">`
     + `📅 ${label}${when}${(late || now) ? ' · ' + formatDateShort(d) : ''}</span>`;
+}
+
+/* Лента дня (v314, вариант B). Только показ: суммы те же, что в таблицах ниже (они скрыты),
+   действия — те же функции (правка, срок, удаление, «разнести остаток»). */
+function renderDayFeed(day) {
+  const list = document.getElementById('fd-list'), sum = document.getElementById('fd-sum');
+  if (!list || !sum) return;
+  const скл = (n, a, b, c) => { const m = n % 10, h = n % 100;
+    return n + ' ' + (m === 1 && h !== 11 ? a : (m >= 2 && m <= 4 && (h < 12 || h > 14)) ? b : c); };
+  const пришло = day.in.reduce((t, r) => t + calcInRowFinal(r), 0);
+  const выдано = day.out.reduce((t, r) => t + (r.amount || 0), 0);
+  const итог = пришло - выдано;
+  sum.innerHTML = `
+    <div class="fd-tile in"><div class="l">Пришло · после 1-го %</div><div class="v">${пришло ? '+' : ''}${fmt(пришло)}</div></div>
+    <div class="fd-tile out"><div class="l">Выдано на руки</div><div class="v">${выдано ? '−' : ''}${fmt(выдано)}</div></div>
+    <div class="fd-tile net${итог < 0 ? ' neg' : ''}"><div><div class="l">За день</div>
+      <div class="v">${итог > 0 ? '+' : итог < 0 ? '−' : ''}${fmt(Math.abs(итог))}</div></div>
+      <div class="fd-cnt">${скл(day.in.length, 'приход', 'прихода', 'приходов')}<br>${скл(day.out.length, 'выдача', 'выдачи', 'выдач')}</div></div>`;
+  if (!day.in.length && !day.out.length) {
+    list.innerHTML = '<div class="fd-empty">За этот день записей нет.<br>Добавьте приход или выдачу кнопками ниже.</div>';
+    return;
+  }
+  const цвет = qeGroupHues(groupedPairs().map(g => g.группа));
+  const пара = name => {
+    const n = (name || '').trim(), g = pairGroupName(n);
+    const кор = n.length > g.length + 1 && n.startsWith(g + '-') ? n.slice(g.length + 1) : '';
+    return `<div class="fd-pair" style="--g:${цвет[g] || 'var(--muted)'}"><i></i>${escapeHtml(g)}${кор ? ` <small>· ${escapeHtml(кор)}</small>` : ''}</div>`;
+  };
+  const пц = p => String(p).replace('.', ',');
+  const кнопки = () => `<button class="fd-dots" onclick="this.closest('.fd-item').classList.toggle('open')" title="Действия" aria-label="Действия">⋯</button>`;
+  const ins = day.in.map((r, i) => {
+    const hasP1 = r.pct !== null && r.pct !== undefined && r.pct > 0;
+    const hasP2 = r.pct2 !== null && r.pct2 !== undefined && r.pct2 > 0 && r.total2 !== null && r.total2 !== undefined;
+    const hasCur = r.pctCur !== null && r.pctCur !== undefined && r.pctCur > 0;
+    const сумма = r.parts && r.parts.length > 1 ? r.parts.map(n => fmtRaw(n)).join(' + ') + ' = ' + fmt(r.amount) : fmt(r.amount);
+    const мета = [сумма,
+      hasP1 ? `<span class="p1">−${пц(r.pct)}%</span>` : '',
+      hasP2 ? `<span class="p2">−${пц(r.pct2)}%</span>` : '',
+      hasCur ? `<span class="pc">кур ${fmt(floor100(r.amount * r.pctCur / 100))}</span>` : ''].filter(Boolean).join(' · ');
+    const кл = (r.client || '');
+    const срез = (r.tag && r.tag.trim()) || кл.lastIndexOf('-') > кл.indexOf('-');
+    return `<div class="fd-item in">
+      <div class="fd-rail"><i></i></div>
+      <div><div class="fd-kind">ПРИХОД</div>${пара(r.client)}
+        <div class="fd-meta">${мета}</div>
+        <div class="fd-meta">${(r.tag && r.tag.trim()) ? `<span class="chip">🏷 ${escapeHtml(r.tag)}</span>` : ''}${r.dueDate ? dueChipEditableHtml(r, 'in', i) : ''}${(r.note && r.note.trim()) ? ` 📝 ${escapeHtml(r.note)}` : ''}</div></div>
+      <div class="fd-right"><div class="v">${hasP1 ? fmtRounded(r.total) : fmt(r.total)}</div>${hasP2 ? `<div class="v2">${fmtRounded(r.total2)}</div>` : ''}${кнопки()}</div>
+      <div class="fd-acts"><button onclick="openQuickEntryEdit('in',${i})">✏️ Изменить</button>${r.dueDate ? '' : `<button onclick="editRowDue('in',${i})">📅 Срок</button>`}${срез ? `<button onclick="trimPairSuffixInRow(${i})">✂️ Убрать метку / суффикс</button>` : ''}<button class="del" onclick="deleteRow('in',${i})">🗑 Удалить</button></div>
+    </div>`;
+  });
+  const COVER = incomeCoverParts(currentDate, true);   // за какой приход выдача (v168)
+  const outs = day.out.map((r, i) => {
+    const has2 = r.amount2 !== undefined && r.amount2 !== null && !isNaN(r.amount2);
+    return `<div class="fd-item out">
+      <div class="fd-rail"><i></i></div>
+      <div><div class="fd-kind">ВЫДАЧА</div>${пара(r.client)}
+        ${outForInHtml(COVER, i, r.amount)}
+        <div class="fd-meta">${has2 ? `<span class="p2">по 2-му % ${fmt(r.amount2)}</span>${r.note2 ? ' · 📝 ' + escapeHtml(r.note2) : ''}<br>` : ''}${r.dueDate ? dueChipEditableHtml(r, 'out', i) : ''}${(r.note && r.note.trim()) ? ` 📝 ${escapeHtml(r.note)}` : ''}</div></div>
+      <div class="fd-right"><div class="v">−${fmt(r.amount)}</div>${кнопки()}</div>
+      <div class="fd-acts"><button onclick="openQuickEntryEdit('out',${i})">✏️ Изменить</button>${r.dueDate ? '' : `<button onclick="editRowDue('out',${i})">📅 Срок</button>`}<button class="del" onclick="deleteRow('out',${i})">🗑 Удалить</button></div>
+    </div>`;
+  });
+  list.innerHTML = ins.concat(outs).join('');
 }
 
 function renderOutBody(day) {
